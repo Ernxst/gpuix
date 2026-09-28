@@ -3,6 +3,8 @@
 import fs from "fs"
 import { createServer, type Server } from "node:http"
 import type { AddressInfo } from "node:net"
+import os from "node:os"
+import path from "node:path"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import React from "react"
 import {
@@ -294,6 +296,47 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
     retryRequestCount = 0
     slowRequestCount = 0
     slowResponseCloseCount = 0
+  })
+
+  it("coalesces eager redraws while many image icons load", () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "gpuix-image-icons-"))
+    const iconCount = 40
+    try {
+      const paths = Array.from({ length: iconCount }, (_, index) => {
+        const iconPath = path.join(directory, `icon-${index}.png`)
+        fs.writeFileSync(iconPath, PNG_BYTES)
+        return iconPath
+      })
+      const testRoot = createImageTestRoot()
+      const before = testRoot.renderer.getDebugFrameOverlayStats().frames
+      const icons = (
+        <div style={{ width: 960 }}>
+          {paths.map((iconPath, index) => (
+            <div key={iconPath} style={{ display: "flex", height: 28, alignItems: "center" }}>
+              <img
+                data-testid={`icon-${index}`}
+                src={{ kind: "path", path: iconPath }}
+                style={{ width: 24, height: 20 }}
+              />
+              {Array.from({ length: 8 }, (_, column) => (
+                <span key={column} style={{ width: 110, marginLeft: 4 }}>
+                  {`Item ${index + 1}, field ${column + 1}`}
+                </span>
+              ))}
+            </div>
+          ))}
+        </div>
+      )
+      testRoot.render(icons)
+      const draws = testRoot.renderer.getDebugFrameOverlayStats().frames - before
+      expect(draws).toBeLessThanOrEqual(8)
+      for (let index = 0; index < iconCount; index++) {
+        const icon = testRoot.renderer.findByTestId(`icon-${index}`)!
+        expect(testRoot.renderer.getImageLoadState(icon.id)?.status).toBe("loaded")
+      }
+    } finally {
+      fs.rmSync(directory, { recursive: true })
+    }
   })
 
   it("steps image decode and first paint separately in manual async-task mode", () => {

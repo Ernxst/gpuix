@@ -721,8 +721,21 @@ impl TestGpuixRenderer {
 
     fn drain_async_tasks_if_eager(&self, cx: &mut gpui::VisualTestAppContext) {
         if self.auto_drains_async_tasks() {
-            cx.run_until_parked();
+            Self::run_tasks_without_auto_draw(cx);
+            // A read can enter with a clean window, then have the drain load
+            // an intrinsic image. Finish that repaint before returning the
+            // read, as GPUI's automatic test draw did before batching.
+            cx.update(|_| ());
         }
+    }
+
+    /// GPUI's test mode otherwise draws a dirty window after each task's
+    /// effect flush. Keep those invalidations, then let the caller draw once
+    /// after the executor parks.
+    fn run_tasks_without_auto_draw(cx: &mut gpui::VisualTestAppContext) {
+        cx.set_auto_draw(false);
+        cx.run_until_parked();
+        cx.set_auto_draw(true);
     }
 
     fn remember_manual_frame(
@@ -759,7 +772,7 @@ impl TestGpuixRenderer {
                 window.dispatch_event(event.to_platform_input(), app);
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+            Self::run_tasks_without_auto_draw(cx);
             Self::draw_if_dirty(cx, window)?;
             return Ok(());
         }
@@ -1436,11 +1449,10 @@ impl TestGpuixRenderer {
     /// is in production — a deferred effect only flushes when that update
     /// finishes — followed by a park so async work the draw spawned (an
     /// intrinsic image load, for example) can dirty layout again before the
-    /// next pass checks it. Every pass parks, including the final one that
-    /// finds the window clean, so pending async work advances even when
-    /// nothing needed drawing; that matches the unconditional park this
-    /// replaced, and like it, work that dirties the window during that last
-    /// park waits for the next read.
+    /// next pass checks it. Every pass parks, including one that finds the
+    /// window clean, so pending async work advances even when nothing needed
+    /// drawing. If that drain dirties the window, the next pass paints it
+    /// before returning the read.
     fn settle_for_read(&self) -> Result<()> {
         if !self.auto_drains_async_tasks() {
             return self.surface_canvas_preparation_diagnostics();
@@ -1450,8 +1462,16 @@ impl TestGpuixRenderer {
                 let drew = cx
                     .update_window(window, |_, window, app| pass(window, app))
                     .map_err(|error| Error::from_reason(error.to_string()))?;
-                self.drain_async_tasks_if_eager(cx);
-                Ok(drew)
+                Self::run_tasks_without_auto_draw(cx);
+                // Inspect dirtiness without letting this check trigger GPUI's
+                // automatic test draw. The next pass must paint the completed
+                // image before returning its intrinsic bounds.
+                cx.set_auto_draw(false);
+                let dirty = cx
+                    .update_window(window, |_, window, _| window.is_dirty())
+                    .map_err(|error| Error::from_reason(error.to_string()));
+                cx.set_auto_draw(true);
+                Ok(drew || dirty?)
             })
         })?;
         self.surface_canvas_preparation_diagnostics()
@@ -1672,7 +1692,7 @@ impl TestGpuixRenderer {
                 });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            cx.run_until_parked();
+            Self::run_tasks_without_auto_draw(cx);
             if auto_drain {
                 Self::draw_if_dirty(cx, window)?;
             } else {
@@ -1907,7 +1927,7 @@ impl TestGpuixRenderer {
                 })
                 .map_err(|error| Error::from_reason(error.to_string()))?;
                 if auto_drain {
-                    cx.run_until_parked();
+                    Self::run_tasks_without_auto_draw(cx);
                     Self::draw_if_dirty(cx, window)?;
                 }
             }

@@ -6383,7 +6383,9 @@ to inspect an in-flight transition. An infinite animation can exhaust the
 
 **Async native work is eager by default.** `flush()`, reads, event helpers, and
 screenshots drain queued native tasks before returning, preserving the existing
-test-root behavior. Use `createTestRoot({ asyncTaskMode: 'manual' })` (or the
+test-root behavior. The test renderer combines redraws requested by those tasks
+into one frame after the task queue settles. Use
+`createTestRoot({ asyncTaskMode: 'manual' })` (or the
 same option on `new TestRenderer`) when a test needs to observe the frames
 around image decode or other background work:
 
