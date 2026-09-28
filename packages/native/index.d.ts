@@ -518,8 +518,8 @@ export declare class TestGpuixRenderer {
    */
   drawPendingFrame(): void
   /**
-   * Queue one callback for the next manually advanced GPUI frame without
-   * dirtying or synchronously drawing the offscreen window.
+   * Queue one callback for the next `advanceAsyncClock()` without dirtying or
+   * synchronously drawing the offscreen window.
    */
   requestFrame(performanceTimestampMs: number): void
   /**

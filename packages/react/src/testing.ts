@@ -1093,10 +1093,8 @@ export class TestRenderer implements NativeRenderer {
       }
     }
 
-    // `test_renderer.rs`'s `advance_async_clock` calls `simulate_next_frame` once
-    // per advance, sampling one `now()` for every `on_next_frame` closure it
-    // fires — every timestamp drained here belongs to that single sampling, so
-    // they must all agree.
+    // `test_renderer.rs` stamps every pending frame request from one clock
+    // sample per advance, so every timestamp drained here must agree.
     const drained = this.native.drainFrameTimestamps()
     if (drained.length > 0) {
       const [timestamp] = drained
