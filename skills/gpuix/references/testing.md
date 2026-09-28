@@ -122,7 +122,7 @@ Lower-level `TestRenderer` methods: `nativeSimulateClick(x, y, button?, modifier
 
 `waitFor(callback, { timeout = 1000, interval = 50 })` sleeps `interval` ms of wall time, then advances the async and timer clocks by `interval`, flushes, and retries. The clocks therefore advance about as fast as wall time: a 2000 ms GPUI timer is never reached inside the default timeout. Advance the clock directly instead.
 
-`asyncTaskMode: "eager"` drains native async tasks after every renderer call. `"manual"` drains them only on `advanceAsyncClock`, and the repaint waits for `drawPendingFrame()`; use it to observe intermediate frames such as an image's `loading` state.
+`asyncTaskMode: "eager"` drains native async tasks after every renderer call and combines their redraws into one frame when the queue settles. `"manual"` drains them only on `advanceAsyncClock`, and the repaint waits for `drawPendingFrame()`; use it to observe intermediate frames such as an image's `loading` state.
 
 ## Reduced motion in tests
 
