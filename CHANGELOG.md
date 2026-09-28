@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.25.0-fork.10
+
+GPU-IX keeps an ancestor's hover styles active while the pointer is over a descendant, including positioned children outside the ancestor's bounds. The release also includes updated GPUI behaviour from Zed. [#704](https://github.com/Ernxst/gpuix/issues/704), [PR #705](https://github.com/Ernxst/gpuix/pull/705), [Ernxst/zed#10](https://github.com/Ernxst/zed/pull/10)
+
 ## 0.25.0-fork.9
 
 1. **GPU-IX renders accessible HTML table elements.** `table`, `caption`, row groups, rows, headers and cells get native box layout and HTML-AAM accessibility roles, with JSX support and examples. Share one grid template across a table's `<tr>` rows to align columns; `scope` selects row or column header roles, and positive `colSpan`/`rowSpan` carry into the accessibility tree. Native tables have no built-in virtualisation; keep using `<virtual-list>` directly for large tables. [PR #696](https://github.com/Ernxst/gpuix/pull/696)
