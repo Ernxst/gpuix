@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.25.0-fork.12
+
+1. **Eager test-renderer flushes drain async work with fewer redraws.** A 40-image test root loads every image after its first eager flush while drawing 3 times instead of 42. On the same local fixture, median flush time fell from 261.5 ms to 17.9 ms across five runs. Manual mode and screenshot suites are unchanged. [#708](https://github.com/Ernxst/gpuix/issues/708), [PR #709](https://github.com/Ernxst/gpuix/pull/709), [Ernxst/zed#11](https://github.com/Ernxst/zed/pull/11)
+2. **The chat example follows the current test and Select APIs.** Its test locators, select items and composer ref now typecheck and the examples suite passes. [PR #710](https://github.com/Ernxst/gpuix/pull/710)
+
 ## 0.25.0-fork.11
 
 1. **Tab and Shift+Tab cross the built edge of a windowed `<virtual-list>`.** When a focused row control reaches the end of the rows the app has mounted, GPU-IX asks `onVisibleRange` for the next range and focuses the newly built row. The app must update its virtual window in response. VoiceOver row navigation beyond the built range remains unverified. [#695](https://github.com/Ernxst/gpuix/issues/695), [PR #702](https://github.com/Ernxst/gpuix/pull/702)
