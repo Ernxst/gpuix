@@ -6,7 +6,7 @@
 import fs from "fs"
 import path from "path"
 import React, { useState } from "react"
-import { beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   createTestRoot,
   isNativeTestRendererAvailable,
@@ -67,6 +67,58 @@ describeNative("accessibility", () => {
 
     const tree = testRoot.renderer.getAccessibilityTree()
     expect(withRole(tree, "GenericContainer")).toEqual([])
+  })
+
+  it("maps description and search elements to their implicit roles", () => {
+    testRoot.render(
+      <div>
+        <dl>
+          <dt>Markup language</dt>
+          <dd>A language for describing documents.</dd>
+        </dl>
+        <search>Find a part</search>
+        <hr />
+      </div>,
+    )
+
+    const tree = testRoot.renderer.getAccessibilityTree()
+    expect(withRole(tree, "DescriptionList")).toHaveLength(1)
+    expect(testRoot.getByRole("descriptionlist")).toBeDefined()
+    expect(testRoot.getByRole("term", { name: "Markup language" })).toBeDefined()
+    expect(testRoot.getByRole("definition")).toBeDefined()
+    expect(testRoot.getByRole("search")).toBeDefined()
+    expect(testRoot.getByText("A language for describing documents.")).toBeDefined()
+    expect(testRoot.getByText("Find a part")).toBeDefined()
+    expect(testRoot.getByRole("separator")).toBeDefined()
+    expect(withRole(tree, "Splitter")[0]?.orientation).toBe("Horizontal")
+  })
+
+  it("lets an explicit role override an alias implicit role", () => {
+    testRoot.render(<search role="complementary">Find a part</search>)
+
+    const tree = testRoot.renderer.getAccessibilityTree()
+    expect(withRole(tree, "Complementary")).toHaveLength(1)
+    expect(withRole(tree, "Search")).toHaveLength(0)
+  })
+
+  it("rejects children on void elements", () => {
+    const expectVoidError = (render: () => void) => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {})
+      try {
+        render()
+        expect(error).toHaveBeenCalledWith(
+          expect.objectContaining({ message: expect.stringMatching(/void element/i) }),
+          expect.anything(),
+          expect.stringMatching(/void element/i),
+        )
+      } finally {
+        error.mockRestore()
+      }
+    }
+
+    expectVoidError(() => testRoot.render(<hr>Not allowed</hr>))
+    const inputRoot = createTestRoot()
+    expectVoidError(() => inputRoot.render(<input>Not allowed</input>))
   })
 
   it("maps native table elements and uses the caption as the table name", () => {

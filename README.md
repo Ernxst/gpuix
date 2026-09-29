@@ -2952,6 +2952,11 @@ add semantics and focus behavior, but no visual defaults.
 | `<blockquote>` | `blockquote` |
 | `<s>`, `<del>` | `deletion` |
 | `<dfn>` | `term`, named from its contents |
+| `<dl>` | `list` in HTML-AAM; AccessKit and Chromium expose `DescriptionList` |
+| `<dt>` | `term`, named from its contents |
+| `<dd>` | `definition` |
+| `<search>` | `search` landmark |
+| `<hr>` | horizontal `separator` |
 | `<figure>` | `figure` |
 | `<figcaption>` | `caption` |
 | `<mark>` | `mark` |
@@ -4049,7 +4054,11 @@ surface as `div`: `main`, `header`, `footer`, `nav`, `section`, `article`,
 `aside`, `h1`–`h6`, `p`, `span`, `strong`, `em`, `ul`, `ol`, `li`, `a`,
 `button`, `kbd`, `abbr`, `address`, `b`, `blockquote`, `cite`, `del`, `dfn`,
 `figure`, `figcaption`, `i`, `ins`, `mark`, `menu`, `pre`, `s`, `samp`,
-`small`, `sub`, `sup`, `time`, `u`, and `var`.
+`small`, `sub`, `sup`, `time`, `u`, `var`, `dl`, `dt`, `dd`, `search`, and `hr`.
+
+Description lists and search landmarks keep their implicit accessibility roles.
+`<hr>` is a void horizontal separator with no default line; style its height and
+background or border to draw one.
 
 As with the existing aliases, the native renderer does not apply browser user
 agent styles. Author the presentation explicitly: for example, `pre` needs

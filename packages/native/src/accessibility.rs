@@ -109,6 +109,7 @@ define_accessibility_roles! {
     "complementary" => Complementary, false,
     "contentinfo" => ContentInfo, false,
     "definition" => Definition, false,
+    "descriptionlist" => DescriptionList, false,
     "deletion" => ContentDeletion, false,
     "dialog" => Dialog, false,
     "document" => Document, false,
@@ -2280,7 +2281,7 @@ mod tests {
             .copied()
             .collect::<std::collections::HashSet<_>>();
 
-        assert_eq!(SUPPORTED_ACCESSIBILITY_ROLE_NAMES.len(), 129);
+        assert_eq!(SUPPORTED_ACCESSIBILITY_ROLE_NAMES.len(), 130);
         assert_eq!(unique.len(), SUPPORTED_ACCESSIBILITY_ROLE_NAMES.len());
         for name in SUPPORTED_ACCESSIBILITY_ROLE_NAMES {
             assert!(

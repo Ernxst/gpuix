@@ -48,6 +48,9 @@ const aliases = [
   <img aria-label="Preview" aria-hidden />,
   <div role="row" aria-rowindex={2} />,
   <div role="consumer-web-only-role" />,
+  <dl><dt>Markup language</dt><dd>A language for documents.</dd></dl>,
+  <search>Find a part</search>,
+  <hr aria-orientation="horizontal" />,
   <text visuallyHidden role="heading" aria-level={1}>Production ledger</text>,
   <table aria-label="Power ledger">
     <caption>Power ledger</caption>

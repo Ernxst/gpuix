@@ -23,7 +23,8 @@ The intrinsic elements are the `ElementType` union in `packages/react/src/types/
 
 - **HTML-looking tags are block boxes, not inline flow.** `span`, `strong`, `em`, `a`, `b`, `i`, `p`, `button`, `label` and the other aliases are created natively as `div`s. With no `display`, a parent stacks its children vertically, each full width. `<p><span>Hello</span> <strong>world</strong></p>` in a 400px `p` paints the `span` at y=0 and the `strong` at y=52, each 400px wide. For styled runs inside a sentence, nest `<text>` in `<text>`.
 - **A `<text>` accepts only strings and nested `<text>`.** Any other child, including `<span>`, `<a>`, `<strong>` and components that render them, throws `InlineTextChildError`.
-- **Unknown tags render nothing.** `<select>`, `<option>`, `<table>`, `<br>`, `<hr>`, `<dialog>`, `<details>`, `<iframe>`, `<video>`, SVG `<path>`, custom elements: TypeScript rejects them, and a forced one logs a Rust warning and paints an empty box, dropping its children. See the substitutes in the element table.
+- **Unknown tags render nothing.** `<select>`, `<option>`, `<br>`, `<dialog>`, `<details>`, `<iframe>`, `<video>`, SVG `<path>`, custom elements: TypeScript rejects them, and a forced one logs a Rust warning and paints an empty box, dropping its children. See the substitutes in the element table.
+- **`<hr>` has no default line.** It is an ordinary `div` box with the implicit horizontal separator role and no user-agent styles; set a height and background or border to draw the line.
 - **JSX SVG does not work.** `<svg>` paints only its `source` (markup string) or `src` (path or data URL) as a monochrome icon tinted by `color`; children and `viewBox`/`fill`/`stroke` are ignored. Icon libraries that emit `<svg><path/></svg>` JSX paint nothing. Use `<svg source={markup}>` for tintable icons and `<img>` for full colour.
 - **`input type="password"` is not masked.** Every type except `checkbox`, `radio`, `range` and `hidden` is a plain text editor, so `email`, `number`, `file`, `date`, `submit` and `button` are editable text fields. Use `<button>` for buttons and `@gpuix/react/dialogs` for files.
 - **Content props, not children, for `code`, `diff` and `markdown`.** `<code>{src}</code>` renders empty; write `<code code={src} language="ts" />`, `<diff patch={p} />`, `<markdown source={md} />`. `<code>` is a highlighted block with its own horizontal scroller, not inline code.
@@ -38,10 +39,11 @@ The intrinsic elements are the `ElementType` union in `packages/react/src/types/
 |---|---|---|
 | `div` | yes | Block by default; `display: "flex"` or `"grid"` for flex or grid. |
 | `text` | strings and `<text>` | The only element that shapes text. Raw strings directly inside a `div` also become text nodes and inherit text styles. |
-| `main header footer nav section article aside h1`–`h6` `p span strong em ul ol li a kbd abbr address b blockquote cite del dfn figure figcaption i ins mark menu pre s samp small sub sup time u var` | yes | Drawn as `div` with the tag's implicit role; no user-agent styles. |
+| `main header footer nav section article aside h1`–`h6` `p span strong em ul ol li a kbd abbr address b blockquote cite del dfn figure figcaption i ins mark menu pre s samp small sub sup time u var dl dt dd search hr` | yes, except `hr` | Drawn as `div` with the tag's implicit role; no user-agent styles. `dl`, `dt`, `dd` and `search` retain their description-list and landmark roles. `hr` is a horizontal separator, has no default line, and needs an authored style; it rejects children. |
 | `button` | yes | Implicit `tabIndex` 0 and role `button`; Enter and Space click; `type` defaults to `submit` inside a form. |
 | `label` | yes | `htmlFor`, or wraps its control. |
 | `form` | yes | Submission and reset. |
+| `table`, `caption`, `thead`, `tbody`, `tfoot`, `tr`, `th`, `td` | yes | Retain their element names and table roles in the accessibility tree; layout is ordinary GPUI box layout, not browser table layout. |
 | `input`, `textarea` | no | Native editors and controls. |
 | `img`, `svg`, `canvas` | no | See below. |
 | `code`, `diff`, `markdown` | no | Native text components. |
@@ -52,8 +54,6 @@ The intrinsic elements are the `ElementType` union in `packages/react/src/types/
 |---|---|
 | `select`, `option` | `@gpuix/react/select` or `/combobox` |
 | `dialog`, popover | `<anchored deferred role="dialog">` |
-| `table`, `dl` | `display: "grid"` with `role` (`table`, `row`, `cell`) |
-| `hr` | `<div role="separator">` |
 | `progress`, `meter` | `role="progressbar"` / `"meter"` with `ariaValue*` |
 | `br` | `whiteSpace: "pre"` on the outer `<text>` and a newline |
 | `video`, `audio`, `iframe` | none |
