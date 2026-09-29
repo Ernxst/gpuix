@@ -74,6 +74,7 @@ Every public import path (checked against both packages' `exports` by `packages/
 @gpuix/react/testing/vitest
 @gpuix/react/testing/matchers
 @gpuix/react/select
+@gpuix/react/dialog
 @gpuix/react/combobox
 @gpuix/react/tooltip
 @gpuix/react/floating
@@ -92,7 +93,7 @@ Every public import path (checked against both packages' `exports` by `packages/
 | `@gpuix/react/cn` | `cn()` for compiled CSS module styles (`css-modules.md`). |
 | `@gpuix/react/jsx-runtime`, `/jsx-dev-runtime` | The JSX runtime and `JSX.IntrinsicElements`, used through `jsxImportSource`. |
 | `@gpuix/react/testing`, `/testing/vitest`, `/testing/matchers` | Test renderer, Vitest wiring, matchers (`testing.md`). |
-| `@gpuix/react/select`, `/combobox`, `/tooltip`, `/floating` | Headless components (`components.md`). |
+| `@gpuix/react/select`, `/dialog`, `/combobox`, `/tooltip`, `/floating` | Headless components (`components.md`). |
 | `@gpuix/react/dialogs` | Native file pickers. |
 | `@gpuix/react/globals` | Opt-in browser-global facades (`events-and-dom.md`). |
 | `@gpuix/react/automation` | Drive a live or test app (`testing.md`). |

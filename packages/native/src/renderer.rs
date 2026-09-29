@@ -12531,19 +12531,14 @@ fn build_element_with_parent_layout(
         box_insets_for_style(&effective)
     });
     let hover_group = style.and_then(|style| style.hover_group.as_deref());
-    let current_color = layered_style
-        .is_some_and(|style| style.hover_within_group.is_some() || style.focus_within_group.is_some())
-        .then(|| {
-            resolved_current_color(
-                style,
-                focused,
-                focus_visible,
-                hover_within,
-                interaction.hovered,
-                interaction.is_active(),
-            )
-        })
-        .flatten();
+    let current_color = resolved_current_color(
+        style,
+        focused,
+        focus_visible,
+        hover_within,
+        interaction.hovered,
+        interaction.is_active(),
+    );
     ctx.inherited = parent_inherited
         .clone()
         .descend(
