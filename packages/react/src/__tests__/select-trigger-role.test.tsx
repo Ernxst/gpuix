@@ -44,6 +44,9 @@ describeNative("SelectTrigger", () => {
 
   it("is a combobox that controls its listbox", () => {
     screen.render(<Fruit />)
+    const closedTrigger = screen.getByRole("combobox", { name: "Fruit" })
+    expect(closedTrigger).not.toHaveAttribute("aria-controls")
+
     screen.renderer.nativeSimulateClick(30, 25)
 
     const trigger = screen.getByRole("combobox", { name: "Fruit" })
@@ -59,5 +62,21 @@ describeNative("SelectTrigger", () => {
 
     expect(triggerNode?.aria.expanded).toBe(true)
     expect(triggerNode?.aria.controls).toEqual([listboxTreeId])
+  })
+
+  it("does not expose aria-controls when the open popup has no list", () => {
+    screen.render(
+      <Select.Root>
+        <Select.Trigger ariaLabel="Fruit" data-testid="trigger">
+          <Select.Value placeholder="Choose" />
+        </Select.Trigger>
+        <Select.Popup>
+          <div>Popup content</div>
+        </Select.Popup>
+      </Select.Root>
+    )
+    screen.renderer.nativeSimulateClick(30, 15)
+
+    expect(screen.getByRole("combobox", { name: "Fruit" })).not.toHaveAttribute("aria-controls")
   })
 })

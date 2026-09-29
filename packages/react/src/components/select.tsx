@@ -24,6 +24,7 @@ import type {
   GpuixScrollEvent,
 } from "../reconciler/synthetic-event.js"
 import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
+import { ResizeObserver } from "../resize-observer.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import {
   FloatingLayer,
@@ -58,6 +59,7 @@ interface SelectContextValue {
   labels: Map<string, ReactNode>
   activeValue: string | null
   listId: string
+  listMounted: boolean
   popupPosition: { x: number; y: number } | undefined
   canScrollUp: boolean
   canScrollDown: boolean
@@ -67,6 +69,7 @@ interface SelectContextValue {
   setOpen: (open: boolean) => void
   setActiveValue: (value: string | null) => void
   setListId: (id: string) => void
+  setListMounted: (mounted: boolean) => void
   setScrollability: (up: boolean, down: boolean) => void
   setFocused: (focused: boolean) => void
   typeahead: (character: string) => void
@@ -86,6 +89,7 @@ export type SelectValueFor<Multiple extends boolean | undefined> = Multiple exte
     : SelectSelection
 
 const SelectContext = createContext<SelectContextValue | null>(null)
+const SelectPopupSideContext = createContext<string>("bottom")
 interface SelectItemContextValue {
   value: string
   setText: (text: { label: string; textValue: string } | null) => void
@@ -182,11 +186,14 @@ export function Select<Multiple extends boolean | undefined = false>({
   const [activeValue, setActiveValue] = useState<string | null>(null)
   const generatedListId = useId()
   const [listId, setListId] = useState(generatedListId)
+  const [listMounted, setListMounted] = useState(false)
   const [popupPosition, setPopupPosition] = useState<{ x: number; y: number }>()
   const [scrollability, setScrollability] = useState({ up: false, down: false })
   const [focused, setFocused] = useState(false)
   const typeaheadBuffer = useRef("")
   const typeaheadTime = useRef(0)
+  const typeaheadStartIndex = useRef(-1)
+  const typeaheadMatchIndex = useRef(-1)
   const triggerPressedWhileOpen = useRef(false)
   const dismissedByOutsidePress = useRef(false)
   const triggerRef = useRef<PublicInstance | null>(null)
@@ -269,24 +276,44 @@ export function Select<Multiple extends boolean | undefined = false>({
   }
 
   const typeahead = (character: string) => {
-    if (disabled || readOnly || !character || character.length !== 1) return
+    if (disabled || (!open && (readOnly || multiple)) || !character || character.length !== 1) return
     const now = Date.now()
     const lower = character.toLocaleLowerCase()
-    const prefix = now - typeaheadTime.current < 1000 ? typeaheadBuffer.current + lower : lower
+    const enabled = items.filter((item) => !item.disabled)
+    const continuesSession = typeaheadBuffer.current.length > 0 && now - typeaheadTime.current < 750
+    const currentValue = activeValue ?? (!open && !multiple && typeof value === "string" ? value : null)
+    const currentIndex = enabled.findIndex((item) => item.value === currentValue)
+    let startIndex = continuesSession ? typeaheadStartIndex.current : currentIndex
+    let prefix = continuesSession ? typeaheadBuffer.current + lower : lower
+
+    const canCycleRepeatedInitial = enabled.every((item) => {
+      const first = item.textValue.trim().toLocaleLowerCase()
+      return !first || first[0] !== first[1]
+    })
+    if (continuesSession && canCycleRepeatedInitial && typeaheadBuffer.current === lower) {
+      prefix = lower
+      startIndex = typeaheadMatchIndex.current
+      typeaheadStartIndex.current = startIndex
+    }
+
     typeaheadTime.current = now
     typeaheadBuffer.current = prefix
-    const enabled = items.filter((item) => !item.disabled)
-    const currentIndex = enabled.findIndex((item) => item.value === activeValue)
-    const ordered = currentIndex < 0
-      ? enabled
-      : [...enabled.slice(currentIndex + 1), ...enabled.slice(0, currentIndex + 1)]
-    const match = ordered.find((item) => item.textValue.trim().toLocaleLowerCase().startsWith(prefix))
-      ?? (prefix.length > 1
-        ? ordered.find((item) => item.textValue.trim().toLocaleLowerCase().startsWith(lower))
-        : undefined)
+    if (!continuesSession) typeaheadStartIndex.current = currentIndex
+    const matchIndex = enabled.findIndex((item, index) =>
+      index > startIndex && item.textValue.trim().toLocaleLowerCase().startsWith(prefix)
+    )
+    const wrappedMatchIndex = matchIndex === -1
+      ? enabled.findIndex((item, index) => index <= startIndex && item.textValue.trim().toLocaleLowerCase().startsWith(prefix))
+      : matchIndex
+    if (wrappedMatchIndex === -1) {
+      typeaheadBuffer.current = ""
+      return
+    }
+    const match = enabled[wrappedMatchIndex]
     if (!match) return
+    typeaheadMatchIndex.current = wrappedMatchIndex
     if (open) setActiveValue(match.value)
-    else if (!multiple) selectValue(match.value)
+    else if (!readOnly && !multiple) selectValue(match.value)
   }
 
   const moveActive = (delta: number) => {
@@ -328,6 +355,7 @@ export function Select<Multiple extends boolean | undefined = false>({
       labels,
       activeValue,
       listId,
+      listMounted,
       popupPosition,
       canScrollUp: scrollability.up,
       canScrollDown: scrollability.down,
@@ -337,6 +365,7 @@ export function Select<Multiple extends boolean | undefined = false>({
       setOpen,
       setActiveValue,
       setListId,
+      setListMounted,
       setScrollability: (up, down) => setScrollability({ up, down }),
       setFocused,
       typeahead,
@@ -345,7 +374,7 @@ export function Select<Multiple extends boolean | undefined = false>({
       registerItem,
       unregisterItem,
     }),
-    [open, value, multiple, disabled, readOnly, focused, items, labels, activeValue, listId, popupPosition, scrollability]
+    [open, value, multiple, disabled, readOnly, focused, items, labels, activeValue, listId, listMounted, popupPosition, scrollability]
   )
 
   return (
@@ -424,7 +453,7 @@ export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
       role: props.role ?? "combobox",
       ariaExpanded: context.open,
       ariaHasPopup: "listbox",
-      ariaControls: context.listId,
+      ariaControls: context.open && context.listMounted ? context.listId : undefined,
       tabIndex: disabled ? -1 : (asChild ? props.tabIndex : (props.tabIndex ?? 0)),
       style: resolvePartStyle(style, state),
       className: resolveClassName(className, state),
@@ -579,7 +608,11 @@ export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
         }
       : { ...resolvedPopupProps, style: { display: "none" as const } }
 
-    return <FloatingLayer {...floatingProps}>{children}</FloatingLayer>
+    return (
+      <SelectPopupSideContext.Provider value={side}>
+        <FloatingLayer {...floatingProps}>{children}</FloatingLayer>
+      </SelectPopupSideContext.Provider>
+    )
   }
 )
 
@@ -696,11 +729,30 @@ export const SelectList = forwardRef<PublicInstance, SelectListProps>(function S
   const context = useSelectContext("SelectList")
   const listRef = useRef<PublicInstance | null>(null)
   useLayoutEffect(() => {
+    if (!context.open) return
+    context.setListMounted(true)
+    return () => context.setListMounted(false)
+  }, [context.open])
+  useLayoutEffect(() => {
+    if (!context.open) return
+    const element = listRef.current
+    if (!element) return
+    const updateScrollability = () => {
+      context.setScrollability(
+        element.scrollTop > 0,
+        element.scrollTop + element.clientHeight < element.scrollHeight
+      )
+    }
+    const observer = new ResizeObserver(updateScrollability)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [context.open])
+  useLayoutEffect(() => {
     const nextId = id ?? context.listId
     context.setListId(nextId)
     const element = listRef.current
     if (element) context.setScrollability(element.scrollTop > 0, element.scrollTop + element.clientHeight < element.scrollHeight)
-  }, [context.open, context.listId, id, context.items.length])
+  }, [context.open, context.listId, id, context.items.length, style])
   const mergedRef = (element: PublicInstance | null) => {
     listRef.current = element
     setRefs(element, ref)
@@ -831,21 +883,32 @@ export const SelectSeparator = forwardRef<PublicInstance, SelectSeparatorProps>(
   }
 )
 
-export type SelectArrowProps = SelectPartProps<Record<string, never>>
+export interface SelectArrowState {
+  direction: "up" | "down"
+  visible: boolean
+  side: string
+  transitionStatus: "starting" | "ending" | "idle" | undefined
+}
+
+export type SelectArrowProps = SelectPartProps<SelectArrowState>
 
 export const SelectScrollUpArrow = forwardRef<PublicInstance, SelectArrowProps>(
   function SelectScrollUpArrow({ className, style, ...props }, ref) {
     const context = useSelectContext("SelectScrollUpArrow")
+    const side = useContext(SelectPopupSideContext)
     if (!context.canScrollUp) return null
-    return <div {...props} className={resolveClassName(className, {})} style={resolvePartStyle(style, {})} ref={ref} />
+    const state: SelectArrowState = { direction: "up", visible: true, side, transitionStatus: "idle" }
+    return <div {...props} className={resolveClassName(className, state)} style={resolvePartStyle(style, state)} ref={ref} />
   }
 )
 
 export const SelectScrollDownArrow = forwardRef<PublicInstance, SelectArrowProps>(
   function SelectScrollDownArrow({ className, style, ...props }, ref) {
     const context = useSelectContext("SelectScrollDownArrow")
+    const side = useContext(SelectPopupSideContext)
     if (!context.canScrollDown) return null
-    return <div {...props} className={resolveClassName(className, {})} style={resolvePartStyle(style, {})} ref={ref} />
+    const state: SelectArrowState = { direction: "down", visible: true, side, transitionStatus: "idle" }
+    return <div {...props} className={resolveClassName(className, state)} style={resolvePartStyle(style, state)} ref={ref} />
   }
 )
 

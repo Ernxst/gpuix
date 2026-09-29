@@ -76,4 +76,54 @@ describeNative("Select scroll arrows", () => {
     expect(screen.getByTestId("up")).toBeVisible()
     expect(screen.queryByTestId("down")).toBeNull()
   })
+
+  it("updates arrow visibility when the list resizes", () => {
+    let downArrowState: Select.SelectArrowState | undefined
+    const renderList = (maxHeight: number) => (
+      <Select.Root>
+        <Select.Trigger ariaLabel="Fruit" style={{ width: 180, height: 36 }}>
+          <Select.Value placeholder="Choose" />
+        </Select.Trigger>
+        <Select.Popup side="top" style={{ width: 180 }}>
+          <Select.ScrollUpArrow data-testid="up" />
+          <Select.List data-testid="list" style={{ maxHeight, overflowY: "scroll" }}>
+            {["Apple", "Banana", "Cherry", "Date", "Elderberry"].map((item) => (
+              <Select.Item key={item} value={item} style={{ height: 32 }}>
+                <Select.ItemText>{item}</Select.ItemText>
+              </Select.Item>
+            ))}
+          </Select.List>
+          <Select.ScrollDownArrow
+            data-testid="down"
+            className={(state) => {
+              downArrowState = state
+              return undefined
+            }}
+          />
+        </Select.Popup>
+      </Select.Root>
+    )
+
+    screen.render(renderList(48))
+    screen.renderer.nativeSimulateClick(30, 15)
+    screen.renderer.drawPendingFrame()
+
+    expect(screen.getByTestId("down")).toBeVisible()
+    expect(downArrowState).toEqual({
+      direction: "down",
+      visible: true,
+      side: "top",
+      transitionStatus: "idle",
+    })
+
+    screen.render(renderList(256))
+    screen.renderer.drawPendingFrame()
+    screen.renderer.drawPendingFrame()
+    expect(screen.queryByTestId("up")).toBeNull()
+    expect(screen.queryByTestId("down")).toBeNull()
+
+    screen.render(renderList(48))
+    screen.renderer.drawPendingFrame()
+    expect(screen.getByTestId("down")).toBeVisible()
+  })
 })
