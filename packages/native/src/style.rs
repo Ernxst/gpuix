@@ -144,6 +144,99 @@ pub enum DimensionValue {
     Auto,
 }
 
+/// A pixel or percentage length used by spacing, offsets, and flex basis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LengthValue {
+    Pixels(f64),
+    Percentage(f64), // 0.0 to 1.0
+}
+
+impl Default for LengthValue {
+    fn default() -> Self {
+        Self::Pixels(0.0)
+    }
+}
+
+impl LengthValue {
+    pub(crate) fn resolve(self, basis: f64) -> f64 {
+        match self {
+            Self::Pixels(value) => value,
+            Self::Percentage(value) => value * basis,
+        }
+    }
+
+    pub(crate) fn is_negative(self) -> bool {
+        match self {
+            Self::Pixels(value) | Self::Percentage(value) => value < 0.0,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for LengthValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{self, Visitor};
+
+        struct LengthVisitor;
+
+        impl Visitor<'_> for LengthVisitor {
+            type Value = LengthValue;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a number, px length, or percentage")
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LengthValue::Pixels(value))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LengthValue::Pixels(value as f64))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LengthValue::Pixels(value as f64))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                match parse_dimension(value).map_err(de::Error::custom)? {
+                    DimensionValue::Pixels(value) => Ok(LengthValue::Pixels(value)),
+                    DimensionValue::Percentage(value) => Ok(LengthValue::Percentage(value)),
+                    _ => Err(de::Error::custom("expected a px length or percentage")),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(LengthVisitor)
+    }
+}
+
+impl Serialize for LengthValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Pixels(value) => serializer.serialize_f64(*value),
+            Self::Percentage(value) => serializer.serialize_str(&format!("{}%", value * 100.0)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TransitionProperty {
@@ -801,14 +894,14 @@ pub struct StyleDesc {
     pub flex_wrap: Option<String>,
     pub flex_grow: Option<f64>,
     pub flex_shrink: Option<f64>,
-    pub flex_basis: Option<f64>,
+    pub flex_basis: Option<LengthValue>,
     pub align_items: Option<String>,
     pub align_self: Option<String>,
     pub align_content: Option<String>,
     pub justify_content: Option<String>,
-    pub gap: Option<f64>,
-    pub row_gap: Option<f64>,
-    pub column_gap: Option<f64>,
+    pub gap: Option<LengthValue>,
+    pub row_gap: Option<LengthValue>,
+    pub column_gap: Option<LengthValue>,
     pub grid_template_columns: Option<Vec<GridTrackValue>>,
     pub grid_template_rows: Option<Vec<GridTrackValue>>,
     pub grid_row_start: Option<GridLineValue>,
@@ -829,23 +922,23 @@ pub struct StyleDesc {
     pub max_height: Option<DimensionValue>,
     pub aspect_ratio: Option<f64>,
 
-    pub padding: Option<f64>,
-    pub padding_top: Option<f64>,
-    pub padding_right: Option<f64>,
-    pub padding_bottom: Option<f64>,
-    pub padding_left: Option<f64>,
+    pub padding: Option<LengthValue>,
+    pub padding_top: Option<LengthValue>,
+    pub padding_right: Option<LengthValue>,
+    pub padding_bottom: Option<LengthValue>,
+    pub padding_left: Option<LengthValue>,
 
-    pub margin: Option<f64>,
-    pub margin_top: Option<f64>,
-    pub margin_right: Option<f64>,
-    pub margin_bottom: Option<f64>,
-    pub margin_left: Option<f64>,
+    pub margin: Option<LengthValue>,
+    pub margin_top: Option<LengthValue>,
+    pub margin_right: Option<LengthValue>,
+    pub margin_bottom: Option<LengthValue>,
+    pub margin_left: Option<LengthValue>,
 
     pub position: Option<String>,
-    pub top: Option<f64>,
-    pub right: Option<f64>,
-    pub bottom: Option<f64>,
-    pub left: Option<f64>,
+    pub top: Option<LengthValue>,
+    pub right: Option<LengthValue>,
+    pub bottom: Option<LengthValue>,
+    pub left: Option<LengthValue>,
 
     pub background: Option<BackgroundValue>,
     pub background_color: Option<String>,
@@ -2418,6 +2511,15 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         };
     }
 
+    macro_rules! length_field {
+        ($key:expr, $value:expr, $name:literal, $field:ident) => {
+            if $key == $name {
+                parsed.style.$field = decode(&property!($name), $value, &mut parsed.problems);
+                continue;
+            }
+        };
+    }
+
     macro_rules! dimension_field {
         ($key:expr, $value:expr, $name:literal, $field:ident) => {
             if $key == $name {
@@ -2546,7 +2648,7 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         );
         number_field!(key, value, "flexGrow", flex_grow);
         number_field!(key, value, "flexShrink", flex_shrink);
-        number_field!(key, value, "flexBasis", flex_basis);
+        length_field!(key, value, "flexBasis", flex_basis);
         enum_field!(
             key,
             value,
@@ -2654,9 +2756,9 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
                 "space-evenly"
             ]
         );
-        number_field!(key, value, "gap", gap);
-        number_field!(key, value, "rowGap", row_gap);
-        number_field!(key, value, "columnGap", column_gap);
+        length_field!(key, value, "gap", gap);
+        length_field!(key, value, "rowGap", row_gap);
+        length_field!(key, value, "columnGap", column_gap);
         if key == "gridColumn" || key == "gridRow" {
             let property = property!(key);
             match parse_grid_line_list(value, 1, 2, "expected 1 or 2 grid lines separated by \"/\"")
@@ -2778,16 +2880,16 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             continue;
         }
 
-        number_field!(key, value, "padding", padding);
-        number_field!(key, value, "paddingTop", padding_top);
-        number_field!(key, value, "paddingRight", padding_right);
-        number_field!(key, value, "paddingBottom", padding_bottom);
-        number_field!(key, value, "paddingLeft", padding_left);
-        number_field!(key, value, "margin", margin);
-        number_field!(key, value, "marginTop", margin_top);
-        number_field!(key, value, "marginRight", margin_right);
-        number_field!(key, value, "marginBottom", margin_bottom);
-        number_field!(key, value, "marginLeft", margin_left);
+        length_field!(key, value, "padding", padding);
+        length_field!(key, value, "paddingTop", padding_top);
+        length_field!(key, value, "paddingRight", padding_right);
+        length_field!(key, value, "paddingBottom", padding_bottom);
+        length_field!(key, value, "paddingLeft", padding_left);
+        length_field!(key, value, "margin", margin);
+        length_field!(key, value, "marginTop", margin_top);
+        length_field!(key, value, "marginRight", margin_right);
+        length_field!(key, value, "marginBottom", margin_bottom);
+        length_field!(key, value, "marginLeft", margin_left);
 
         enum_field!(
             key,
@@ -2796,10 +2898,10 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             position,
             ["relative", "absolute", "fixed"]
         );
-        number_field!(key, value, "top", top);
-        number_field!(key, value, "right", right);
-        number_field!(key, value, "bottom", bottom);
-        number_field!(key, value, "left", left);
+        length_field!(key, value, "top", top);
+        length_field!(key, value, "right", right);
+        length_field!(key, value, "bottom", bottom);
+        length_field!(key, value, "left", left);
 
         if key == "background" {
             let property = property!("background");
@@ -3337,7 +3439,8 @@ fn validate_ranges(parsed: &mut ParsedStyle, prefix: &str) {
     macro_rules! reject_if {
         ($field:ident, $name:literal, $invalid:expr, $reason:literal) => {
             if parsed.style.$field.is_some_and($invalid) {
-                let value = serde_json::Value::from(parsed.style.$field.take().unwrap());
+                let value = serde_json::to_value(parsed.style.$field.take().unwrap())
+                    .expect("style values are JSON serializable");
                 let property = if prefix.is_empty() {
                     $name.to_string()
                 } else {
@@ -3404,15 +3507,12 @@ fn validate_ranges(parsed: &mut ParsedStyle, prefix: &str) {
             $(reject_if!($field, $name, |value| value < 0.0, "expected a non-negative number");)+
         };
     }
+    macro_rules! non_negative_length {
+        ($($field:ident => $name:literal),+ $(,)?) => {
+            $(reject_if!($field, $name, |value| value.is_negative(), "expected a non-negative length");)+
+        };
+    }
     non_negative!(
-        gap => "gap",
-        row_gap => "rowGap",
-        column_gap => "columnGap",
-        padding => "padding",
-        padding_top => "paddingTop",
-        padding_right => "paddingRight",
-        padding_bottom => "paddingBottom",
-        padding_left => "paddingLeft",
         border_width => "borderWidth",
         border_top_width => "borderTopWidth",
         border_right_width => "borderRightWidth",
@@ -3424,6 +3524,17 @@ fn validate_ranges(parsed: &mut ParsedStyle, prefix: &str) {
         border_bottom_left_radius => "borderBottomLeftRadius",
         border_bottom_right_radius => "borderBottomRightRadius",
         outline_width => "outlineWidth",
+    );
+    non_negative_length!(
+        flex_basis => "flexBasis",
+        gap => "gap",
+        row_gap => "rowGap",
+        column_gap => "columnGap",
+        padding => "padding",
+        padding_top => "paddingTop",
+        padding_right => "paddingRight",
+        padding_bottom => "paddingBottom",
+        padding_left => "paddingLeft",
     );
 }
 
@@ -5357,6 +5468,76 @@ mod tests {
                 renderer.contains(&format!("style.{native_name}")),
                 "{key} is declared but has no renderer application path"
             );
+        }
+    }
+
+    #[test]
+    fn spacing_lengths_preserve_pixel_and_percentage_units() {
+        let properties = [
+            "flexBasis",
+            "gap",
+            "rowGap",
+            "columnGap",
+            "padding",
+            "paddingTop",
+            "paddingRight",
+            "paddingBottom",
+            "paddingLeft",
+            "margin",
+            "marginTop",
+            "marginRight",
+            "marginBottom",
+            "marginLeft",
+            "top",
+            "right",
+            "bottom",
+            "left",
+        ];
+
+        for property in properties {
+            let parsed = parse_style_value(&json!({ property: "10%" }));
+            assert!(parsed.problems.is_empty(), "{property}: {:?}", parsed.problems);
+            let serialized = serde_json::to_value(parsed.style).unwrap();
+            assert_eq!(serialized[property], "10%", "{property}");
+
+            let pixels = parse_style_value(&json!({ property: "12px" }));
+            assert!(pixels.problems.is_empty(), "{property}: {:?}", pixels.problems);
+            let serialized = serde_json::to_value(pixels.style).unwrap();
+            assert_eq!(serialized[property], 12.0, "{property}");
+        }
+
+        for property in ["margin", "marginTop", "marginRight", "marginBottom", "marginLeft"] {
+            let parsed = parse_style_value(&json!({ property: "-10%" }));
+            assert!(parsed.problems.is_empty(), "{property}: {:?}", parsed.problems);
+        }
+    }
+
+    #[test]
+    fn spacing_lengths_reject_auto_and_negative_non_margin_lengths() {
+        for property in [
+            "flexBasis",
+            "gap",
+            "rowGap",
+            "columnGap",
+            "padding",
+            "paddingTop",
+            "paddingRight",
+            "paddingBottom",
+            "paddingLeft",
+            "top",
+            "right",
+            "bottom",
+            "left",
+        ] {
+            let auto = parse_style_value(&json!({ property: "auto" }));
+            assert_eq!(auto.problems.len(), 1, "{property}");
+            assert_eq!(auto.problems[0].property, property);
+
+            if property != "top" && property != "right" && property != "bottom" && property != "left" {
+                let negative = parse_style_value(&json!({ property: "-10%" }));
+                assert_eq!(negative.problems.len(), 1, "{property}");
+                assert_eq!(negative.problems[0].property, property);
+            }
         }
     }
     fn with_fill(fill: &str) -> StyleDesc {

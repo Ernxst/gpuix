@@ -40,6 +40,42 @@ afterEach(() => {
 })
 
 describeNative("style diagnostics", { timeout: 12_000 }, () => {
+  it("accepts percentages for spacing, insets, and flex basis in strict style mode", () => {
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    try {
+      testRoot.render(
+        <div
+          data-testid="percentage-lengths"
+          style={{
+            flexBasis: "10%",
+            gap: "10%",
+            rowGap: "10%",
+            columnGap: "10%",
+            padding: "10%",
+            paddingTop: "10%",
+            paddingRight: "10%",
+            paddingBottom: "10%",
+            paddingLeft: "10%",
+            margin: "10%",
+            marginTop: "10%",
+            marginRight: "10%",
+            marginBottom: "10%",
+            marginLeft: "10%",
+            top: "10%",
+            right: "10%",
+            bottom: "10%",
+            left: "10%",
+          }}
+        />,
+      )
+
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
   it("diagnoses a populated virtual-list with no bounded height", () => {
     const testRoot = createTestRoot({ strictStyles: false })
 

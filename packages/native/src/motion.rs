@@ -118,6 +118,12 @@ impl TransitionValue {
         use TransitionProperty::*;
 
         let number = |value: Option<f64>| value.map(Self::Number);
+        let offset = |value: Option<crate::style::LengthValue>| {
+            value.and_then(|value| match value {
+                crate::style::LengthValue::Pixels(value) => Some(Self::Number(value)),
+                crate::style::LengthValue::Percentage(_) => None,
+            })
+        };
         let dimension = |value: &Option<DimensionValue>| value.clone().map(Self::Dimension);
         let color = |value: &Option<String>| {
             value
@@ -138,10 +144,10 @@ impl TransitionValue {
             MinHeight => dimension(&style.min_height),
             MaxWidth => dimension(&style.max_width),
             MaxHeight => dimension(&style.max_height),
-            Top => number(style.top),
-            Right => number(style.right),
-            Bottom => number(style.bottom),
-            Left => number(style.left),
+            Top => offset(style.top),
+            Right => offset(style.right),
+            Bottom => offset(style.bottom),
+            Left => offset(style.left),
             BorderRadius => number(style.border_radius),
             BorderTopLeftRadius => number(style.border_top_left_radius),
             BorderTopRightRadius => number(style.border_top_right_radius),
@@ -263,10 +269,18 @@ impl TransitionValue {
             (MinHeight, Self::Dimension(value)) => style.min_height = Some(value.clone()),
             (MaxWidth, Self::Dimension(value)) => style.max_width = Some(value.clone()),
             (MaxHeight, Self::Dimension(value)) => style.max_height = Some(value.clone()),
-            (Top, Self::Number(value)) => style.top = Some(*value),
-            (Right, Self::Number(value)) => style.right = Some(*value),
-            (Bottom, Self::Number(value)) => style.bottom = Some(*value),
-            (Left, Self::Number(value)) => style.left = Some(*value),
+            (Top, Self::Number(value)) => {
+                style.top = Some(crate::style::LengthValue::Pixels(*value))
+            }
+            (Right, Self::Number(value)) => {
+                style.right = Some(crate::style::LengthValue::Pixels(*value))
+            }
+            (Bottom, Self::Number(value)) => {
+                style.bottom = Some(crate::style::LengthValue::Pixels(*value))
+            }
+            (Left, Self::Number(value)) => {
+                style.left = Some(crate::style::LengthValue::Pixels(*value))
+            }
             (BorderRadius, Self::Number(value)) => style.border_radius = Some(*value),
             (BorderTopLeftRadius, Self::Number(value)) => {
                 style.border_top_left_radius = Some(*value)
@@ -1412,16 +1426,16 @@ impl MotionStyle {
             style.opacity = Some(value);
         }
         if let Some(value) = self.top {
-            style.top = Some(value);
+            style.top = Some(crate::style::LengthValue::Pixels(value));
         }
         if let Some(value) = self.right {
-            style.right = Some(value);
+            style.right = Some(crate::style::LengthValue::Pixels(value));
         }
         if let Some(value) = self.bottom {
-            style.bottom = Some(value);
+            style.bottom = Some(crate::style::LengthValue::Pixels(value));
         }
         if let Some(value) = self.left {
-            style.left = Some(value);
+            style.left = Some(crate::style::LengthValue::Pixels(value));
         }
         if let Some(value) = self.border_radius {
             style.border_radius = Some(value);
@@ -2145,7 +2159,10 @@ mod tests {
         let middle = state.frame(middle_at, false);
         assert_eq!(middle.style.opacity, Some(0.5));
         assert_eq!(middle.style.width, Some(DimensionValue::Pixels(150.0)));
-        assert_eq!(middle.style.top, Some(10.0));
+        assert_eq!(
+            middle.style.top,
+            Some(crate::style::LengthValue::Pixels(10.0))
+        );
         assert_eq!(middle.style.border_radius, None);
         assert_eq!(middle.style.border_top_left_radius, Some(8.0));
         assert_eq!(middle.style.border_top_right_radius, Some(8.0));

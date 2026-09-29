@@ -22,7 +22,7 @@ The `style` prop takes a `StyleDesc` object (`packages/react/src/types/host.ts`)
 
 ## Traps
 
-- **Spacing, insets, radii, font sizes and letter spacing take numbers only, and a number means px.** `padding`, `margin*`, `gap`, `top`/`right`/`bottom`/`left`, `borderRadius*`, `fontSize`, `letterSpacing`, `flexBasis`, `outlineWidth`/`outlineOffset` reject `"8px"`, `"1rem"`, `"50%"`, `"auto"` and multi-value strings such as `"8px 16px"`. `margin: "0 auto"` is dropped; centre with `alignItems`/`justifyContent`.
+- **Spacing, insets and `flexBasis` accept numbers (px), `"<n>px"` and `"<n>%"`.** Browser bases are: padding and margin use the containing block's content-box width; relative insets use its content-box axis, absolute insets its padding-box axis; `columnGap` uses the content-box width, `rowGap` its height, and `flexBasis` the flex container's inner main-axis size. Percentages in cyclic intrinsic-size calculations follow Taffy's CSS rules. `margin: "0 auto"`, `"1rem"`, `"auto"` and multi-value strings such as `"8px 16px"` are dropped. Radii, font sizes and letter spacing still take numbers only.
 - **Among lengths, only `width`, `height`, `min*` and `max*` accept strings.** See Lengths. There is no `rem`, `em`, `min()`, `max()` or `var()` in any inline value.
 - **A numeric `lineHeight` is a multiple of the font size.** `lineHeight: 20` is twenty lines tall; write `"20px"` for pixels.
 - **`display` accepts `"none"`, `"flex"` or `"grid"` only.** `"block"`, `"inline"`, `"inline-flex"` and `"contents"` are dropped. An element with no `display` lays out as a block: its children stack vertically, each taking the full width. That includes `span`, `strong`, `a` and the other inline-looking tags (see `elements.md`).
@@ -60,20 +60,20 @@ Override with `render(<App />, { strictStyles })` or `createRoot(renderer, { str
 | `flexDirection` | `row`, `row-reverse`, `column`, `column-reverse` |
 | `flexWrap` | `nowrap`, `wrap`, `wrap-reverse` |
 | `flexGrow`, `flexShrink` | number ≥ 0 |
-| `flexBasis` | number (px) |
+| `flexBasis` | number (px), `"<n>px"`, or `"<n>%"` |
 | `alignItems`, `alignSelf`, `justifyItems`, `justifySelf` | `start`, `flex-start`, `center`, `end`, `flex-end`, `baseline`, `stretch` |
 | `alignContent` | `start`, `flex-start`, `center`, `end`, `flex-end`, `normal`, `space-between` / `between`, `space-around` / `around`, `space-evenly` / `evenly`, `stretch` |
 | `justifyContent` | `start`, `flex-start`, `center`, `end`, `flex-end`, `space-between` / `between`, `space-around` / `around`, `space-evenly` / `evenly` |
-| `gap`, `rowGap`, `columnGap` | number ≥ 0 |
+| `gap`, `rowGap`, `columnGap` | non-negative number (px), `"<n>px"` or `"<n>%"` |
 | `gridTemplateColumns`, `gridTemplateRows` | array of track objects, not a CSS string: `[{ type: "fr", value: 1 }, { type: "px", value: 200 }]`; also `percent`, `auto`, `min-content`, `max-content`, `fit-content`, `minmax`, `repeat` (count or `auto-fill`/`auto-fit`) |
 | `gridAutoRows`, `gridAutoColumns` | track objects without `repeat` |
 | `gridColumn`, `gridRow`, `*Start`, `*End`, `gridArea` | `auto`, an integer, `span N`, `"a / b"`; no named lines or areas (#253) |
 | `gridAutoFlow` | `row`, `column`, `dense`, `row dense`, `column dense` |
 | `width`, `height`, `min*`, `max*` | see Lengths |
 | `aspectRatio` | positive number or `"16 / 9"` |
-| `padding*`, `margin*` | number; padding ≥ 0, margin may be negative |
+| `padding*`, `margin*` | number (px), `"<n>px"` or `"<n>%"`; padding ≥ 0, margin may be negative |
 | `position` | `relative`, `absolute`, `fixed` (lays out as `absolute`; the TS type omits it) |
-| `top`, `right`, `bottom`, `left` | number |
+| `top`, `right`, `bottom`, `left` | number (px), `"<n>px"` or `"<n>%"` |
 | `opacity` | 0–1 |
 | `overflow`, `overflowX`, `overflowY` | `visible`, `hidden`, `scroll`, `auto` (`auto` behaves as `scroll`); only `scroll`/`auto` make a ref scrollable |
 | `clipPath` | `inset()` with 1–4 non-negative `px`, `%` or `0` values |
