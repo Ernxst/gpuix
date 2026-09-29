@@ -7837,8 +7837,7 @@ pub(crate) struct GpuixView {
     /// Test-only resolved-style reads use this instead of reconstructing hover
     /// from automation bounds, which cannot account for occlusion or capture.
     pub(crate) interactive_style_states: HashMap<u64, InteractiveStyleState>,
-    /// Currently hovered style IDs and hit targets that may need reconciliation
-    /// after a retained-tree rerender.
+    /// Currently hovered ancestors whose state can affect descendant styles.
     hover_reconciliation_candidates: HashSet<u64>,
     /// The deepest retained host hitbox selected during the current external
     /// drag move. Capture callbacks fill this in; the normal bubble callback
@@ -8368,7 +8367,6 @@ impl GpuixView {
             }
         }
         drop(tree);
-        self.sync_hover_reconciliation_candidate(id);
 
         if self.hover_target_dispatch_pending {
             return;
@@ -8431,24 +8429,36 @@ impl GpuixView {
         // its attached descendants, even when that descendant extends beyond
         // the ancestor's own painted bounds.
         let tree = self.tree.lock().unwrap();
-        let stale_candidates = stale_candidates
+        let stale_groups = stale_candidates
             .into_iter()
             .filter(|id| !pointer_is_over_attached_descendant(&tree, *id, x, y))
             .collect::<Vec<_>>();
+        let stale_targets = self
+            .hovered_targets
+            .iter()
+            .copied()
+            .filter(|target| {
+                stale_groups.iter().any(|group| {
+                    is_hover_target_descendant(&tree, *target, *group)
+                })
+            })
+            .collect::<Vec<_>>();
         drop(tree);
-        if stale_candidates.is_empty() {
+        if stale_groups.is_empty() {
             return false;
         }
 
         let mut changed = false;
-        let mut removed_target = false;
-        for id in stale_candidates {
+        for id in stale_groups {
             changed |= self
                 .interactive_style_states
                 .get_mut(&id)
                 .is_some_and(|state| state.set_hovered(false));
+            self.hover_reconciliation_candidates.remove(&id);
+        }
+        let mut removed_target = false;
+        for id in stale_targets {
             removed_target |= self.hovered_targets.remove(&id);
-            self.sync_hover_reconciliation_candidate(id);
         }
         if changed {
             self.interaction_revision = self.interaction_revision.saturating_add(1);
@@ -8459,27 +8469,23 @@ impl GpuixView {
         changed
     }
 
-    fn sync_hover_reconciliation_candidate(&mut self, id: u64) {
-        let still_hovered = self.hovered_targets.contains(&id)
-            || self
-                .interactive_style_states
-                .get(&id)
-                .is_some_and(|state| state.hovered);
-        if still_hovered {
-            self.hover_reconciliation_candidates.insert(id);
-        } else {
-            self.hover_reconciliation_candidates.remove(&id);
-        }
-    }
-
-    fn set_interactive_hovered(&mut self, id: u64, hovered: bool) -> bool {
+    fn set_interactive_hovered(
+        &mut self,
+        id: u64,
+        hovered: bool,
+        tracks_ancestor_hover: bool,
+    ) -> bool {
         let changed = self
             .interactive_style_states
             .entry(id)
             .or_default()
             .set_hovered(hovered);
-        if changed {
-            self.sync_hover_reconciliation_candidate(id);
+        if tracks_ancestor_hover && changed {
+            if hovered {
+                self.hover_reconciliation_candidates.insert(id);
+            } else {
+                self.hover_reconciliation_candidates.remove(&id);
+            }
         }
         changed
     }
@@ -8492,7 +8498,6 @@ impl GpuixView {
     /// target and becomes a no-op.
     pub(crate) fn update_hover_target_before_mouse_move(&mut self, id: u64) {
         self.hovered_targets.insert(id);
-        self.sync_hover_reconciliation_candidate(id);
         self.hover_target = Some(id);
         self.dispatch_hover_target_change(false);
     }
@@ -11630,11 +11635,16 @@ impl gpui::Render for GpuixView {
         self.hovered_targets
             .retain(|id| tree.elements.contains_key(id));
         self.hover_reconciliation_candidates.retain(|id| {
-            self.hovered_targets.contains(id)
-                || self
-                    .interactive_style_states
-                    .get(id)
-                    .is_some_and(|state| state.hovered)
+            tree.elements.get(id).is_some_and(|element| {
+                element
+                    .style
+                    .as_deref()
+                    .is_some_and(|style| style.hover_group.is_some())
+                    && self
+                        .interactive_style_states
+                        .get(id)
+                        .is_some_and(|state| state.hovered)
+            })
         });
         self.transition_states.retain(|id, _| tree.is_attached(*id));
 
@@ -14284,7 +14294,7 @@ fn build_virtual_list(
             .child(surface)
             .hover_listener_mode(gpui::HoverListenerMode::InputModalityIndependent)
             .on_hover(cx.listener(move |view, is_hovered: &bool, _window, cx| {
-                if view.set_interactive_hovered(id, *is_hovered) {
+                if view.set_interactive_hovered(id, *is_hovered, true) {
                     cx.notify();
                 }
             }))
@@ -16118,7 +16128,7 @@ pub(crate) fn build_host_container(
                         .get_mut(&id)
                         .is_some_and(|state| state.set_hovered(is_hovered));
                 let interactive_changed = (tracks_hover || tracks_hover_group)
-                    && view.set_interactive_hovered(id, is_hovered);
+                    && view.set_interactive_hovered(id, is_hovered, tracks_hover_group);
                 if interactive_changed {
                     view.interaction_revision = view.interaction_revision.saturating_add(1);
                 }

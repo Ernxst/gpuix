@@ -177,6 +177,7 @@ describe.skipIf(!isNativeTestRendererAvailable())("ancestor :hover over painted 
             data-testid="row"
             style={{
               display: hidden ? "none" : "flex",
+              hoverGroup: "row",
               width: 100,
               height: 50,
               backgroundColor: "#253047",
