@@ -10523,7 +10523,32 @@ impl GpuixView {
                     }
                 }
                 let after = f32::from(state.scroll_px_offset_for_scrollbar().y);
-                after != before
+                if after == before {
+                    return false;
+                }
+
+                match action {
+                    KeyboardScrollAction::Home => emit_virtual_window_advance(
+                        &self.event_callback,
+                        entry,
+                        id,
+                        0,
+                        FocusDirection::Previous,
+                    ),
+                    KeyboardScrollAction::End => emit_virtual_window_advance(
+                        &self.event_callback,
+                        entry,
+                        id,
+                        entry
+                            .config
+                            .logical_count(entry.child_ids.len())
+                            .saturating_sub(1),
+                        FocusDirection::Next,
+                    ),
+                    KeyboardScrollAction::Line { .. } | KeyboardScrollAction::Page { .. } => {}
+                }
+
+                true
             }
         }
     }
@@ -17309,20 +17334,20 @@ pub(crate) fn emit_event_full(
     }
 }
 
-/// Tell JS to widen a `<virtual-list>`'s window past a cross-window focus
-/// target. `gpui::ListState::scroll_to_reveal_item` moves the list's scroll
-/// position directly and never runs the closure `set_scroll_handler`
-/// installs, which only fires from an actual wheel/drag scroll — so a
-/// programmatic reveal past the built range needs its own `visibleRange`
-/// event: an *estimated* viewport range ending (or starting, for `Previous`)
-/// at `target_index`, sized from the list's own measured viewport height and
-/// its estimated row height, not a single-row range. A real scroll's own
+/// Tell JS to move a `<virtual-list>`'s window after a programmatic scroll to
+/// a logical target. `gpui::ListState::scroll_to_reveal_item` and `scroll_to`
+/// move the list's scroll position directly and never run the closure
+/// `set_scroll_handler` installs, which only fires from an actual wheel/drag
+/// scroll — so a programmatic scroll past the built range needs its own
+/// `visibleRange` event: an *estimated* viewport range ending (or starting,
+/// for `Previous`) at `target_index`, sized from the list's measured viewport
+/// height and estimated row height, not a single-row range. A real scroll's
 /// event uses each row's actual measured height instead, so a list with
 /// variable-height rows can get different indices here than a real scroll at
-/// the same position would report; this one is still bounded and always
-/// includes `target_index`, which is what widening the window needs. An app
-/// that reads `endIndex` to size its window, not just `startIndex`, gets a
-/// plausible one either way.
+/// the same position would report; this one is still bounded and includes
+/// `target_index`, which is what moving the window needs. An app that reads
+/// `endIndex` to size its window, not just `startIndex`, gets a plausible one
+/// either way.
 fn emit_virtual_window_advance(
     callback: &Option<EventCallback>,
     entry: &VirtualListEntry,

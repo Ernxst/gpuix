@@ -2079,6 +2079,10 @@ same pass. This needs `onVisibleRange` to actually grow the window far enough
 to include the requested row; a fixed-size window that never grows leaves
 navigation stuck at its edge, the same as it would with real scrolling.
 
+When the list itself has focus, Home and End scroll to the first and last
+logical rows. With `onVisibleRange`, those jumps also update the mounted
+window so the destination row is rendered.
+
 The list needs a **bounded height** or bounded flex space. Each rendered row
 must have one stable host root, which can contain any GPUIX host or custom
 element. There is no `VirtualList` wrapper: windowing is application state.
