@@ -259,7 +259,7 @@ describe("resolved test-renderer styles", () => {
         expect(resolved()).toMatchObject({
           color: "#0011ff",
           fontSize: 12,
-          fontWeight: 400,
+          fontWeight: "400",
           textDecoration: "none",
         })
         root.renderer.captureScreenshot(idle)
@@ -269,7 +269,7 @@ describe("resolved test-renderer styles", () => {
         expect(resolved()).toMatchObject({
           color: "#ff00ff",
           fontSize: 32,
-          fontWeight: 900,
+          fontWeight: "900",
           textDecoration: "underline",
         })
         root.renderer.captureScreenshot(focused)
@@ -279,7 +279,7 @@ describe("resolved test-renderer styles", () => {
         expect(resolved()).toMatchObject({
           color: "#0011ff",
           fontSize: 12,
-          fontWeight: 400,
+          fontWeight: "400",
           textDecoration: "none",
         })
         root.renderer.captureScreenshot(reset)

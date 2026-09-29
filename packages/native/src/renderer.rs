@@ -13260,13 +13260,8 @@ pub(crate) fn effective_group_state_style(
         "groupFocusVisible",
         "groupFocusWithin",
     ];
-    let order = if style.group_state_order.is_empty() {
-        fallback_order.as_slice()
-    } else {
-        style.group_state_order.as_slice()
-    };
-    for state in order {
-        let overlay = match state.as_str() {
+    let mut apply_state = |state: &str| {
+        let overlay = match state {
             "hoverWithin" if hover_within => style.hover_within.as_deref(),
             "activeWithin" if active_within => style.active_within.as_deref(),
             "groupFocus" if group_focus => style.group_focus.as_deref(),
@@ -13280,6 +13275,15 @@ pub(crate) fn effective_group_state_style(
         };
         if let Some(overlay) = overlay {
             merge_intrinsic_state_style(&mut effective, overlay);
+        }
+    };
+    if style.group_state_order.is_empty() {
+        for state in fallback_order {
+            apply_state(state);
+        }
+    } else {
+        for state in &style.group_state_order {
+            apply_state(state);
         }
     }
 
