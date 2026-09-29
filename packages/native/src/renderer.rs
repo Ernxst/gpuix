@@ -8244,10 +8244,14 @@ impl GpuixView {
             } else {
                 crate::automation::get_box_insets(id).unwrap_or_default()
             };
-            let padding_left = insets.padding_left;
-            let padding_right = insets.padding_right;
-            let padding_top = insets.padding_top;
-            let padding_bottom = insets.padding_bottom;
+            let containing_width = element
+                .and_then(|element| element.parent)
+                .and_then(|parent_id| content_box_width(&tree, parent_id))
+                .unwrap_or(border_bounds.width);
+            let padding_left = insets.padding_left.resolve(containing_width);
+            let padding_right = insets.padding_right.resolve(containing_width);
+            let padding_top = insets.padding_top.resolve(containing_width);
+            let padding_bottom = insets.padding_bottom.resolve(containing_width);
             let border_left = insets.border_left;
             let border_right = insets.border_right;
             let border_top = insets.border_top;
@@ -12391,23 +12395,31 @@ fn remove_subtree_hover_state(ctx: &mut BuildCtx<'_>, root_id: u64) {
 fn containing_block_basis(
     parent: Option<&crate::retained_tree::RetainedElement>,
     parent_id: Option<u64>,
+    tree: &crate::retained_tree::RetainedTree,
 ) -> Option<f64> {
-    let bounds = crate::automation::get_bounds(parent_id?)?;
-    let style = parent.and_then(|parent| parent.style.as_deref());
-    // Each side falls back through its own shorthand, the way the box model
-    // resolves `padding-left` against `padding` and `border-left-width`
-    // against `border-width`.
-    let side = |longhand: fn(&StyleDesc) -> Option<f64>,
-                shorthand: fn(&StyleDesc) -> Option<f64>| {
-        style
-            .and_then(|style| longhand(style).or_else(|| shorthand(style)))
-            .unwrap_or(0.0)
-    };
-    let padding = side(|style| style.padding_left, |style| style.padding)
-        + side(|style| style.padding_right, |style| style.padding);
-    let border = side(|style| style.border_left_width, |style| style.border_width)
-        + side(|style| style.border_right_width, |style| style.border_width);
-    Some((bounds.width - padding - border).max(0.0))
+    parent?;
+    content_box_width(tree, parent_id?)
+}
+
+fn content_box_width(
+    tree: &crate::retained_tree::RetainedTree,
+    element_id: u64,
+) -> Option<f64> {
+    let element = tree.elements.get(&element_id)?;
+    let bounds = crate::automation::get_bounds(element_id)?;
+    let basis = element
+        .parent
+        .and_then(|parent_id| content_box_width(tree, parent_id))
+        .unwrap_or(bounds.width);
+    let insets = crate::automation::get_box_insets(element_id).unwrap_or_default();
+    Some(
+        (bounds.width
+            - insets.padding_left.resolve(basis)
+            - insets.padding_right.resolve(basis)
+            - insets.border_left
+            - insets.border_right)
+            .max(0.0),
+    )
 }
 
 /// The pixel numbers this element's intrinsic transition endpoint needs, or
@@ -12458,7 +12470,7 @@ fn intrinsic_transition_size(
         window,
         cx,
     );
-    (measured, containing_block_basis(parent, parent_id))
+    (measured, containing_block_basis(parent, parent_id, ctx.tree))
 }
 
 /// [`content_sized_intrinsic_axes`], widened for an explicit keyword.
@@ -12523,7 +12535,8 @@ fn content_sized_intrinsic_axes(
         width: false,
         height: false,
     };
-    let inset = |start: Option<f64>, end: Option<f64>| start.is_some() && end.is_some();
+    let inset = |start: Option<crate::style::LengthValue>,
+                 end: Option<crate::style::LengthValue>| start.is_some() && end.is_some();
     if let Some(style) = style {
         if matches!(style.position.as_deref(), Some("absolute") | Some("fixed")) {
             return IntrinsicAxes {
@@ -13133,9 +13146,11 @@ fn effective_intrinsic_state_style(style: &StyleDesc, state: InteractionProbeSta
 }
 
 fn box_insets_for_style(style: &StyleDesc) -> crate::automation::BoxInsets {
-    let side = |longhand: fn(&StyleDesc) -> Option<f64>,
-                shorthand: fn(&StyleDesc) -> Option<f64>| {
-        longhand(style).or_else(|| shorthand(style)).unwrap_or(0.0)
+    let side = |longhand: fn(&StyleDesc) -> Option<crate::style::LengthValue>,
+                shorthand: fn(&StyleDesc) -> Option<crate::style::LengthValue>| {
+        longhand(style)
+            .or_else(|| shorthand(style))
+            .unwrap_or_default()
     };
     let borders_suppressed = style
         .border_style
@@ -13145,7 +13160,7 @@ fn box_insets_for_style(style: &StyleDesc) -> crate::automation::BoxInsets {
         if borders_suppressed {
             0.0
         } else {
-            side(longhand, |style| style.border_width)
+            longhand(style).or(style.border_width).unwrap_or(0.0)
         }
     };
     crate::automation::BoxInsets {
@@ -13188,12 +13203,12 @@ mod intrinsic_state_style_tests {
     fn overlays_authored_fields_and_preserves_the_base() {
         let base = StyleDesc {
             width: Some(crate::style::DimensionValue::Pixels(100.0)),
-            padding: Some(4.0),
+            padding: Some(crate::style::LengthValue::Pixels(4.0)),
             font_size: Some(12.0),
             ..Default::default()
         };
         let overlay = StyleDesc {
-            padding: Some(20.0),
+            padding: Some(crate::style::LengthValue::Pixels(20.0)),
             font_size: Some(18.0),
             ..Default::default()
         };
@@ -13201,7 +13216,7 @@ mod intrinsic_state_style_tests {
         let mut merged = base.clone();
         merge_intrinsic_state_style(&mut merged, &overlay);
         assert_eq!(merged.width, base.width);
-        assert_eq!(merged.padding, Some(20.0));
+        assert_eq!(merged.padding, Some(crate::style::LengthValue::Pixels(20.0)));
         assert_eq!(merged.font_size, Some(18.0));
         assert!(merged.hover.is_none());
         assert!(merged.focus.is_none());
@@ -13210,27 +13225,27 @@ mod intrinsic_state_style_tests {
     #[test]
     fn an_overlay_shorthand_clears_base_longhands() {
         let base = StyleDesc {
-            padding_left: Some(4.0),
-            margin_left: Some(4.0),
-            gap: Some(3.0),
+            padding_left: Some(crate::style::LengthValue::Pixels(4.0)),
+            margin_left: Some(crate::style::LengthValue::Pixels(4.0)),
+            gap: Some(crate::style::LengthValue::Pixels(3.0)),
             border_top_width: Some(2.0),
             ..Default::default()
         };
         let overlay = StyleDesc {
-            padding: Some(20.0),
-            margin: Some(20.0),
-            gap: Some(12.0),
+            padding: Some(crate::style::LengthValue::Pixels(20.0)),
+            margin: Some(crate::style::LengthValue::Pixels(20.0)),
+            gap: Some(crate::style::LengthValue::Pixels(12.0)),
             border_width: Some(5.0),
             ..Default::default()
         };
 
         let mut merged = base.clone();
         merge_intrinsic_state_style(&mut merged, &overlay);
-        assert_eq!(merged.padding, Some(20.0));
+        assert_eq!(merged.padding, Some(crate::style::LengthValue::Pixels(20.0)));
         assert_eq!(merged.padding_left, None);
-        assert_eq!(merged.margin, Some(20.0));
+        assert_eq!(merged.margin, Some(crate::style::LengthValue::Pixels(20.0)));
         assert_eq!(merged.margin_left, None);
-        assert_eq!(merged.gap, Some(12.0));
+        assert_eq!(merged.gap, Some(crate::style::LengthValue::Pixels(12.0)));
         assert_eq!(merged.row_gap, None);
         assert_eq!(merged.column_gap, None);
         assert_eq!(merged.border_width, Some(5.0));
@@ -13240,18 +13255,18 @@ mod intrinsic_state_style_tests {
     #[test]
     fn an_overlay_longhand_keeps_the_base_shorthand_for_other_sides() {
         let base = StyleDesc {
-            padding: Some(10.0),
+            padding: Some(crate::style::LengthValue::Pixels(10.0)),
             ..Default::default()
         };
         let overlay = StyleDesc {
-            padding_left: Some(4.0),
+            padding_left: Some(crate::style::LengthValue::Pixels(4.0)),
             ..Default::default()
         };
 
         let mut merged = base.clone();
         merge_intrinsic_state_style(&mut merged, &overlay);
-        assert_eq!(merged.padding, Some(10.0));
-        assert_eq!(merged.padding_left, Some(4.0));
+        assert_eq!(merged.padding, Some(crate::style::LengthValue::Pixels(10.0)));
+        assert_eq!(merged.padding_left, Some(crate::style::LengthValue::Pixels(4.0)));
     }
 
     #[test]
@@ -16153,6 +16168,18 @@ fn dimension_to_length(value: &crate::style::DimensionValue) -> gpui::Length {
     }
 }
 
+fn style_length_to_definite(value: crate::style::LengthValue) -> gpui::DefiniteLength {
+    use crate::style::LengthValue;
+    match value {
+        LengthValue::Pixels(value) => gpui::px(value as f32).into(),
+        LengthValue::Percentage(value) => gpui::relative(value as f32),
+    }
+}
+
+fn style_length_to_length(value: crate::style::LengthValue) -> gpui::Length {
+    style_length_to_definite(value).into()
+}
+
 /// Resolve the font-relative and viewport-relative parts of a length before
 /// handing percentages to GPUI/Taffy. Taffy supplies the containing-block
 /// basis at layout time; the window supplies the viewport basis here, exactly
@@ -16639,7 +16666,7 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         el.style().flex_shrink = Some(shrink as f32);
     }
     if let Some(basis) = style.flex_basis {
-        el = el.flex_basis(gpui::px(basis as f32));
+        el.style().flex_basis = Some(style_length_to_length(basis));
     }
     // The former wrapper carried flex-none independently from the authored
     // child. On the child itself it is only a default: any authored flex
@@ -16689,15 +16716,16 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         el.style().justify_self = Some(justify_self);
     }
     if let Some(gap) = style.gap {
-        el = el.gap(gpui::px(gap as f32));
+        el.style().gap.width = Some(style_length_to_definite(gap));
+        el.style().gap.height = Some(style_length_to_definite(gap));
     }
     // Per-axis gaps were in the style type and implemented nowhere. They come
     // after `gap` so the axis value wins, matching CSS shorthand order.
     if let Some(gap) = style.row_gap {
-        el = el.gap_y(gpui::px(gap as f32));
+        el.style().gap.height = Some(style_length_to_definite(gap));
     }
     if let Some(gap) = style.column_gap {
-        el = el.gap_x(gpui::px(gap as f32));
+        el.style().gap.width = Some(style_length_to_definite(gap));
     }
     if let Some(ref w) = style.width {
         el = apply_width(el, w);
@@ -16721,34 +16749,42 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         el.style().max_size.height = Some(dimension_to_length(max_h));
     }
     if let Some(p) = style.padding {
-        el = el.p(gpui::px(p as f32));
+        let p = style_length_to_definite(p);
+        el.style().padding.top = Some(p);
+        el.style().padding.right = Some(p);
+        el.style().padding.bottom = Some(p);
+        el.style().padding.left = Some(p);
     }
     if let Some(pt) = style.padding_top {
-        el = el.pt(gpui::px(pt as f32));
+        el.style().padding.top = Some(style_length_to_definite(pt));
     }
     if let Some(pr) = style.padding_right {
-        el = el.pr(gpui::px(pr as f32));
+        el.style().padding.right = Some(style_length_to_definite(pr));
     }
     if let Some(pb) = style.padding_bottom {
-        el = el.pb(gpui::px(pb as f32));
+        el.style().padding.bottom = Some(style_length_to_definite(pb));
     }
     if let Some(pl) = style.padding_left {
-        el = el.pl(gpui::px(pl as f32));
+        el.style().padding.left = Some(style_length_to_definite(pl));
     }
     if let Some(m) = style.margin {
-        el = el.m(gpui::px(m as f32));
+        let m = style_length_to_length(m);
+        el.style().margin.top = Some(m.clone());
+        el.style().margin.right = Some(m.clone());
+        el.style().margin.bottom = Some(m.clone());
+        el.style().margin.left = Some(m);
     }
     if let Some(mt) = style.margin_top {
-        el = el.mt(gpui::px(mt as f32));
+        el.style().margin.top = Some(style_length_to_length(mt));
     }
     if let Some(mr) = style.margin_right {
-        el = el.mr(gpui::px(mr as f32));
+        el.style().margin.right = Some(style_length_to_length(mr));
     }
     if let Some(mb) = style.margin_bottom {
-        el = el.mb(gpui::px(mb as f32));
+        el.style().margin.bottom = Some(style_length_to_length(mb));
     }
     if let Some(ml) = style.margin_left {
-        el = el.ml(gpui::px(ml as f32));
+        el.style().margin.left = Some(style_length_to_length(ml));
     }
     // Taffy has no viewport-fixed position, and GPUI has no scrolling document,
     // so "fixed" lays out exactly like "absolute". `should_occlude` already
@@ -16759,16 +16795,16 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         _ => {}
     }
     if let Some(top) = style.top {
-        el = el.top(gpui::px(top as f32));
+        el.style().inset.top = Some(style_length_to_length(top));
     }
     if let Some(right) = style.right {
-        el = el.right(gpui::px(right as f32));
+        el.style().inset.right = Some(style_length_to_length(right));
     }
     if let Some(bottom) = style.bottom {
-        el = el.bottom(gpui::px(bottom as f32));
+        el.style().inset.bottom = Some(style_length_to_length(bottom));
     }
     if let Some(left) = style.left {
-        el = el.left(gpui::px(left as f32));
+        el.style().inset.left = Some(style_length_to_length(left));
     }
     if let Some(background_color) = style.background_color.as_deref() {
         if let Some(color) = crate::color::parse_color_rgba(background_color) {

@@ -66,6 +66,40 @@ test("converts simple CSS module classes into GPUIX style objects", async () => 
   })
 })
 
+test("preserves percentage values for native spacing and layout lengths", async () => {
+  await expect(
+    transformGpuixCssModule(
+      `.panel {
+        gap: 10%;
+        row-gap: 12%;
+        column-gap: 14%;
+        padding: 5%;
+        margin: 6%;
+        margin-left: 7%;
+        top: 8%;
+        flex-basis: 40%;
+      }`,
+      "/fixture/percentage.module.css",
+    ),
+  ).resolves.toEqual({
+    panel: {
+      gap: "10%",
+      rowGap: "12%",
+      columnGap: "14%",
+      paddingTop: "5%",
+      paddingRight: "5%",
+      paddingBottom: "5%",
+      paddingLeft: "5%",
+      marginTop: "6%",
+      marginRight: "6%",
+      marginBottom: "6%",
+      marginLeft: "7%",
+      top: "8%",
+      flexBasis: "40%",
+    },
+  })
+})
+
 test("converts text-decoration shorthand and longhands to style prop keys", async () => {
   await expect(
     transformGpuixCssModule(

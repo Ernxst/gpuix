@@ -4513,7 +4513,7 @@ The intrinsic keywords are measured on `<div>` and `<text>` once, then re-measur
 
 **Size interpolation:** `interpolateSize` (`"numeric-only"` | `"allow-keywords"`) — inherited; `"allow-keywords"` lets a `width` or `height` transition travel to or from `auto`. See [`interpolateSize`](#interpolatesize-transitions-that-target-an-intrinsic-size).
 
-**Spacing:** `padding`, `paddingTop/Right/Bottom/Left`, `margin`, `marginTop/Right/Bottom/Left`
+**Spacing:** `padding`, `paddingTop/Right/Bottom/Left`, `margin`, `marginTop/Right/Bottom/Left`, `gap`, `rowGap`, `columnGap`, `flexBasis`, `top`, `right`, `bottom`, `left` accept numbers (pixels), `"<n>px"`, and `"<n>%"`. Browser bases are: padding and margins use the containing block's content-box width (including vertical sides); insets use the corresponding containing-block axis (the content box for relative positioning and the padding box for absolute positioning); `columnGap` uses the content-box width and `rowGap` its height; `flexBasis` uses the flex container's inner main-axis size. For cyclic percentage sizes in intrinsic-size calculations, the native Taffy layout follows CSS flex/grid rules.
 
 **Position:** `position` (`"relative"` | `"absolute"` | `"fixed"`), `top`, `right`, `bottom`, `left` — `"fixed"` lays out like `"absolute"`, because GPUI has no scrolling document to be fixed against
 

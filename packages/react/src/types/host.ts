@@ -46,6 +46,9 @@ export type DimensionValue =
   | `calc(${CalcExpression})`
   | `clamp(${LengthAtom}, ${LengthAtom}, ${LengthAtom})`
 
+/** A pixel or percentage length for spacing, offsets, and flex basis. */
+export type LengthValue = number | `${number}px` | `${number}%`
+
 /**
  * A bare number or numeric string is a unitless multiplier of the resolved
  * font size, matching React DOM's `lineHeight`. A `${number}px` string is an
@@ -548,14 +551,14 @@ export interface StyleDesc {
   flexWrap?: FlexWrap
   flexGrow?: number
   flexShrink?: number
-  flexBasis?: number
+  flexBasis?: LengthValue
   alignItems?: AlignItems
   alignSelf?: AlignItems
   alignContent?: AlignContent
   justifyContent?: JustifyContent
-  gap?: number
-  rowGap?: number
-  columnGap?: number
+  gap?: LengthValue
+  rowGap?: LengthValue
+  columnGap?: LengthValue
   gridTemplateColumns?: GridTemplate
   gridTemplateRows?: GridTemplate
   gridColumn?: string | number
@@ -579,23 +582,23 @@ export interface StyleDesc {
   maxHeight?: DimensionValue
   aspectRatio?: number | string
 
-  padding?: number
-  paddingTop?: number
-  paddingRight?: number
-  paddingBottom?: number
-  paddingLeft?: number
+  padding?: LengthValue
+  paddingTop?: LengthValue
+  paddingRight?: LengthValue
+  paddingBottom?: LengthValue
+  paddingLeft?: LengthValue
 
-  margin?: number
-  marginTop?: number
-  marginRight?: number
-  marginBottom?: number
-  marginLeft?: number
+  margin?: LengthValue
+  marginTop?: LengthValue
+  marginRight?: LengthValue
+  marginBottom?: LengthValue
+  marginLeft?: LengthValue
 
   position?: Position
-  top?: number
-  right?: number
-  bottom?: number
-  left?: number
+  top?: LengthValue
+  right?: LengthValue
+  bottom?: LengthValue
+  left?: LengthValue
 
   background?: BackgroundValue
   backgroundColor?: GpuixColor
