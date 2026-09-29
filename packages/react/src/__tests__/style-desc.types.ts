@@ -319,7 +319,8 @@ void invalidImage
 // `SharedStyle` is exactly the mapped type consumers used to be told to write
 // by hand: mutually assignable in both directions.
 type HandWrittenSharedStyle = CSSProperties &
-  Pick<StyleDesc, Extract<keyof CSSProperties, keyof StyleDesc>>
+  Pick<StyleDesc, Extract<keyof CSSProperties, keyof StyleDesc>> &
+  Pick<StyleDesc, `--${string}`>
 
 declare const exportedShared: SharedStyle
 declare const handWrittenShared: HandWrittenSharedStyle

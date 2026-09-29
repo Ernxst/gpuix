@@ -166,6 +166,11 @@ describeNative("render", () => {
     expect(textContent(screen.renderer, screen.getByTestId("count"))).toBe("count 1")
   })
 
+  it("exposes the window title from its last accessibility frame", () => {
+    const screen = render(<text>Title reader</text>)
+    expect(screen.renderer.getWindowTitle()).toBe("GPUIX Test")
+  })
+
   it("flushes passive effects before render, rerender and unmount return", () => {
     registrationCleanups.length = 0
 

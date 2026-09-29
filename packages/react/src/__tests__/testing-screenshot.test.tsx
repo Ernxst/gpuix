@@ -550,13 +550,19 @@ describeNative("toMatchScreenshot", () => {
     })
   })
 
-  it("refuses a negated assertion and a receiver it cannot capture", async () => {
+  it("supports negated assertions and rejects a receiver it cannot capture", async () => {
     await withScene(async (screen, directory) => {
       screen.render(<Scene />)
       const options = { resolveScreenshotPath: () => path.join(directory, "tile.png") }
 
+      await withNewGoldenWrites(() =>
+        expect(expect(screen).toMatchScreenshot(options)).rejects.toThrowError(/a new one was created/)
+      )
+      screen.render(<Scene color={BLUE} />)
+      await expect(screen).not.toMatchScreenshot(options)
+      screen.render(<Scene />)
       await expect(expect(screen).not.toMatchScreenshot(options)).rejects.toThrowError(
-        `'toMatchScreenshot' cannot be used with "not"`
+        "Screenshot matches the stored reference, but was expected to differ."
       )
       await expect(expect({ nothing: true }).toMatchScreenshot(options)).rejects.toThrowError(
         /toMatchScreenshot expects a render result, a TestRenderer, or a TestElement/
