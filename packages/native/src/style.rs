@@ -2535,7 +2535,7 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             value,
             "flexDirection",
             flex_direction,
-            ["row", "column"]
+            ["row", "row-reverse", "column", "column-reverse"]
         );
         enum_field!(
             key,
@@ -5174,6 +5174,15 @@ mod tests {
         assert_eq!(block.style.display, None);
         assert_eq!(block.problems.len(), 1);
         assert_eq!(block.problems[0].property, "display");
+    }
+
+    #[test]
+    fn flex_direction_accepts_reverse_values() {
+        for value in ["row-reverse", "column-reverse"] {
+            let parsed = parse_style_value(&json!({ "flexDirection": value }));
+            assert!(parsed.problems.is_empty(), "{value}: {:?}", parsed.problems);
+            assert_eq!(parsed.style.flex_direction.as_deref(), Some(value));
+        }
     }
 
     #[test]

@@ -262,7 +262,7 @@ export type FontWeight =
 
 export type Display = "none" | "flex" | "grid"
 export type Visibility = "visible" | "hidden"
-export type FlexDirection = "row" | "column"
+export type FlexDirection = "row" | "row-reverse" | "column" | "column-reverse"
 export type FlexWrap = "nowrap" | "wrap" | "wrap-reverse"
 export type AlignItems = "start" | "flex-start" | "center" | "end" | "flex-end" | "baseline" | "stretch"
 export type AlignContent =

@@ -12556,7 +12556,10 @@ fn content_sized_intrinsic_axes(
         && !scrolls(|style| style.overflow_y.as_deref());
 
     let main_is_width = match parent_declares(|style| style.display.as_deref()) {
-        Some("flex") => parent_declares(|style| style.flex_direction.as_deref()) != Some("column"),
+        Some("flex") => !matches!(
+            parent_declares(|style| style.flex_direction.as_deref()),
+            Some("column" | "column-reverse")
+        ),
         // A grid item is stretched into its area on both axes by default, and
         // GPUIX has no `justify-items` / `align-items` override to read there.
         Some("grid") => return STRETCHED,
@@ -12633,6 +12636,12 @@ mod content_sized_intrinsic_axes_tests {
             (
                 "flex column, default alignment: width is stretched",
                 serde_json::json!({ "display": "flex", "flexDirection": "column" }),
+                serde_json::json!({}),
+                (false, true),
+            ),
+            (
+                "flex column-reverse, default alignment: width is stretched",
+                serde_json::json!({ "display": "flex", "flexDirection": "column-reverse" }),
                 serde_json::json!({}),
                 (false, true),
             ),
@@ -16605,11 +16614,12 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         grid_location.column.end =
             to_gpui_grid_placement(style.grid_column_end.unwrap_or(GridLineValue::Auto));
     }
-    if style.flex_direction.as_deref() == Some("column") {
-        el = el.flex_col();
-    }
-    if style.flex_direction.as_deref() == Some("row") {
-        el = el.flex_row();
+    match style.flex_direction.as_deref() {
+        Some("column") => el = el.flex_col(),
+        Some("row-reverse") => el = el.flex_row_reverse(),
+        Some("column-reverse") => el = el.flex_col_reverse(),
+        Some("row") => el = el.flex_row(),
+        _ => {}
     }
     match style.flex_wrap.as_deref() {
         Some("wrap") => el = el.flex_wrap(),

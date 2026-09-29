@@ -156,6 +156,28 @@ function HoverWithinSiblingProbe({
 }
 
 describe("style props reach the renderer", { timeout: 16_000 }, () => {
+  it("lays out reverse flex directions on their main axis", () => {
+    const row = createTestRoot({ width: 100, height: 40 })
+    row.render(
+      <div style={{ display: "flex", flexDirection: "row-reverse", width: 100, height: 40 }}>
+        <div data-testid="row-a" style={{ width: 20, height: 10 }} />
+        <div data-testid="row-b" style={{ width: 30, height: 10 }} />
+      </div>,
+    )
+    expect(boundsFor(row.renderer, "row-a").x).toBe(80)
+    expect(boundsFor(row.renderer, "row-b").x).toBe(50)
+
+    const column = createTestRoot({ width: 40, height: 100 })
+    column.render(
+      <div style={{ display: "flex", flexDirection: "column-reverse", width: 40, height: 100 }}>
+        <div data-testid="column-a" style={{ width: 10, height: 20 }} />
+        <div data-testid="column-b" style={{ width: 10, height: 30 }} />
+      </div>,
+    )
+    expect(boundsFor(column.renderer, "column-a").y).toBe(80)
+    expect(boundsFor(column.renderer, "column-b").y).toBe(50)
+  })
+
   it("resolves ch, calc, and clamp dimensions on the GPU", () => {
     const shot = path.join(SHOTS_DIR, "expressive-lengths.png")
     const { render, renderer } = createTestRoot()
