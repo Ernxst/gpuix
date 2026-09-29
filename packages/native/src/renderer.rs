@@ -9742,10 +9742,10 @@ fn font_with_overrides(mut font: InheritedFont, style: Option<&StyleDesc>) -> In
 
 /// Resolve the inheritable colour from the same layered style that GPUI paints.
 ///
-/// Custom SVGs rasterize `currentColor` during build, before GPUI applies its
-/// `hover`, `group_hover`, and `active` paint refinements. Carrying this one
-/// resolved value through `Inherited` keeps their raster source aligned with
-/// the parent div's painted text colour.
+/// Text runs and custom SVGs resolve their colour while the host is built,
+/// before GPUI applies its interaction paint refinements. Carrying this value
+/// through `Inherited` and the host text style keeps them aligned with the
+/// parent's painted colour.
 fn resolved_current_color(
     style: Option<&StyleDesc>,
     focused: bool,
@@ -9753,6 +9753,7 @@ fn resolved_current_color(
     hover_within: bool,
     hovered: bool,
     active: bool,
+    focus_group: Option<&InheritedHoverGroup>,
 ) -> Option<gpui::Rgba> {
     let style = style?;
     let mut color = style
@@ -9781,6 +9782,17 @@ fn resolved_current_color(
     }
     if active {
         refine(style.active.as_deref());
+    }
+    if let Some(group) = focus_group {
+        if group.focused {
+            refine(style.group_focus.as_deref());
+        }
+        if group.focus_visible {
+            refine(style.group_focus_visible.as_deref());
+        }
+        if group.focus_within {
+            refine(style.group_focus_within.as_deref());
+        }
     }
     color
 }
@@ -12306,6 +12318,7 @@ fn build_element_with_parent_layout(
         hover_within,
         interaction.hovered,
         interaction.is_active(),
+        focus_groups.focus_paint_group,
     );
     ctx.inherited = parent_inherited
         .clone()
@@ -12352,7 +12365,7 @@ fn build_element_with_parent_layout(
         "div" | "text" | "table" | "caption" | "thead" | "tbody" | "tfoot" | "tr"
         | "th" | "td" => {
             ctx.custom_registry.destroy(id);
-            build_host_container(element, style, box_insets, ctx, window, cx)
+            build_host_container(element, style, box_insets, current_color, ctx, window, cx)
         }
         "virtual-list" => {
             ctx.custom_registry.destroy(id);
@@ -15487,6 +15500,7 @@ pub(crate) fn build_host_container(
     element: &crate::retained_tree::RetainedElement,
     style: Option<&StyleDesc>,
     box_insets: Option<crate::automation::BoxInsets>,
+    resolved_text_color: Option<gpui::Rgba>,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -15510,6 +15524,12 @@ pub(crate) fn build_host_container(
 
     if let Some(style) = style {
         el = apply_interactive_styles(el, style);
+    }
+    if let Some(color) = resolved_text_color {
+        // Text runs inherit GPUI's text style while the host is built. Group
+        // focus refinements are attached later, so apply the resolved colour
+        // here as well as keeping the paint-time refinement on the host.
+        el = el.text_color(color);
     }
 
     if style.and_then(|style| style.pointer_events.as_deref()) == Some("none") {

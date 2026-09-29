@@ -108,6 +108,191 @@ describe("resolved test-renderer styles", () => {
     }
   })
 
+  it.each(["focus", "focus-visible", "focus-within"] as const)(
+    "repaints CSS module text colour for :%s",
+    async (state) => {
+      const source = new URL("../../../plugins/src/css-modules.ts", import.meta.url).href
+      const { transformGpuixCssModule } = await import(source)
+      const styles = await transformGpuixCssModule(
+        `.group { display: flex; flex-direction: column; }
+       .child { color: #0011ff; font-size: 32px; width: 300px; }
+       .group:${state} .child { color: #ff00ff; }`,
+        "/fixture/focus-within-text-colour.module.css",
+      )
+      for (const style of Object.values(styles)) {
+        Object.defineProperty(style, Symbol.for("gpuix.compiledStyle"), { value: true })
+      }
+
+      const root = createTestRoot()
+      try {
+        root.render(
+          <>
+            <button ariaLabel="Keyboard start" type="button"><text>Start</text></button>
+            <div
+              className={styles.group}
+              data-testid="focus-group"
+              tabIndex={state === "focus-within" ? undefined : 0}
+            >
+              {state === "focus-within" && (
+                <button data-testid="focus-within-text-target" type="button">
+                  <text>Focus target</text>
+                </button>
+              )}
+              <text className={styles.child} data-testid="focus-within-text-child">
+                Focus-within evidence
+              </text>
+            </div>
+          </>,
+        )
+        const child = root.renderer.findByTestId("focus-within-text-child")!
+        const target = root.renderer.findByTestId(
+          state === "focus-within" ? "focus-within-text-target" : "focus-group",
+        )!
+        const idle = path.join(SHOTS_DIR, `module-${state}-text-idle.png`)
+        const focused = path.join(SHOTS_DIR, `module-${state}-text-focused.png`)
+
+        root.renderer.captureScreenshot(idle)
+        root.renderer.simulateKeystrokes("tab")
+        root.renderer.simulateKeystrokes("tab")
+        expect(root.renderer.getActiveElement()).toBe(target.id)
+        expect(root.renderer.getResolvedStyle(child.id)?.color).toBe("#ff00ff")
+        root.renderer.captureScreenshot(focused)
+        expectScreenshotsDiffer(idle, focused)
+      } finally {
+        root.unmount()
+      }
+    },
+  )
+
+  it("repaints inherited group focus colour on text inside a div descendant", async () => {
+    const source = new URL("../../../plugins/src/css-modules.ts", import.meta.url).href
+    const { transformGpuixCssModule } = await import(source)
+    const styles = await transformGpuixCssModule(
+      `.group { display: flex; flex-direction: column; }
+       .child { color: #0011ff; font-size: 32px; width: 300px; }
+       .group:focus-within .child { color: #ff00ff; }`,
+      "/fixture/focus-within-div-colour.module.css",
+    )
+    for (const style of Object.values(styles)) {
+      Object.defineProperty(style, Symbol.for("gpuix.compiledStyle"), { value: true })
+    }
+
+    const root = createTestRoot()
+    try {
+      root.render(
+        <>
+          <button ariaLabel="Keyboard start" type="button"><text>Start</text></button>
+          <div className={styles.group}>
+            <button data-testid="focus-within-div-target" type="button">
+              <text>Focus target</text>
+            </button>
+            <div className={styles.child} data-testid="focus-within-div-child">
+              <text>Focus-within evidence</text>
+            </div>
+          </div>
+        </>,
+      )
+      const child = root.renderer.findByTestId("focus-within-div-child")!
+      const target = root.renderer.findByTestId("focus-within-div-target")!
+      const idle = path.join(SHOTS_DIR, "module-focus-within-div-colour-idle.png")
+      const focused = path.join(SHOTS_DIR, "module-focus-within-div-colour-focused.png")
+
+      root.renderer.captureScreenshot(idle)
+      root.renderer.simulateKeystrokes("tab")
+      root.renderer.simulateKeystrokes("tab")
+      expect(root.renderer.getActiveElement()).toBe(target.id)
+      expect(root.renderer.getResolvedStyle(child.id)?.color).toBe("#ff00ff")
+      root.renderer.captureScreenshot(focused)
+      expectScreenshotsDiffer(idle, focused)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("repaints CSS module text colour when a descendant receives programmatic focus", async () => {
+    const source = new URL("../../../plugins/src/css-modules.ts", import.meta.url).href
+    const { transformGpuixCssModule } = await import(source)
+    const styles = await transformGpuixCssModule(
+      `.group { display: flex; flex-direction: column; }
+       .child { color: #0011ff; font-size: 32px; width: 300px; }
+       .group:focus-within .child { color: #ff00ff; }`,
+      "/fixture/focus-within-programmatic-colour.module.css",
+    )
+    for (const style of Object.values(styles)) {
+      Object.defineProperty(style, Symbol.for("gpuix.compiledStyle"), { value: true })
+    }
+
+    const root = createTestRoot()
+    try {
+      root.render(
+        <div className={styles.group}>
+          <button data-testid="programmatic-focus-target" type="button">
+            <text>Focus target</text>
+          </button>
+          <text className={styles.child} data-testid="programmatic-focus-child">
+            Focus-within evidence
+          </text>
+        </div>,
+      )
+      const child = root.renderer.findByTestId("programmatic-focus-child")!
+      const target = root.renderer.findByTestId("programmatic-focus-target")!
+      const idle = path.join(SHOTS_DIR, "module-focus-within-programmatic-idle.png")
+      const focused = path.join(SHOTS_DIR, "module-focus-within-programmatic-focused.png")
+
+      root.renderer.captureScreenshot(idle)
+      root.renderer.focusElement(target.id)
+      expect(root.renderer.getActiveElement()).toBe(target.id)
+      expect(root.renderer.getResolvedStyle(child.id)?.color).toBe("#ff00ff")
+      root.renderer.captureScreenshot(focused)
+      expectScreenshotsDiffer(idle, focused)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("paints non-inherited CSS module properties for a focused group descendant", async () => {
+    const source = new URL("../../../plugins/src/css-modules.ts", import.meta.url).href
+    const { transformGpuixCssModule } = await import(source)
+    const styles = await transformGpuixCssModule(
+      `.group { display: flex; flex-direction: column; }
+       .box { width: 80px; height: 40px; background-color: #0011ff; }
+       .group:focus-within .box { background-color: #ff00ff; }`,
+      "/fixture/focus-within-box.module.css",
+    )
+    for (const style of Object.values(styles)) {
+      Object.defineProperty(style, Symbol.for("gpuix.compiledStyle"), { value: true })
+    }
+
+    const root = createTestRoot()
+    try {
+      root.render(
+        <>
+          <button ariaLabel="Keyboard start" type="button"><text>Start</text></button>
+          <div className={styles.group}>
+            <button data-testid="focus-within-box-target" type="button">
+              <text>Focus target</text>
+            </button>
+            <div className={styles.box} data-testid="focus-within-box" />
+          </div>
+        </>,
+      )
+      const box = root.renderer.findByTestId("focus-within-box")!
+      const target = root.renderer.findByTestId("focus-within-box-target")!
+      const idle = path.join(SHOTS_DIR, "module-focus-within-box-idle.png")
+      const focused = path.join(SHOTS_DIR, "module-focus-within-box-focused.png")
+
+      root.renderer.captureScreenshot(idle)
+      root.renderer.simulateKeystrokes("tab")
+      root.renderer.simulateKeystrokes("tab")
+      expect(root.renderer.getActiveElement()).toBe(target.id)
+      expect(root.renderer.getResolvedStyle(box.id)?.backgroundColor).toBe("#ff00ff")
+      root.renderer.captureScreenshot(focused)
+      expectScreenshotsDiffer(idle, focused)
+    } finally {
+      root.unmount()
+    }
+  })
+
   it("reads the hoverWithin style applied by the issue #52 repro", () => {
     const root = createTestRoot()
     try {

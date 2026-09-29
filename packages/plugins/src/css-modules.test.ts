@@ -1089,6 +1089,37 @@ test("merges hovered descendant rules from the same ancestor", async () => {
   })
 })
 
+test("binds one child to hover and focus styles from different ancestors", async () => {
+  await expect(
+    transformGpuixCssModule(
+      `
+        .child { opacity: 1; }
+        .a:hover .child { opacity: 0.5; }
+        .b:focus-visible .child { opacity: 0.8; }
+      `,
+      "/fixture/multiple-ancestor-groups.module.css",
+    ),
+  ).resolves.toEqual({
+    child: {
+      hoverWithinGroup:
+        "gpuix-css-module:hover-group:%2Ffixture%2Fmultiple-ancestor-groups.module.css:a",
+      hoverWithin: { opacity: 0.5 },
+      focusWithinGroup:
+        "gpuix-css-module:hover-group:%2Ffixture%2Fmultiple-ancestor-groups.module.css:b",
+      groupFocusVisible: { opacity: 0.8 },
+      opacity: 1,
+    },
+    a: {
+      hoverGroup:
+        "gpuix-css-module:hover-group:%2Ffixture%2Fmultiple-ancestor-groups.module.css:a",
+    },
+    b: {
+      hoverGroup:
+        "gpuix-css-module:hover-group:%2Ffixture%2Fmultiple-ancestor-groups.module.css:b",
+    },
+  })
+})
+
 test("rejects hovered descendant rules from different ancestors", async () => {
   await expect(
     transformGpuixCssModule(

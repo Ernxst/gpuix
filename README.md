@@ -4749,7 +4749,9 @@ equivalent.
 CSS modules also support `.group:focus .descendant`,
 `.group:focus-visible .descendant`, and `.group:focus-within .descendant`.
 These apply the descendant's style while the marked ancestor is focused,
-keyboard-modality focused, or contains focus, respectively.
+keyboard-modality focused, or contains focus, respectively. Their colour
+refinements also update inherited text colour and `currentColor` paints on the
+descendant.
 
 `hover` stays active while the pointer is over a descendant, including a link,
 a child that paints its own background, or an absolutely positioned child

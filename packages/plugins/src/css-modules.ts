@@ -317,7 +317,13 @@ async function parseCssModule(
   const accumulatedStyles: CssModuleStyles = {}
   const groupRelations = new Map<
     string,
-    { ancestor: string; selector: string; states: Set<string> }
+    {
+      descendant: string
+      kind: "hover" | "focus"
+      ancestor: string
+      selector: string
+      states: Set<string>
+    }
   >()
 
   root.walkRules((rule) => {
@@ -327,7 +333,9 @@ async function parseCssModule(
       if (!parsed) continue // validateSelectors has already rejected this selector.
 
       if (parsed.kind === "groupDescendant") {
-        const previousRelation = groupRelations.get(parsed.descendant)
+        const kind = parsed.state.startsWith("groupFocus") ? "focus" : "hover"
+        const relationKey = `${parsed.descendant}\0${kind}`
+        const previousRelation = groupRelations.get(relationKey)
         if (previousRelation && previousRelation.ancestor !== parsed.ancestor) {
           throw unsupportedCss(
             sourceId,
@@ -336,7 +344,9 @@ async function parseCssModule(
         }
         const states = previousRelation?.states ?? new Set<string>()
         states.add(parsed.state)
-        groupRelations.set(parsed.descendant, {
+        groupRelations.set(relationKey, {
+          descendant: parsed.descendant,
+          kind,
           ancestor: parsed.ancestor,
           selector: previousRelation?.selector ?? trimmedSelector,
           states,
@@ -459,20 +469,20 @@ async function parseCssModule(
   // Bind the descendant state to the marker on its matching ancestor. The
   // marker may be declared after the relation, so derive it after all rules
   // have contributed in stylesheet order.
-  for (const [descendant, { ancestor, states }] of groupRelations) {
+  for (const { descendant, kind, ancestor, states } of groupRelations.values()) {
     const hoverGroup = accumulatedStyles[ancestor]?.hoverGroup
     if (typeof hoverGroup !== "string") continue
 
     const descendantStyle = accumulatedStyles[descendant] ??= {}
     const binding: Record<string, unknown> = {}
-    if (states.has("hoverWithin") || states.has("activeWithin")) {
+    if (kind === "hover" && (states.has("hoverWithin") || states.has("activeWithin"))) {
       if (!("hoverWithinGroup" in descendantStyle)) binding.hoverWithinGroup = hoverGroup
     }
-    if (
+    if (kind === "focus" && (
       states.has("groupFocus") ||
       states.has("groupFocusVisible") ||
       states.has("groupFocusWithin")
-    ) {
+    )) {
       if (!("focusWithinGroup" in descendantStyle)) binding.focusWithinGroup = hoverGroup
     }
     if (Object.keys(binding).length > 0) {
