@@ -67,3 +67,8 @@ Before writing code that relies on a browser behaviour, check it in the referenc
 2. Check the reference file's Traps and its open-issues table; many gaps are tracked on https://github.com/Ernxst/gpuix/issues.
 3. Confirm the prop or value against `StyleDesc`, `Props` and the element prop types in `@gpuix/react`'s `types/host.d.ts`.
 4. Reproduce it in a test with `createTestRoot()` and assert numbers (bounds, text, resolved style) rather than pixels.
+5. If no issue tracks the gap, raise it with the user before working around it; do not file by default. Give them the
+   `@gpuix/react` version, strict-mode warning, reproduction, same-markup browser behaviour and, if available, a link to
+   the GPUI `Styled` method or AccessKit setter (showing this is a wiring gap). File only when the user agrees.
+6. A workaround must not hide the gap: do not rename files or change config to get past a rule. Comment the workaround
+   with the issue number or the user's decision, so it can be removed when the fix ships.
