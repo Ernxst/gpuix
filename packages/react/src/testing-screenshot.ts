@@ -16,8 +16,7 @@
 /// (`compareImages`), so the same three knobs — `tolerance`,
 /// `differingPixelBudget`, `maxChannelDelta` — govern here.
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import os from "node:os"
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
 
 import {
@@ -27,6 +26,7 @@ import {
   readPngSize,
   type PixelRect,
   type PngSize,
+  type RgbaImage,
 } from "./testing-png.js"
 import {
   TestRenderer,
@@ -165,7 +165,7 @@ export interface ScreenshotDecisionInput {
   updateSnapshot: SnapshotUpdateState
   comparator: ResolvedComparatorOptions
   /** Runs the native comparison. Called only when the sizes agree. */
-  compare: () => ImageComparisonResult
+  compare: () => Pick<ImageComparisonResult, "differingPixelRatio" | "maxChannelDelta">
 }
 
 const DEFAULT_SCREENSHOT_DIRECTORY = "__screenshots__"
@@ -447,26 +447,28 @@ function deviceRect(
   return { x: left, y: top, width: right - left, height: bottom - top }
 }
 
-/**
- * Capture the target as PNG bytes: the window, or the element clipped out of
- * it.
- *
- * The bytes are also left on disk in `directory`, because the native
- * comparator reads files rather than buffers. Nothing durable is written until
- * the outcome says something failed.
- */
-function capture(target: CaptureTarget, directory: string): { bytes: Buffer; file: string } {
-  const file = path.join(directory, "actual.png")
-  if (target.element === null) {
-    target.renderer.captureScreenshot(file)
-    return { bytes: readFileSync(file), file }
-  }
+/** Capture the window or the element's device-pixel bounds as RGBA pixels. */
+interface CapturedScreenshot extends RgbaImage {
+  captureMs: number
+  cropMs: number
+}
 
+function capture(target: CaptureTarget): CapturedScreenshot {
   target.renderer.prepareScreenshotCapture()
-  const rect = deviceRect(target.renderer, target.element)
-  target.renderer.captureScreenshotClip(file, rect.x, rect.y, rect.width, rect.height)
-  const bytes = readFileSync(file)
-  return { bytes, file }
+  const captured =
+    target.element === null
+      ? target.renderer.captureScreenshotRaw()
+      : (() => {
+          const rect = deviceRect(target.renderer, target.element!)
+          return target.renderer.captureScreenshotClipRaw(rect.x, rect.y, rect.width, rect.height)
+        })()
+  return {
+    width: captured.width,
+    height: captured.height,
+    data: captured.pixels,
+    captureMs: captured.captureMs,
+    cropMs: captured.cropMs,
+  }
 }
 
 const ANIMATION_SETTLE_STEP_MS = 16
@@ -480,10 +482,9 @@ const ANIMATION_SETTLE_BUDGET_MS = 10_000
  */
 function captureWithAnimationSettled(
   target: CaptureTarget,
-  directory: string,
   animations: "disabled" | "allow"
-): { bytes: Buffer; file: string } {
-  if (animations === "allow") return capture(target, directory)
+): CapturedScreenshot {
+  if (animations === "allow") return capture(target)
 
   const wasPaused = target.renderer.isClockPaused()
   target.renderer.clockPause()
@@ -510,7 +511,7 @@ function captureWithAnimationSettled(
       elapsed += ANIMATION_SETTLE_STEP_MS
     }
 
-    return capture(target, directory)
+    return capture(target)
   } finally {
     if (!wasPaused) target.renderer.clockResume()
   }
@@ -644,81 +645,73 @@ export async function toMatchScreenshot(
     defaultResolveScreenshotPath)(pathContext)
 
   const target = resolveCaptureTarget(received)
-  const scratch = mkdtempSync(path.join(os.tmpdir(), "gpuix-screenshot-"))
   const diffPaths = screenshotDiffPaths(referencePath)
 
-  try {
-    const { bytes: actualBytes, file: actualFile } = captureWithAnimationSettled(
-      target,
-      scratch,
-      animations
-    )
-    const actualSize = readPngSize(actualBytes, "screenshot")
-    const referenceBytes = existsSync(referencePath) ? readFileSync(referencePath) : null
-    const referenceSize = referenceBytes === null ? null : readPngSize(referenceBytes, referencePath)
+  const actual = captureWithAnimationSettled(target, animations)
+  const actualSize = { width: actual.width, height: actual.height }
+  const actualBytes = (): Buffer => encodePng(actual)
+  const referenceBytes = existsSync(referencePath) ? readFileSync(referencePath) : null
+  const referenceSize = referenceBytes === null ? null : readPngSize(referenceBytes, referencePath)
 
-    const outcome = decideScreenshotOutcome({
-      reference: referenceSize,
-      actual: actualSize,
-      updateSnapshot: updateMode(this),
-      comparator,
-      // The native comparator decodes files, not buffers, which is why the
-      // capture is on disk before this runs.
-      compare: () =>
-        target.renderer.compareImages(referencePath, actualFile, comparator.tolerance),
-    })
+  const outcome = decideScreenshotOutcome({
+    reference: referenceSize,
+    actual: actualSize,
+    updateSnapshot: updateMode(this),
+    comparator,
+    compare: () =>
+      target.renderer.compareImagePixels(
+        referencePath,
+        actual.data,
+        actual.width,
+        actual.height,
+        comparator.tolerance
+      ),
+  })
 
-    switch (outcome.type) {
-      case "matched":
-        return { pass: true, message: () => "" }
-      case "update-reference": {
-        write(referencePath, actualBytes)
-        return { pass: true, message: () => "" }
-      }
-      case "missing-reference": {
-        const written = outcome.location === "reference" ? referencePath : diffPaths.reference
-        write(written, actualBytes)
-        return {
-          pass: false,
-          message: () => failureMessage(this, outcome.message, { reference: written }),
-        }
-      }
-      case "dimension-mismatch": {
-        // No diff image: two sizes have no per-pixel difference to paint.
-        write(diffPaths.actual, actualBytes)
-        return {
-          pass: false,
-          message: () =>
-            failureMessage(this, outcome.message, {
-              reference: referencePath,
-              actual: diffPaths.actual,
-            }),
-        }
-      }
-      default: {
-        write(diffPaths.actual, actualBytes)
-        write(
-          diffPaths.diff,
-          encodePng(
-            diffImage(
-              decodePng(referenceBytes!, referencePath),
-              decodePng(actualBytes, "screenshot"),
-              comparator.tolerance
-            )
-          )
-        )
-        return {
-          pass: false,
-          message: () =>
-            failureMessage(this, outcome.message, {
-              reference: referencePath,
-              actual: diffPaths.actual,
-              diff: diffPaths.diff,
-            }),
-        }
+  switch (outcome.type) {
+    case "matched":
+      return { pass: true, message: () => "" }
+    case "update-reference": {
+      write(referencePath, actualBytes())
+      return { pass: true, message: () => "" }
+    }
+    case "missing-reference": {
+      const written = outcome.location === "reference" ? referencePath : diffPaths.reference
+      write(written, actualBytes())
+      return {
+        pass: false,
+        message: () => failureMessage(this, outcome.message, { reference: written }),
       }
     }
-  } finally {
-    rmSync(scratch, { recursive: true, force: true })
+    case "dimension-mismatch": {
+      // No diff image: two sizes have no per-pixel difference to paint.
+      write(diffPaths.actual, actualBytes())
+      return {
+        pass: false,
+        message: () =>
+          failureMessage(this, outcome.message, {
+            reference: referencePath,
+            actual: diffPaths.actual,
+          }),
+      }
+    }
+    default: {
+      write(diffPaths.actual, actualBytes())
+      write(
+        diffPaths.diff,
+        encodePng(
+          diffImage(decodePng(referenceBytes!, referencePath), actual, comparator.tolerance)
+        )
+      )
+      return {
+        pass: false,
+        message: () =>
+          failureMessage(this, outcome.message, {
+            reference: referencePath,
+            actual: diffPaths.actual,
+            diff: diffPaths.diff,
+          }),
+      }
+    }
   }
 }

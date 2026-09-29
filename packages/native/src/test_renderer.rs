@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use image::ImageEncoder;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
@@ -54,6 +55,16 @@ pub struct ScreenshotCaptureTimings {
     pub capture_ms: f64,
     pub crop_ms: f64,
     pub encode_ms: f64,
+    pub write_ms: f64,
+}
+
+#[napi(object)]
+pub struct ScreenshotImageData {
+    pub pixels: Buffer,
+    pub width: u32,
+    pub height: u32,
+    pub capture_ms: f64,
+    pub crop_ms: f64,
 }
 
 // ── Thread-local storage for !Send GPUI types ────────────────────────
@@ -324,6 +335,12 @@ pub struct ImageComparisonResult {
     pub max_channel_delta: u32,
     pub max_channel_delta_outside_golden_contour: u32,
     pub eroded_geometry_mismatch_ratio: f64,
+}
+
+#[napi(object)]
+pub struct ScreenshotComparisonResult {
+    pub differing_pixel_ratio: f64,
+    pub max_channel_delta: u32,
 }
 
 fn pixels_differ(pixel_a: &[u8], pixel_b: &[u8], tolerance: u8) -> bool {
@@ -2844,6 +2861,49 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Capture the current rendered state as RGBA pixels without encoding a PNG.
+    #[napi]
+    pub fn capture_screenshot_raw(&self) -> Result<ScreenshotImageData> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let capture_start = std::time::Instant::now();
+            let image = self.capture_rendered_image(cx, window, view)?;
+            Ok(ScreenshotImageData {
+                width: image.width(),
+                height: image.height(),
+                pixels: Buffer::from(image.into_raw()),
+                capture_ms: capture_start.elapsed().as_secs_f64() * 1000.0,
+                crop_ms: 0.0,
+            })
+        })
+    }
+
+    /// Capture and crop a rectangle in device pixels, returning RGBA pixels.
+    #[napi]
+    pub fn capture_screenshot_clip_raw(
+        &self,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    ) -> Result<ScreenshotImageData> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let capture_start = std::time::Instant::now();
+            let image = self.capture_rendered_image(cx, window, view)?;
+            let capture_ms = capture_start.elapsed().as_secs_f64() * 1000.0;
+            let crop_start = std::time::Instant::now();
+            let clipped =
+                crop_screenshot(&image, x, y, width, height).map_err(Error::from_reason)?;
+            let crop_ms = crop_start.elapsed().as_secs_f64() * 1000.0;
+            Ok(ScreenshotImageData {
+                width: clipped.width(),
+                height: clipped.height(),
+                pixels: Buffer::from(clipped.into_raw()),
+                capture_ms,
+                crop_ms,
+            })
+        })
+    }
+
     /// Capture and crop to a rectangle in device pixels before PNG encoding.
     #[napi]
     pub fn capture_screenshot_clip(
@@ -2862,14 +2922,25 @@ impl TestGpuixRenderer {
             let clipped =
                 crop_screenshot(&image, x, y, width, height).map_err(Error::from_reason)?;
             let crop_ms = crop_start.elapsed().as_secs_f64() * 1000.0;
+            let mut png = Vec::new();
             let encode_start = std::time::Instant::now();
-            clipped
-                .save(&path)
-                .map_err(|e| Error::from_reason(format!("Failed to save screenshot: {}", e)))?;
+            image::codecs::png::PngEncoder::new(&mut png)
+                .write_image(
+                    clipped.as_raw(),
+                    clipped.width(),
+                    clipped.height(),
+                    image::ExtendedColorType::Rgba8,
+                )
+                .map_err(|e| Error::from_reason(format!("Failed to encode screenshot: {e}")))?;
+            let encode_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
+            let write_start = std::time::Instant::now();
+            std::fs::write(&path, png)
+                .map_err(|e| Error::from_reason(format!("Failed to save screenshot: {e}")))?;
             Ok(ScreenshotCaptureTimings {
                 capture_ms,
                 crop_ms,
-                encode_ms: encode_start.elapsed().as_secs_f64() * 1000.0,
+                encode_ms,
+                write_ms: write_start.elapsed().as_secs_f64() * 1000.0,
             })
         })
     }
@@ -2950,6 +3021,71 @@ impl TestGpuixRenderer {
             usize::try_from(u32::from(size_a.height)).unwrap(),
             tolerance,
         ))
+    }
+
+    /// Compare a reference PNG with raw screenshot pixels without encoding or decoding the actual.
+    #[napi]
+    pub fn compare_image_pixels(
+        &self,
+        reference_path: String,
+        actual_pixels: Buffer,
+        width: u32,
+        height: u32,
+        tolerance: u32,
+    ) -> Result<ScreenshotComparisonResult> {
+        let tolerance = u8::try_from(tolerance).map_err(|_| {
+            Error::from_reason(format!(
+                "Image comparison tolerance must be between 0 and 255, got {tolerance}"
+            ))
+        })?;
+        let reference = decode_png_for_comparison(&reference_path)?;
+        let reference_size = reference.size(0);
+        let width = usize::try_from(width).unwrap();
+        let height = usize::try_from(height).unwrap();
+        if usize::from(reference_size.width) != width
+            || usize::from(reference_size.height) != height
+        {
+            return Err(Error::from_reason(format!(
+                "Image dimensions differ: {reference_path} is {}x{}, screenshot is {width}x{height}",
+                u32::from(reference_size.width),
+                u32::from(reference_size.height),
+            )));
+        }
+        let expected_bytes = width * height * 4;
+        if actual_pixels.len() != expected_bytes {
+            return Err(Error::from_reason(format!(
+                "Screenshot pixel buffer has {} bytes; expected {expected_bytes}",
+                actual_pixels.len()
+            )));
+        }
+        let reference_pixels = reference.as_bytes(0).ok_or_else(|| {
+            Error::from_reason(format!("Decoded PNG has no frame: {reference_path}"))
+        })?;
+        // GPUI exposes decoded PNG channels in BGRA order; native captures are RGBA.
+        let actual_rgba = actual_pixels.as_ref();
+        let mut differing_pixels = 0usize;
+        let mut max_channel_delta = 0u8;
+        for index in 0..width * height {
+            let offset = index * 4;
+            let golden_pixel = &reference_pixels[offset..offset + 4];
+            let actual_pixel = &actual_rgba[offset..offset + 4];
+            let mut pixel_differs = false;
+            for (channel, actual_channel) in [2, 1, 0, 3].into_iter().enumerate() {
+                let delta = golden_pixel[channel].abs_diff(actual_pixel[actual_channel]);
+                max_channel_delta = max_channel_delta.max(delta);
+                pixel_differs |= delta > tolerance;
+            }
+            differing_pixels += usize::from(pixel_differs);
+        }
+        let pixel_count = width * height;
+        Ok(ScreenshotComparisonResult {
+            differing_pixel_ratio: if pixel_count == 0 {
+                0.0
+            } else {
+                differing_pixels as f64 / pixel_count as f64
+            },
+            max_channel_delta: u32::from(max_channel_delta),
+        })
     }
 
     /// Return and clear all collected events since the last drain.
