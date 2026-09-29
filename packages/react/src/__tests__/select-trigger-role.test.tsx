@@ -50,5 +50,14 @@ describeNative("SelectTrigger", () => {
     const listbox = screen.getByRole("listbox")
 
     expect(trigger).toHaveAttribute("aria-controls", listbox.authorId)
+
+    const tree = screen.renderer.getAccessibilityTree()
+    const triggerNode = Object.values(tree.nodes).find((node) => node.host_id === trigger.id)
+    const [listboxTreeId] = Object.entries(tree.nodes).find(
+      ([, node]) => node.host_id === listbox.id
+    ) ?? []
+
+    expect(triggerNode?.aria.expanded).toBe(true)
+    expect(triggerNode?.aria.controls).toEqual([listboxTreeId])
   })
 })

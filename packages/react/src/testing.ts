@@ -121,6 +121,7 @@ export interface AccessKitNodeSnapshot {
     /** AccessKit models atomicity as a flag, so `false` is reported as absent. */
     live_atomic?: true
     expanded?: boolean
+    controls?: string[]
     toggled?: "False" | "True" | "Mixed"
     orientation?: "Horizontal" | "Vertical"
     read_only?: true

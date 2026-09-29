@@ -1197,11 +1197,7 @@ export interface AccessibilityProps {
   ariaHidden?: Booleanish
   /** DOM-compatible alias for ariaHidden. */
   "aria-hidden"?: Booleanish
-  /**
-   * Space-separated `id`s of the elements this one controls, such as a tab's
-   * panel. Retained for `getAttribute` and attribute matchers; AccessKit has
-   * no field for the relationship, so it is not projected.
-   */
+  /** Space-separated `id`s of the elements this one controls. */
   ariaControls?: string
   /** DOM-compatible alias for ariaControls. */
   "aria-controls"?: string
@@ -1220,11 +1216,7 @@ export interface AccessibilityProps {
   ariaRoleDescription?: string
   /** DOM-compatible alias for ariaRoleDescription. */
   "aria-roledescription"?: string
-  /**
-   * Which changes inside a live region are announced. Retained for
-   * `getAttribute` and attribute matchers; AccessKit has no field for it, so
-   * it is not projected and every change is announced.
-   */
+  /** Which changes inside a live region are announced. Every change is announced. */
   ariaRelevant?: AriaRelevant
   /** DOM-compatible alias for ariaRelevant. */
   "aria-relevant"?: AriaRelevant
