@@ -8,13 +8,8 @@ import type { GpuixFocusEvent } from "../reconciler/synthetic-event.js"
 import { createTestRoot } from "../testing.js"
 import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
 
-type SharedStyle = {
-  [Property in keyof CSSProperties & keyof StyleDesc]?: Exclude<
-    CSSProperties[Property],
-    undefined
-  > &
-    Exclude<StyleDesc[Property], undefined>
-}
+type SharedStyle = CSSProperties &
+  Pick<StyleDesc, Extract<keyof CSSProperties, keyof StyleDesc>>
 
 type WidenedShared = SharedStyle & Pick<StyleDesc, NativeStateStyleKey>
 
@@ -54,6 +49,60 @@ describe("resolved test-renderer styles", () => {
       expectScreenshotsDiffer(idle, pressed)
       root.renderer.nativeSimulateMouseUp(x + 5, y + 5)
       expect(root.renderer.getResolvedStyle(title.id)?.backgroundColor).toBe("#334155")
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it("renders CSS module descendant focus states with native focus and modality", async () => {
+    const source = new URL("../../../plugins/src/css-modules.ts", import.meta.url).href
+    const { transformGpuixCssModule } = await import(source)
+    const styles = await transformGpuixCssModule(
+      `.card { width: 300px; height: 80px; padding: 20px; }
+       .title { width: 100px; height: 40px; }
+       .card:focus .title { width: 101px; }
+       .card:focus-visible .title { height: 41px; }
+       .card:focus-within .title { opacity: 0.9; }`,
+      "/fixture/card-focus.module.css",
+    )
+    for (const style of Object.values(styles)) {
+      Object.defineProperty(style, Symbol.for("gpuix.compiledStyle"), { value: true })
+    }
+
+    const root = createTestRoot()
+    try {
+      root.render(
+        <>
+          <div className={styles.card} data-testid="card" tabIndex={0}>
+            <span className={styles.title} data-testid="title" tabIndex={0} />
+          </div>
+          <div data-testid="outside" tabIndex={0} />
+        </>,
+      )
+      const card = root.renderer.findByTestId("card")!
+      const title = root.renderer.findByTestId("title")!
+      const outside = root.renderer.findByTestId("outside")!
+      const resolvedTitle = () => root.renderer.getResolvedStyle(title.id)
+
+      expect(resolvedTitle()).toMatchObject({ width: 100, height: 40 })
+
+      root.renderer.simulateKeystrokes("tab")
+      expect(root.renderer.getActiveElement()).toBe(card.id)
+      expect(resolvedTitle()).toMatchObject({ width: 101, height: 41, opacity: 0.9 })
+      root.renderer.simulateKeystrokes("tab")
+      expect(root.renderer.getActiveElement()).toBe(title.id)
+      expect(resolvedTitle()).toMatchObject({ width: 100, height: 40, opacity: 0.9 })
+
+      root.renderer.focusElement(outside.id)
+      expect(resolvedTitle()).toMatchObject({ width: 100, height: 40 })
+
+      const bounds = root.renderer.getElementBounds(card.id)!
+      root.renderer.nativeSimulateMouseDown(bounds.x + 5, bounds.y + 5)
+      expect(root.renderer.getActiveElement()).toBe(card.id)
+      expect(resolvedTitle()).toMatchObject({ width: 101, height: 40, opacity: 0.9 })
+      root.renderer.nativeSimulateMouseUp(bounds.x + 5, bounds.y + 5)
+      root.renderer.focusElement(outside.id)
+      expect(resolvedTitle()).toMatchObject({ width: 100, height: 40 })
     } finally {
       root.unmount()
     }

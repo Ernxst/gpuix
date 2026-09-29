@@ -523,7 +523,14 @@ export type NativeStateStyleKey =
 /** Base declarations accepted inside a native interaction-state style. */
 export type NativeStateStyle = Omit<
   StyleDesc,
-  NativeStateStyleKey | "transition" | "hoverGroup" | "hoverWithinGroup"
+  | NativeStateStyleKey
+  | "groupFocus"
+  | "groupFocusVisible"
+  | "groupFocusWithin"
+  | "transition"
+  | "hoverGroup"
+  | "hoverWithinGroup"
+  | "focusWithinGroup"
 >
 
 /**
@@ -732,6 +739,8 @@ export interface StyleDesc {
    *  `group-hover/name`. A name with no matching ancestor is a style
    *  diagnostic. */
   hoverWithinGroup?: string
+  /** Binds group focus styles to the named ancestor marked by `hoverGroup`. */
+  focusWithinGroup?: string
 
   // Native state styles — applied by GPUI without a JS round trip.
   // Nesting is one level deep: a state style cannot contain another state style.
@@ -751,6 +760,12 @@ export interface StyleDesc {
    *  for both pointer and keyboard focus. An element without `tabIndex`
    *  still becomes focusable for this purpose, but not a tab stop. */
   focusWithin?: NativeStateStyle
+  /** Applies while the matching named `hoverGroup` ancestor is focused. */
+  groupFocus?: NativeStateStyle
+  /** Applies while that ancestor has keyboard-visible focus. */
+  groupFocusVisible?: NativeStateStyle
+  /** Applies while that ancestor or any element in its subtree has focus. */
+  groupFocusWithin?: NativeStateStyle
   /** Applies while OS files are dragged over this element. Desktop-only:
    *  there is no web equivalent. */
   dragOver?: NativeStateStyle
@@ -768,13 +783,8 @@ export interface StyleDesc {
  * NativeStateStyleKey>`, or add the native state at the call site, to use
  * them alongside a `SharedStyle`.
  */
-export type SharedStyle = {
-  [Property in keyof CSSProperties & keyof StyleDesc]?: Exclude<
-    CSSProperties[Property],
-    undefined
-  > &
-    Exclude<StyleDesc[Property], undefined>
-}
+export type SharedStyle = CSSProperties &
+  Pick<StyleDesc, Extract<keyof CSSProperties, keyof StyleDesc>>
 
 // Element types supported by GPUIX
 export type ElementType =

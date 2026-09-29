@@ -3182,13 +3182,14 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_resolved_style(&self, id: f64) -> Result<Option<String>> {
         let id = to_element_id(id)?;
-        let (style, hover_groups) = {
+        let (style, hover_groups, focus_groups) = {
             let tree = self.tree.lock().unwrap();
             let Some(element) = tree.elements.get(&id) else {
                 return Ok(None);
             };
             let style = element.style.clone().unwrap_or_default();
             let hover_within_group_target = style.hover_within_group.clone();
+            let focus_within_group_target = style.focus_within_group.clone();
             (
                 style,
                 ancestor_hover_groups(&tree, id, hover_within_group_target.as_deref())
@@ -3203,6 +3204,7 @@ impl TestGpuixRenderer {
                         (group_id, accepts_pointer)
                     })
                     .collect::<Vec<_>>(),
+                ancestor_hover_groups(&tree, id, focus_within_group_target.as_deref()),
             )
         };
 
@@ -3222,6 +3224,7 @@ impl TestGpuixRenderer {
             hover_within_state,
             active_state,
             active_within_state,
+            (group_focus_state, group_focus_within_state),
             drag_over,
             transitioned_style,
             motion_style,
@@ -3240,6 +3243,28 @@ impl TestGpuixRenderer {
                     crate::renderer::is_focus_within(&tree, &view.focus_handles, id, window)
                 };
                 let keyboard = window.last_input_was_keyboard();
+                let group_focus = focus_groups
+                    .iter()
+                    .map(|group_id| {
+                        view.focus_handles
+                            .get(group_id)
+                            .is_some_and(|handle| handle.is_focused(window))
+                    })
+                    .collect::<Vec<_>>();
+                let group_focus_within = {
+                    let tree = view.tree.lock().unwrap();
+                    focus_groups
+                        .iter()
+                        .map(|group_id| {
+                            crate::renderer::is_focus_within(
+                                &tree,
+                                &view.focus_handles,
+                                *group_id,
+                                window,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                };
                 let hovered = view
                     .interactive_style_states
                     .get(&id)
@@ -3283,6 +3308,7 @@ impl TestGpuixRenderer {
                     hover_within,
                     active,
                     active_within,
+                    (group_focus, group_focus_within),
                     drag_over,
                     transitioned_style,
                     motion_style,
@@ -3322,6 +3348,11 @@ impl TestGpuixRenderer {
                         })
                 })
             });
+        let group_focus = group_focus_state.iter().any(|focused| *focused);
+        let group_focus_visible = group_focus && keyboard_input;
+        let group_focus_within = group_focus_within_state
+            .iter()
+            .any(|focused_within| *focused_within);
 
         let layered_style = motion_style.map(|motion_style| {
             let mut layered = transitioned_style
@@ -3343,6 +3374,18 @@ impl TestGpuixRenderer {
         }
         if focus && keyboard_input {
             refine_style_object(&mut resolved, effective_style.focus_visible.as_deref())?;
+        }
+        if group_focus {
+            refine_style_object(&mut resolved, effective_style.group_focus.as_deref())?;
+        }
+        if group_focus_visible {
+            refine_style_object(
+                &mut resolved,
+                effective_style.group_focus_visible.as_deref(),
+            )?;
+        }
+        if group_focus_within {
+            refine_style_object(&mut resolved, effective_style.group_focus_within.as_deref())?;
         }
         if hover_within {
             refine_style_object(&mut resolved, effective_style.hover_within.as_deref())?;

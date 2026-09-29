@@ -1003,6 +1003,8 @@ pub struct StyleDesc {
     /// Name shared by the marked ancestors `hoverWithin` and `activeWithin`
     /// follow. Unset matches every marked ancestor.
     pub hover_within_group: Option<String>,
+    /// Name shared by the marked ancestor that `groupFocus*` styles follow.
+    pub focus_within_group: Option<String>,
 
     /// Per-element GPUI paint identity for this element's `hoverGroup`.
     #[serde(skip)]
@@ -1013,6 +1015,9 @@ pub struct StyleDesc {
     /// The matching ancestor selected for GPUI's one active refinement.
     #[serde(skip)]
     pub(crate) resolved_active_within_group: Option<gpui::SharedString>,
+    /// The matching ancestor selected for GPUI's group focus refinements.
+    #[serde(skip)]
+    pub(crate) resolved_focus_within_group: Option<gpui::SharedString>,
 
     pub hover: Option<Box<StyleDesc>>,
     pub hover_within: Option<Box<StyleDesc>>,
@@ -1025,6 +1030,10 @@ pub struct StyleDesc {
     /// `hoverGroup`-style marker: the relationship comes from the focused
     /// element's ancestry, which the renderer already walks.
     pub focus_within: Option<Box<StyleDesc>>,
+    /// Group focus states are distinct from the element-local focus states.
+    pub group_focus: Option<Box<StyleDesc>>,
+    pub group_focus_visible: Option<Box<StyleDesc>>,
+    pub group_focus_within: Option<Box<StyleDesc>>,
     /// Applies while OS files are dragged over this element. Desktop-only:
     /// there is no web equivalent.
     pub drag_over: Option<Box<StyleDesc>>,
@@ -2619,6 +2628,20 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             }
             continue;
         }
+        if key == "focusWithinGroup" {
+            if prefix.is_empty() {
+                parsed.style.focus_within_group =
+                    decode::<String>(&property!("focusWithinGroup"), value, &mut parsed.problems);
+            } else {
+                reject(
+                    &mut parsed.problems,
+                    property!("focusWithinGroup"),
+                    value,
+                    "focusWithinGroup marks the base element and cannot be nested in a state style",
+                );
+            }
+            continue;
+        }
         if key == "display"
             && matches!(prefix, "hover" | "active" | "dragOver")
             && value.as_str() == Some("none")
@@ -3344,6 +3367,9 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
                 | "focus"
                 | "focusVisible"
                 | "focusWithin"
+                | "groupFocus"
+                | "groupFocusVisible"
+                | "groupFocusWithin"
                 | "dragOver"
         ) {
             let property = match key.as_str() {
@@ -3354,6 +3380,9 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
                 "focus" => property!("focus"),
                 "focusVisible" => property!("focusVisible"),
                 "focusWithin" => property!("focusWithin"),
+                "groupFocus" => property!("groupFocus"),
+                "groupFocusVisible" => property!("groupFocusVisible"),
+                "groupFocusWithin" => property!("groupFocusWithin"),
                 "dragOver" => property!("dragOver"),
                 _ => unreachable!(),
             };
@@ -3393,6 +3422,18 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
                     "focusWithin" => {
                         parsed.style.focus_within =
                             parse_nested_style("focusWithin", value, &mut parsed.problems)
+                    }
+                    "groupFocus" => {
+                        parsed.style.group_focus =
+                            parse_nested_style("groupFocus", value, &mut parsed.problems)
+                    }
+                    "groupFocusVisible" => {
+                        parsed.style.group_focus_visible =
+                            parse_nested_style("groupFocusVisible", value, &mut parsed.problems)
+                    }
+                    "groupFocusWithin" => {
+                        parsed.style.group_focus_within =
+                            parse_nested_style("groupFocusWithin", value, &mut parsed.problems)
                     }
                     "dragOver" => {
                         parsed.style.drag_over =

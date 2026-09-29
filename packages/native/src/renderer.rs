@@ -216,15 +216,16 @@ pub(crate) fn pending_custom_prop_diagnostic(
 // as a likely authoring mistake when their matching ancestor is absent.
 const CSS_MODULE_HOVER_GROUP_PREFIX: &str = "gpuix-css-module:hover-group:";
 
-/// Whether a `hoverWithinGroup` name on `element_id` matches any ancestor's
-/// `hoverGroup`. `None` when there is no `hoverWithinGroup` to check, or when
+/// Whether a group name on `element_id` matches any ancestor's `hoverGroup`.
+/// `None` when there is no group binding to check, or when
 /// a matching ancestor exists.
-pub(crate) fn pending_hover_within_group_diagnostic(
+pub(crate) fn pending_group_diagnostic(
     tree: &RetainedTree,
     element_id: u64,
+    target: Option<&str>,
+    property: &str,
 ) -> Option<PendingStyleDiagnostic> {
-    let style = tree.elements.get(&element_id)?.style.as_deref()?;
-    let target = style.hover_within_group.as_deref()?;
+    let target = target?;
     let mut current = tree
         .elements
         .get(&element_id)
@@ -249,12 +250,38 @@ pub(crate) fn pending_hover_within_group_diagnostic(
     Some(PendingStyleDiagnostic {
         element_id,
         problem: StyleProblem {
-            property: "hoverWithinGroup".to_string(),
+            property: property.to_string(),
             value: format!("{target:?}"),
             reason: format!("no ancestor hoverGroup named {target:?} was found"),
         },
         kind: DiagnosticKind::Property,
     })
+}
+
+pub(crate) fn pending_hover_within_group_diagnostic(
+    tree: &RetainedTree,
+    element_id: u64,
+) -> Option<PendingStyleDiagnostic> {
+    let style = tree.elements.get(&element_id)?.style.as_deref()?;
+    pending_group_diagnostic(
+        tree,
+        element_id,
+        style.hover_within_group.as_deref(),
+        "hoverWithinGroup",
+    )
+}
+
+pub(crate) fn pending_focus_within_group_diagnostic(
+    tree: &RetainedTree,
+    element_id: u64,
+) -> Option<PendingStyleDiagnostic> {
+    let style = tree.elements.get(&element_id)?.style.as_deref()?;
+    pending_group_diagnostic(
+        tree,
+        element_id,
+        style.focus_within_group.as_deref(),
+        "focusWithinGroup",
+    )
 }
 
 pub(crate) fn pending_accessibility_diagnostics(
@@ -9207,6 +9234,9 @@ struct InheritedHoverGroup {
     name: gpui::SharedString,
     /// Retained ID used for the exact hit-test state reported by GPUI.
     id: u64,
+    focused: bool,
+    focus_visible: bool,
+    focus_within: bool,
 }
 
 struct ResolvedHoverGroups<'a> {
@@ -9214,6 +9244,7 @@ struct ResolvedHoverGroups<'a> {
     active_within: bool,
     hover_paint_group: Option<&'a InheritedHoverGroup>,
     active_paint_group: Option<&'a InheritedHoverGroup>,
+    focus_paint_group: Option<&'a InheritedHoverGroup>,
 }
 
 /// Match every marked ancestor with the requested name. GPUI can paint only
@@ -9230,6 +9261,9 @@ fn resolve_hover_groups<'a>(
     let mut nearest = None;
     let mut hovered = None;
     let mut active = None;
+    let mut focused = None;
+    let mut focus_visible = None;
+    let mut focus_within = None;
     for group in groups {
         if target.is_some_and(|name| group.name.as_ref() != name) {
             continue;
@@ -9243,6 +9277,15 @@ fn resolve_hover_groups<'a>(
         if state.is_some_and(InteractiveStyleState::is_active) {
             active = Some(group);
         }
+        if group.focused {
+            focused = Some(group);
+        }
+        if group.focus_visible {
+            focus_visible = Some(group);
+        }
+        if group.focus_within {
+            focus_within = Some(group);
+        }
     }
     let hover_fallback = if target.is_some() { nearest } else { outermost };
     ResolvedHoverGroups {
@@ -9250,6 +9293,7 @@ fn resolve_hover_groups<'a>(
         active_within: active.is_some(),
         hover_paint_group: hovered.or(hover_fallback),
         active_paint_group: active.or(hovered).or(outermost),
+        focus_paint_group: focused.or(focus_visible).or(focus_within).or(hover_fallback),
     }
 }
 
@@ -9266,10 +9310,16 @@ mod nearest_hover_group_tests {
             InheritedHoverGroup {
                 name: "card".into(),
                 id: 1,
+                focused: false,
+                focus_visible: false,
+                focus_within: false,
             },
             InheritedHoverGroup {
                 name: "card".into(),
                 id: 2,
+                focused: false,
+                focus_visible: false,
+                focus_within: false,
             },
         ]
     }
@@ -9615,6 +9665,7 @@ impl Inherited {
         style: Option<&StyleDesc>,
         hover_group: Option<&str>,
         hover_group_id: u64,
+        group_focus_state: (bool, bool, bool),
         resolved_current_color: Option<gpui::Rgba>,
         font: InheritedFont,
     ) -> Self {
@@ -9651,6 +9702,9 @@ impl Inherited {
             self.hover_groups.push(InheritedHoverGroup {
                 name: gpui::SharedString::from(hover_group.to_owned()),
                 id: hover_group_id,
+                focused: group_focus_state.0,
+                focus_visible: group_focus_state.1,
+                focus_within: group_focus_state.2,
             });
         }
         if let Some(color) = resolved_current_color {
@@ -10999,6 +11053,12 @@ impl GpuixView {
                     .style
                     .as_deref()
                     .is_some_and(|style| style.focus_within.is_some())
+                // Group focus refinements need a tracked handle on the marked
+                // ancestor, including for :focus-within on a non-focusable div.
+                || element
+                    .style
+                    .as_deref()
+                    .is_some_and(|style| style.hover_group.is_some())
         };
         let mut pending_auto_focus = Vec::new();
         // Create handles for elements that need focus but don't have one yet.
@@ -11891,6 +11951,10 @@ fn build_element_with_parent_layout(
         .style
         .as_deref()
         .and_then(|style| style.hover_within_group.as_deref());
+    let focus_within_group_target = element
+        .style
+        .as_deref()
+        .and_then(|style| style.focus_within_group.as_deref());
     let hover_groups = resolve_hover_groups(
         &parent_inherited.hover_groups,
         hover_within_group_target,
@@ -11898,6 +11962,11 @@ fn build_element_with_parent_layout(
     );
     let (hover_within, active_within) = (hover_groups.hover_within, hover_groups.active_within);
     let focus_within = is_focus_within(ctx.tree, ctx.focus_handles, id, window);
+    let focus_groups = resolve_hover_groups(
+        &parent_inherited.hover_groups,
+        focus_within_group_target,
+        ctx.interactive_style_states,
+    );
     let effective_display = element.style.as_deref().and_then(|style| {
         effective_display(
             style,
@@ -12219,6 +12288,9 @@ fn build_element_with_parent_layout(
         style.resolved_active_within_group = hover_groups
             .active_paint_group
             .map(|group| paint_hover_group_name(group.id));
+        style.resolved_focus_within_group = focus_groups
+            .focus_paint_group
+            .map(|group| paint_hover_group_name(group.id));
     }
     let style = resolved_style.as_ref();
     let box_insets = style.map(|style| {
@@ -12236,7 +12308,14 @@ fn build_element_with_parent_layout(
     );
     ctx.inherited = parent_inherited
         .clone()
-        .descend(style, hover_group, id, current_color, font);
+        .descend(
+            style,
+            hover_group,
+            id,
+            (focused, focus_visible, focus_within),
+            current_color,
+            font,
+        );
     ctx.inherited.accessibility_hidden |= crate::accessibility::is_hidden(element);
     ctx.inherited.text_accessibility_owned_by_role |=
         crate::accessibility::role_supports_name_from_contents(ctx.tree, element);
@@ -16495,6 +16574,33 @@ where
             apply_styles(refinement, &active_within_style)
         });
     }
+    if let (Some(group), Some(group_focus_style)) = (
+        style.resolved_focus_within_group.clone(),
+        style.group_focus.as_deref(),
+    ) {
+        let group_focus_style = effective_state_style(style, group_focus_style);
+        el = el.group_focus(group, |refinement| {
+            apply_styles(refinement, &group_focus_style)
+        });
+    }
+    if let (Some(group), Some(group_focus_visible_style)) = (
+        style.resolved_focus_within_group.clone(),
+        style.group_focus_visible.as_deref(),
+    ) {
+        let group_focus_visible_style = effective_state_style(style, group_focus_visible_style);
+        el = el.group_focus_visible(group, |refinement| {
+            apply_styles(refinement, &group_focus_visible_style)
+        });
+    }
+    if let (Some(group), Some(group_focus_within_style)) = (
+        style.resolved_focus_within_group.clone(),
+        style.group_focus_within.as_deref(),
+    ) {
+        let group_focus_within_style = effective_state_style(style, group_focus_within_style);
+        el = el.group_focus_within(group, |refinement| {
+            apply_styles(refinement, &group_focus_within_style)
+        });
+    }
     el
 }
 
@@ -17984,6 +18090,7 @@ pub(crate) fn apply_batch_to_tree_with_diagnostics(
     if collect_diagnostics {
         for &id in &inline_style_candidates {
             diagnostics.extend(pending_hover_within_group_diagnostic(tree, id));
+            diagnostics.extend(pending_focus_within_group_diagnostic(tree, id));
         }
     }
     for id in inline_style_candidates {

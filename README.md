@@ -4737,6 +4737,11 @@ pressed, matching CSS `.group:active .descendant`. `dragOver` applies while OS
 files are dragged over the element; it is desktop-only, since there is no web
 equivalent.
 
+CSS modules also support `.group:focus .descendant`,
+`.group:focus-visible .descendant`, and `.group:focus-within .descendant`.
+These apply the descendant's style while the marked ancestor is focused,
+keyboard-modality focused, or contains focus, respectively.
+
 `hover` stays active while the pointer is over a descendant, including a link,
 a child that paints its own background, or an absolutely positioned child
 outside the ancestor's box, as CSS `:hover` does in a browser.
@@ -4888,8 +4893,9 @@ that. `focusWithin` needs no `tabIndex` of its own — it gets a focus handle
 without becoming a tab stop, so a descendant's focus is all that is required.
 
 Nesting is one level deep. A state style cannot contain `hover`, `hoverWithin`,
-`active`, `activeWithin`, `focus`, `focusVisible`, `focusWithin`, `dragOver`,
-`transition`, `hoverGroup`, or `hoverWithinGroup`; the last three are
+`active`, `activeWithin`, `focus`, `focusVisible`, `focusWithin`, `groupFocus`,
+`groupFocusVisible`, `groupFocusWithin`, `dragOver`, `transition`, `hoverGroup`,
+`hoverWithinGroup`, or `focusWithinGroup`; the last four are
 declarations on the base style only. `hover`, `active`, and `dragOver` also
 reject `display: "none"`, because hiding the element removes the hit-test box
 that triggers the state.

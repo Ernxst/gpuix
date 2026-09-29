@@ -812,6 +812,45 @@ test("compiles a pressed ancestor selector into the shared group and activeWithi
   })
 })
 
+test.each([
+  ["focus", "groupFocus"],
+  ["focus-visible", "groupFocusVisible"],
+  ["focus-within", "groupFocusWithin"],
+])("compiles an ancestor :%s selector into %s", async (pseudoClass, state) => {
+  const group = "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card"
+  await expect(
+    transformGpuixCssModule(
+      `.card:${pseudoClass} .title { color: #ffffff; }`,
+      "/fixture/card.module.css",
+    ),
+  ).resolves.toEqual({
+    card: { hoverGroup: group },
+    title: {
+      focusWithinGroup: group,
+      [state]: { color: "#ffffff" },
+    },
+  })
+})
+
+test("combines ancestor focus and pointer states for one descendant", async () => {
+  const group = "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card"
+  await expect(
+    transformGpuixCssModule(
+      `.card:hover .title { color: white; }
+       .card:focus .title { background-color: red; }`,
+      "/fixture/card.module.css",
+    ),
+  ).resolves.toEqual({
+    card: { hoverGroup: group },
+    title: {
+      hoverWithinGroup: group,
+      hoverWithin: { color: "white" },
+      focusWithinGroup: group,
+      groupFocus: { backgroundColor: "red" },
+    },
+  })
+})
+
 test("composes same-file classes in stylesheet order", async () => {
   await expect(
     transformGpuixCssModule(
@@ -1108,12 +1147,6 @@ test("rejects other selectors and at-rules", async () => {
       "/fixture/card.module.css",
     ),
   ).rejects.toThrow('selector ".card:hover .body .title" is not supported yet')
-  await expect(
-    transformGpuixCssModule(
-      ".card:focus .title { color: red; }",
-      "/fixture/card.module.css",
-    ),
-  ).rejects.toThrow('selector ".card:focus .title" is not supported yet')
   await expect(
     transformGpuixCssModule("@media (min-width: 1px) { .panel { color: red; } }", "/fixture/panel.module.css"),
   ).rejects.toThrow('at-rule "@media" is not supported yet')
