@@ -120,6 +120,7 @@ export interface AccessKitNodeSnapshot {
     live?: "Off" | "Polite" | "Assertive"
     /** AccessKit models atomicity as a flag, so `false` is reported as absent. */
     live_atomic?: true
+    modal?: true
     expanded?: boolean
     controls?: string[]
     toggled?: "False" | "True" | "Mixed"
@@ -208,6 +209,8 @@ interface NativeTestRendererApi extends Omit<NativeRenderer, "requestFrame"> {
   blur(): void
   focusNext(): void
   focusPrevious(): void
+  focusNextWithin(elementId: number): void
+  focusPreviousWithin(elementId: number): void
   resolveTabKeyDown(defaultPrevented: boolean): void
   resolveScrollKeyDown(defaultPrevented: boolean): void
   resolveEditorKeyDown(elementId: number, defaultPrevented: boolean): void
@@ -1896,6 +1899,20 @@ export class TestRenderer implements NativeRenderer {
     this.dispatchNativeEvents()
   }
 
+  focusNextWithin(elementId: number): void {
+    this.native.flush()
+    this.native.focusNextWithin(elementId)
+    this.native.flush()
+    this.dispatchNativeEvents()
+  }
+
+  focusPreviousWithin(elementId: number): void {
+    this.native.flush()
+    this.native.focusPreviousWithin(elementId)
+    this.native.flush()
+    this.dispatchNativeEvents()
+  }
+
   resolveTabKeyDown(defaultPrevented: boolean): void {
     this.native.resolveTabKeyDown(defaultPrevented)
     // Production reports the resulting focus transition on a later frame.
@@ -3337,6 +3354,7 @@ export interface TestRootOptions extends TestRendererOptions {
   strictStyles?: boolean
   /** Window-level text selection. Fires when the selected ranges change. */
   onSelectionChange?: (event: EventPayload, renderer: NativeRenderer) => void
+  tabNavigation?: boolean
 }
 
 /**
@@ -3362,6 +3380,7 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
   const root = createRoot(renderer, {
     strictStyles: options.strictStyles,
     onSelectionChange: options.onSelectionChange,
+    tabNavigation: options.tabNavigation,
   })
   const queries = getQueries(renderer, () => renderer.getRoot(), true)
   let unmounted = false

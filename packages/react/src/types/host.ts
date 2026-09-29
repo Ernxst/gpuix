@@ -1132,6 +1132,10 @@ interface AccessibilityPropsBase {
   ariaAtomic?: Booleanish
   /** DOM-compatible alias for ariaAtomic. */
   "aria-atomic"?: Booleanish
+  /** Whether a dialog makes the rest of the window inert to assistive technology. */
+  ariaModal?: Booleanish
+  /** DOM-compatible alias for ariaModal. */
+  "aria-modal"?: Booleanish
   /** Selected state for `option` and `tab` nodes. */
   ariaSelected?: Booleanish
   /** DOM-compatible alias for ariaSelected. */
@@ -1627,6 +1631,8 @@ export interface AnchoredProps extends Props {
   deferred?: boolean
   priority?: number
   occlude?: boolean
+  /** Cover the viewport and follow resizes in the native renderer. */
+  fill?: "window"
 }
 
 /** Canvas bitmap coordinates. Layout can independently resize the element. */
@@ -1737,6 +1743,10 @@ export interface NativeRenderer {
   focusNext?(): void
   /** Move focus to the previous GPUI tab stop without changing Tab's default policy. */
   focusPrevious?(): void
+  /** Move focus to the next painted tab stop below an element, wrapping within it. */
+  focusNextWithin?(elementId: number): void
+  /** Move focus to the previous painted tab stop below an element, wrapping within it. */
+  focusPreviousWithin?(elementId: number): void
   /** @internal Complete Tab's default focus traversal after synthetic dispatch. */
   resolveTabKeyDown?(defaultPrevented: boolean): void
   /** @internal Complete a scroll key's default after synthetic dispatch. */
@@ -1987,6 +1997,8 @@ export interface Container {
   /** The last hover target path reported by native hit testing. */
   hoverPath: Instance[]
   preventedKeyboardActivations: Map<number, string>
+  /** Whether unprevented Tab and Shift+Tab use the native focus order. */
+  tabNavigation?: boolean
   strictStyles: boolean
   /** The id last passed to `setRoot`. `announce()` attaches its regions beneath it. */
   rootElementId: number | null

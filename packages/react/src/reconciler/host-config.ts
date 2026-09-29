@@ -1193,6 +1193,7 @@ const UNIVERSAL_PROPS = new Set([
   "ariaCurrent",
   "ariaLive",
   "ariaAtomic",
+  "ariaModal",
   "ariaSelected",
   "ariaValueText",
   "ariaValueMin",

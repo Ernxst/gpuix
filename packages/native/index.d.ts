@@ -205,6 +205,10 @@ export declare class GpuixRenderer {
   focusNext(): void
   /** Move focus to the previous GPUIX tab stop without dispatching a key event. */
   focusPrevious(): void
+  /** Move focus among the painted tab stops below an element, wrapping at its edges. */
+  focusNextWithin(elementId: number): void
+  /** Move focus among the painted tab stops below an element in reverse order. */
+  focusPreviousWithin(elementId: number): void
   /**
    * Complete the DOM default for a Tab keydown after React capture and
    * bubble handlers have had a chance to call preventDefault().
@@ -610,6 +614,8 @@ export declare class TestGpuixRenderer {
   blur(): void
   focusNext(): void
   focusPrevious(): void
+  focusNextWithin(elementId: number): void
+  focusPreviousWithin(elementId: number): void
   resolveTabKeyDown(defaultPrevented: boolean): void
   resolveScrollKeyDown(defaultPrevented: boolean): void
   /**

@@ -22,6 +22,7 @@ const aliases = [
     aria-current="page"
     aria-live="polite"
     aria-atomic
+    aria-modal="true"
     aria-selected
     aria-valuetext="Medium"
     aria-valuemin={1}
@@ -72,6 +73,7 @@ const aliasProps: Props = {
   "aria-current": "page",
   "aria-live": "polite",
   "aria-atomic": true,
+  ariaModal: false,
   "aria-selected": true,
   "aria-valuetext": "Medium",
   "aria-valuemin": 1,
@@ -175,6 +177,8 @@ const invalidOrientation: Props = { ariaOrientation: "diagonal" }
 const invalidInvalid: Props = { ariaInvalid: "format" }
 // @ts-expect-error ariaLive accepts only the ARIA live-region politeness tokens.
 const invalidLive: Props = { ariaLive: "rude" }
+// @ts-expect-error ariaModal accepts only Booleanish values.
+const invalidModal: Props = { ariaModal: "sometimes" }
 // @ts-expect-error disabled is an HTML boolean attribute, not an ARIA Booleanish attribute.
 const invalidDisabled: Props = { disabled: "false" }
 const popupTokens: Props[] = [

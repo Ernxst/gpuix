@@ -46,6 +46,11 @@
       "import": "./dist/components/select.js",
       "default": "./dist/components/select.js"
     },
+    "./dialog": {
+      "types": "./dist/components/dialog.d.ts",
+      "import": "./dist/components/dialog.js",
+      "default": "./dist/components/dialog.js"
+    },
     "./combobox": {
       "types": "./dist/components/combobox.d.ts",
       "import": "./dist/components/combobox.js",

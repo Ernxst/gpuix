@@ -2139,6 +2139,38 @@ impl TestGpuixRenderer {
     }
 
     #[napi]
+    pub fn focus_next_within(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.move_focus_within(id, FocusDirection::Next, window, cx);
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            self.drain_async_tasks_if_eager(cx);
+            Ok(())
+        })
+    }
+
+    #[napi]
+    pub fn focus_previous_within(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.move_focus_within(id, FocusDirection::Previous, window, cx);
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            self.drain_async_tasks_if_eager(cx);
+            Ok(())
+        })
+    }
+
+    #[napi]
     pub fn resolve_tab_key_down(&self, default_prevented: bool) -> Result<()> {
         with_test_state(self.state_id, |cx, window, view| {
             let view = view.clone();

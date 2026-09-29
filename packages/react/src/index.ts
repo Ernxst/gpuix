@@ -232,6 +232,8 @@ export type {
   ComboboxTriggerProps,
   ComboboxValueProps,
 } from "./components/combobox.js"
+export { Button, buttonProps } from "./components/button.js"
+export type { ButtonBehavior, ButtonState, HeadlessButtonProps } from "./components/button.js"
 export { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./components/tooltip.js"
 export type {
   TooltipPopupProps,
@@ -239,6 +241,27 @@ export type {
   TooltipProviderProps,
   TooltipTriggerProps,
 } from "./components/tooltip.js"
+export {
+  Dialog,
+  DialogRoot,
+  DialogTrigger,
+  DialogPortal,
+  DialogBackdrop,
+  DialogPopup,
+  DialogTitle,
+  DialogDescription,
+  DialogClose,
+  AlertDialog,
+  AlertDialogRoot,
+  AlertDialogTrigger,
+  AlertDialogPortal,
+  AlertDialogBackdrop,
+  AlertDialogPopup,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogClose,
+} from "./components/dialog.js"
+export type { DialogProps, DialogTriggerProps, DialogPortalProps, DialogBackdropProps, DialogPopupProps, DialogCloseProps, FocusTarget } from "./components/dialog.js"
 export { AnimatePresence, motion, useIsPresent, usePresence } from "./components/index.js"
 export type { AnimatePresenceProps } from "./components/index.js"
 export type {

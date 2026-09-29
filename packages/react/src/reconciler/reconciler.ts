@@ -133,6 +133,8 @@ export interface RootOptions {
   onUncaughtError?: (failure: RootFailure) => void
   /** Window-level text selection. Fires when the selected ranges change. */
   onSelectionChange?: (event: import("@gpuix/native").EventPayload, renderer: NativeRenderer) => void
+  /** Tab and Shift+Tab move through focusable elements by default. */
+  tabNavigation?: boolean
 }
 
 function describeThrownValue(error: unknown): string {
@@ -200,6 +202,7 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
     preventedDragOvers: new Map(),
     hoverPath: [],
     preventedKeyboardActivations: new Map(),
+    tabNavigation: options.tabNavigation ?? true,
     strictStyles,
     rootElementId: null,
     rootElementType: null,

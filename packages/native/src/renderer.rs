@@ -1768,6 +1768,8 @@ enum UiCommand {
     },
     FocusNext,
     FocusPrevious,
+    FocusNextWithin(u64),
+    FocusPreviousWithin(u64),
     ResolveTabKeyDown {
         default_prevented: bool,
     },
@@ -2175,6 +2177,12 @@ async fn run_ui_commands(
             }),
             UiCommand::FocusPrevious => window.update(cx, |view, window, cx| {
                 view.move_focus(FocusDirection::Previous, window, cx)
+            }),
+            UiCommand::FocusNextWithin(id) => window.update(cx, move |view, window, cx| {
+                view.move_focus_within(id, FocusDirection::Next, window, cx)
+            }),
+            UiCommand::FocusPreviousWithin(id) => window.update(cx, move |view, window, cx| {
+                view.move_focus_within(id, FocusDirection::Previous, window, cx)
             }),
             UiCommand::ResolveTabKeyDown { default_prevented } => {
                 window.update(cx, move |view, window, cx| {
@@ -5089,6 +5097,38 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Move focus among the painted tab stops below an element, wrapping at its edges.
+    #[napi]
+    pub fn focus_next_within(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, cx| {
+            view.move_focus_within(id, FocusDirection::Next, window, cx)
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::FocusNextWithin(id));
+
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux", target_os = "freebsd")))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Move focus among the painted tab stops below an element in reverse order.
+    #[napi]
+    pub fn focus_previous_within(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, cx| {
+            view.move_focus_within(id, FocusDirection::Previous, window, cx)
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::FocusPreviousWithin(id));
+
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux", target_os = "freebsd")))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     /// Complete the DOM default for a Tab keydown after React capture and
     /// bubble handlers have had a chance to call preventDefault().
     #[napi]
@@ -7154,9 +7194,25 @@ impl WebGpuixRenderer {
         update_web_view(|view, window, cx| view.move_focus(FocusDirection::Next, window, cx))
     }
 
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = focusNextWithin)]
+    pub fn focus_next_within(&self, element_id: f64) -> Result<(), wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        update_web_view(move |view, window, cx| {
+            view.move_focus_within(id, FocusDirection::Next, window, cx)
+        })
+    }
+
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = focusPrevious)]
     pub fn focus_previous(&self) -> Result<(), wasm_bindgen::JsValue> {
         update_web_view(|view, window, cx| view.move_focus(FocusDirection::Previous, window, cx))
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = focusPreviousWithin)]
+    pub fn focus_previous_within(&self, element_id: f64) -> Result<(), wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        update_web_view(move |view, window, cx| {
+            view.move_focus_within(id, FocusDirection::Previous, window, cx)
+        })
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = resolveTabKeyDown)]
@@ -10628,15 +10684,52 @@ impl GpuixView {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        if self.focus_unrendered_virtual_target(direction, window, cx) {
+        if self.focus_unrendered_virtual_target(direction, None, window, cx) {
             return;
         }
-        self.leave_radio_group(direction, window, cx);
+        self.leave_radio_group(direction, None, window, cx);
         match direction {
             FocusDirection::Next => window.focus_next(cx),
             FocusDirection::Previous => window.focus_prev(cx),
         }
-        self.enter_radio_group_backwards(direction, window, cx);
+        self.enter_radio_group_backwards(direction, None, window, cx);
+        self.scroll_current_focus_into_view(window, cx);
+    }
+
+    pub(crate) fn move_focus_within(
+        &mut self,
+        element_id: u64,
+        direction: FocusDirection,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if self.focus_unrendered_virtual_target(direction, Some(element_id), window, cx) {
+            return;
+        }
+
+        self.leave_radio_group(direction, Some(element_id), window, cx);
+        let mut focus_ids = std::collections::HashSet::new();
+        {
+            let tree = self.tree.lock().unwrap();
+            let mut pending = vec![element_id];
+            while let Some(id) = pending.pop() {
+                if let Some(element) = tree.elements.get(&id) {
+                    pending.extend(element.children.iter().copied());
+                    if let Some(handle) = self.focus_handles.get(&id) {
+                        focus_ids.insert(handle.id());
+                    }
+                }
+            }
+        }
+
+        if focus_ids.is_empty() {
+            return;
+        }
+        match direction {
+            FocusDirection::Next => window.focus_next_among(|id| focus_ids.contains(id), cx),
+            FocusDirection::Previous => window.focus_prev_among(|id| focus_ids.contains(id), cx),
+        }
+        self.enter_radio_group_backwards(direction, Some(element_id), window, cx);
         self.scroll_current_focus_into_view(window, cx);
     }
 
@@ -10645,11 +10738,13 @@ impl GpuixView {
     fn reachable_radio_groups(
         &self,
         window: &gpui::Window,
+        within: Option<u64>,
     ) -> crate::custom_elements::choice_input::RadioGroups {
         let tree_arc = self.tree.clone();
         let tree = tree_arc.lock().unwrap();
         crate::custom_elements::choice_input::RadioGroups::collect(&tree, |id| {
-            self.display_none_in_ancestry(&tree, id, window)
+            within.is_some_and(|root| !is_descendant_or_self(&tree, root, id))
+                || self.display_none_in_ancestry(&tree, id, window)
                 || accessibility_hidden_in_ancestry(&tree, id)
         })
     }
@@ -10666,13 +10761,14 @@ impl GpuixView {
     fn leave_radio_group(
         &mut self,
         direction: FocusDirection,
+        within: Option<u64>,
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
         let Some(focused) = self.focused_element_id(window) else {
             return;
         };
-        let groups = self.reachable_radio_groups(window);
+        let groups = self.reachable_radio_groups(window, within);
         let Some(members) = groups.members(focused) else {
             return;
         };
@@ -10691,6 +10787,7 @@ impl GpuixView {
     fn enter_radio_group_backwards(
         &mut self,
         direction: FocusDirection,
+        within: Option<u64>,
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
@@ -10700,7 +10797,7 @@ impl GpuixView {
         let Some(focused) = self.focused_element_id(window) else {
             return;
         };
-        let groups = self.reachable_radio_groups(window);
+        let groups = self.reachable_radio_groups(window, within);
         let Some(members) = groups.members(focused) else {
             return;
         };
@@ -10733,6 +10830,7 @@ impl GpuixView {
     fn focus_unrendered_virtual_target(
         &mut self,
         direction: FocusDirection,
+        within: Option<u64>,
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
@@ -10750,7 +10848,7 @@ impl GpuixView {
             return false;
         };
 
-        let Some(root_id) = tree.root_id else {
+        let Some(root_id) = within.or(tree.root_id) else {
             return false;
         };
         let mut stack = vec![root_id];
@@ -14630,6 +14728,19 @@ fn direct_child_index(tree: &RetainedTree, ancestor_id: u64, element_id: u64) ->
                 .iter()
                 .position(|child| *child == current);
         }
+        current = parent_id;
+    }
+}
+
+fn is_descendant_or_self(tree: &RetainedTree, ancestor_id: u64, element_id: u64) -> bool {
+    let mut current = element_id;
+    loop {
+        if current == ancestor_id {
+            return true;
+        }
+        let Some(parent_id) = tree.elements.get(&current).and_then(|element| element.parent) else {
+            return false;
+        };
         current = parent_id;
     }
 }
