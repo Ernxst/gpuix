@@ -6263,8 +6263,11 @@ impl GpuixRenderer {
             crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
 
         #[cfg(target_os = "macos")]
-        update_window(|view, _window, _cx| {
+        update_window(|view, _window, cx| {
             view.last_pointer_position = Some((x, y));
+            if view.reconcile_hover_state_at_pointer(x, y) {
+                cx.notify();
+            }
         })?;
 
         #[cfg(target_os = "macos")]
@@ -7890,6 +7893,8 @@ pub(crate) struct GpuixView {
     /// Test-only resolved-style reads use this instead of reconstructing hover
     /// from automation bounds, which cannot account for occlusion or capture.
     pub(crate) interactive_style_states: HashMap<u64, InteractiveStyleState>,
+    /// Currently hovered ancestors whose state can affect descendant styles.
+    hover_reconciliation_candidates: HashSet<u64>,
     /// The deepest retained host hitbox selected during the current external
     /// drag move. Capture callbacks fill this in; the normal bubble callback
     /// consumes it after GPUI has visited the whole ancestry.
@@ -8224,6 +8229,7 @@ impl GpuixView {
             interaction_revision: 0,
             last_focus_state: None,
             interactive_style_states: HashMap::new(),
+            hover_reconciliation_candidates: HashSet::new(),
             external_drag_move_target: None,
             external_drag_move_paths: None,
             external_drag_move_position: None,
@@ -8428,11 +8434,7 @@ impl GpuixView {
         });
     }
 
-    fn pointer_is_over_visible_hover_group(
-        &self,
-        id: u64,
-        window: &gpui::Window,
-    ) -> bool {
+    fn pointer_is_over_visible_hover_group(&self, id: u64, window: &gpui::Window) -> bool {
         let Some(bounds) = crate::automation::get_bounds(id) else {
             return false;
         };
@@ -8445,6 +8447,103 @@ impl GpuixView {
             && x <= bounds.x + bounds.width
             && y >= bounds.y
             && y <= bounds.y + bounds.height
+    }
+
+    /// GPUI can leave a retained hitbox hovered when a rerender changes its
+    /// hitbox tree before the next hover callback. A pointer move outside the
+    /// last painted bounds is enough evidence to clear that stale state.
+    fn reconcile_hover_state_at_pointer(&mut self, x: f64, y: f64) -> bool {
+        // A captured pointer intentionally keeps ancestor hover styles alive
+        // until release, even when it moves beyond the ancestor's bounds.
+        if self.pointer_router.borrow().is_pressed() {
+            return false;
+        }
+        if self.hover_reconciliation_candidates.is_empty() {
+            return false;
+        }
+        let outside = |id: u64| {
+            crate::automation::get_bounds(id).is_none_or(|bounds| {
+                bounds.width <= 0.0
+                    || bounds.height <= 0.0
+                    || x < bounds.x
+                    || x > bounds.x + bounds.width
+                    || y < bounds.y
+                    || y > bounds.y + bounds.height
+            })
+        };
+        let stale_candidates = self
+            .hover_reconciliation_candidates
+            .iter()
+            .copied()
+            .filter(|id| outside(*id))
+            .collect::<Vec<_>>();
+        if stale_candidates.is_empty() {
+            return false;
+        }
+
+        // A hovered ancestor remains hovered while the pointer is over one of
+        // its attached descendants, even when that descendant extends beyond
+        // the ancestor's own painted bounds.
+        let tree = self.tree.lock().unwrap();
+        let stale_groups = stale_candidates
+            .into_iter()
+            .filter(|id| !pointer_is_over_attached_descendant(&tree, *id, x, y))
+            .collect::<Vec<_>>();
+        let stale_targets = self
+            .hovered_targets
+            .iter()
+            .copied()
+            .filter(|target| {
+                stale_groups.iter().any(|group| {
+                    is_hover_target_descendant(&tree, *target, *group)
+                })
+            })
+            .collect::<Vec<_>>();
+        drop(tree);
+        if stale_groups.is_empty() {
+            return false;
+        }
+
+        let mut changed = false;
+        for id in stale_groups {
+            changed |= self
+                .interactive_style_states
+                .get_mut(&id)
+                .is_some_and(|state| state.set_hovered(false));
+            self.hover_reconciliation_candidates.remove(&id);
+        }
+        let mut removed_target = false;
+        for id in stale_targets {
+            removed_target |= self.hovered_targets.remove(&id);
+        }
+        if changed {
+            self.interaction_revision = self.interaction_revision.saturating_add(1);
+        }
+        if removed_target {
+            self.dispatch_hover_target_change(true);
+        }
+        changed
+    }
+
+    fn set_interactive_hovered(
+        &mut self,
+        id: u64,
+        hovered: bool,
+        tracks_ancestor_hover: bool,
+    ) -> bool {
+        let changed = self
+            .interactive_style_states
+            .entry(id)
+            .or_default()
+            .set_hovered(hovered);
+        if tracks_ancestor_hover && changed {
+            if hovered {
+                self.hover_reconciliation_candidates.insert(id);
+            } else {
+                self.hover_reconciliation_candidates.remove(&id);
+            }
+        }
+        changed
     }
 
     /// Publish the target implied by a GPUI mouse-move callback before the
@@ -11633,6 +11732,18 @@ impl gpui::Render for GpuixView {
         }
         self.hovered_targets
             .retain(|id| tree.elements.contains_key(id));
+        self.hover_reconciliation_candidates.retain(|id| {
+            tree.elements.get(id).is_some_and(|element| {
+                element
+                    .style
+                    .as_deref()
+                    .is_some_and(|style| style.hover_group.is_some())
+                    && self
+                        .interactive_style_states
+                        .get(id)
+                        .is_some_and(|state| state.hovered)
+            })
+        });
         self.transition_states.retain(|id, _| tree.is_attached(*id));
 
         // Build the element tree. custom_registry, focus_handles, and scroll_handles
@@ -11719,7 +11830,11 @@ impl gpui::Render for GpuixView {
                 .text_color(gpui::rgba(0xe2e2e2ff))
                 .track_focus(&self.root_focus_handle)
                 .on_mouse_move(cx.listener(|view, event: &gpui::MouseMoveEvent, _window, _cx| {
-                    view.last_pointer_position = Some(point_to_xy(event.position));
+                    let (x, y) = point_to_xy(event.position);
+                    view.last_pointer_position = Some((x, y));
+                    if view.reconcile_hover_state_at_pointer(x, y) {
+                        _cx.notify();
+                    }
                 }))
                 .on_action(cx.listener(Self::focus_next_action))
                 .on_action(cx.listener(Self::focus_previous_action))
@@ -14277,12 +14392,7 @@ fn build_virtual_list(
             .child(surface)
             .hover_listener_mode(gpui::HoverListenerMode::InputModalityIndependent)
             .on_hover(cx.listener(move |view, is_hovered: &bool, _window, cx| {
-                if view
-                    .interactive_style_states
-                    .entry(id)
-                    .or_default()
-                    .set_hovered(*is_hovered)
-                {
+                if view.set_interactive_hovered(id, *is_hovered, true) {
                     cx.notify();
                 }
             }))
@@ -15627,6 +15737,36 @@ fn is_hover_target_descendant(tree: &RetainedTree, descendant: u64, ancestor: u6
     false
 }
 
+fn pointer_is_over_attached_descendant(tree: &RetainedTree, ancestor: u64, x: f64, y: f64) -> bool {
+    let Some(element) = tree.elements.get(&ancestor) else {
+        return false;
+    };
+    if !tree.is_attached(ancestor) {
+        return false;
+    }
+
+    let mut pending = element.children.clone();
+    while let Some(id) = pending.pop() {
+        let Some(element) = tree.elements.get(&id) else {
+            continue;
+        };
+        if tree.is_attached(id)
+            && crate::automation::get_bounds(id).is_some_and(|bounds| {
+                bounds.width > 0.0
+                    && bounds.height > 0.0
+                    && x >= bounds.x
+                    && x <= bounds.x + bounds.width
+                    && y >= bounds.y
+                    && y <= bounds.y + bounds.height
+            })
+        {
+            return true;
+        }
+        pending.extend(element.children.iter().copied());
+    }
+    false
+}
+
 fn nearest_hovered_ancestor(
     tree: &RetainedTree,
     hovered_targets: &HashSet<u64>,
@@ -16099,20 +16239,16 @@ pub(crate) fn build_host_container(
                         .get_mut(&id)
                         .is_some_and(|state| state.set_hovered(is_hovered));
                 let interactive_changed = (tracks_hover || tracks_hover_group)
-                    && view
-                        .interactive_style_states
-                        .entry(id)
-                        .or_default()
-                        .set_hovered(is_hovered);
+                    && view.set_interactive_hovered(id, is_hovered, tracks_hover_group);
                 if interactive_changed {
                     view.interaction_revision = view.interaction_revision.saturating_add(1);
                 }
                 if transition_changed || interactive_changed {
                     cx.notify();
                 }
-            if tracks_mouse_hover {
-                view.update_hover_target(id, is_hovered, window, cx);
-            }
+                if tracks_mouse_hover {
+                    view.update_hover_target(id, is_hovered, window, cx);
+                }
             }));
     }
 
