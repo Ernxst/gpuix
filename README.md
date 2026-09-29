@@ -3516,9 +3516,17 @@ const models = [
 </Select>
 ```
 
-The trigger participates in normal tab navigation. Opening the Select focuses
-its content. `Up`, `Down`, `Ctrl+P`, `Ctrl+N`, `Enter`, and `Escape` control the
-menu. Closing it restores focus to the trigger. Disabled items are skipped.
+`Select` Root renders no wrapper element, and its Popup is positioned against
+the Trigger. The trigger participates in normal tab navigation and exposes a
+`combobox` role controlling the List's `listbox`. Opening the Select focuses
+its content. Typing highlights a matching item; `Up`, `Down`, `Ctrl+P`,
+`Ctrl+N`, `Enter`, and `Escape` control the menu. Closing it restores focus to
+the trigger. Disabled items are skipped. The highlighted item scrolls into
+view, and scroll arrows appear only while the list can scroll further in that
+direction. Home/End and PageUp/PageDown are not handled.
+
+Select parts accept `className` and `style` functions with state matching the
+corresponding Base UI part. `Root` renders no element and takes neither prop.
 
 Set `multiple` on `Select` to keep the popup open while items are toggled. The
 controlled and uncontrolled values are string arrays, and `onValueChange`
