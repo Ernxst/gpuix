@@ -70,6 +70,16 @@ describeNative("SelectPopup background", () => {
     })
   })
 
+  it("honours an explicitly transparent background instead of the fallback", () => {
+    screen.render(<Fruit popup={{ style: { width: 180, backgroundColor: "#00000000" } }} />)
+    screen.renderer.nativeSimulateClick(30, 25)
+    screen.renderer.drawPendingFrame()
+
+    expect(screen.renderer.getResolvedStyle(screen.getByTestId("popup").id)).toMatchObject({
+      backgroundColor: "#00000000",
+    })
+  })
+
   it("lets a background shorthand from style replace the fallback", () => {
     screen.render(<Fruit popup={{ style: { width: 180, background: "#123456" } }} />)
     screen.renderer.nativeSimulateClick(30, 25)
