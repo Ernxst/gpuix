@@ -2402,7 +2402,7 @@ impl CustomElement for ImgElement {
         .id(element_id.clone());
 
         if let Some(style) = ctx.style {
-            el = crate::renderer::apply_interactive_styles(el, style);
+            el = crate::renderer::apply_interactive_styles(el, style, ctx.focus_within);
             // GPUI fills `aspect_ratio` from the bitmap once it loads. That
             // overrides a definite height and jumps the box. A CSS `<img>` with
             // both width and height keeps that box; `objectFit` paints inside it.
@@ -2598,7 +2598,7 @@ impl CustomElement for SvgElement {
             .text_color(ctx.current_color)
             .id(element_id.clone());
         if let Some(style) = ctx.style {
-            icon = crate::renderer::apply_interactive_styles(icon, style);
+            icon = crate::renderer::apply_interactive_styles(icon, style, ctx.focus_within);
         }
         let icon = super::wire_standard_events(icon, &ctx, cx);
         let icon = super::apply_accessibility(icon, &ctx);
