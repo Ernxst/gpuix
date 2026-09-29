@@ -8,6 +8,7 @@ import { performance } from "node:perf_hooks"
 import React from "react"
 
 import { createTestRoot, isNativeTestRendererAvailable } from "../packages/react/src/testing.js"
+import { readPngSize } from "../packages/react/src/testing-png.js"
 import {
   toMatchScreenshot,
   type ScreenshotMatcherContext,
@@ -15,6 +16,7 @@ import {
 
 const CALLS = 20
 const TRANSITION_MS = 160
+const baseline = process.argv.includes("--baseline")
 
 if (process.platform !== "darwin" || !isNativeTestRendererAvailable()) {
   throw new Error("This benchmark requires the macOS native test renderer")
@@ -60,13 +62,15 @@ const phases = {
   nativeWriteMs: 0,
   compareMs: 0,
 }
-type Measurement = typeof phases & { totalMs: number; fileIoMs: number }
+type Measurement = typeof phases & { totalMs: number; fileIoMs: number; unaccountedMs: number }
 const original = {
   flush: renderer.flush.bind(renderer),
   active: renderer.getActiveAnimationCount.bind(renderer),
   advance: renderer.advanceAsyncClock.bind(renderer),
   capture: renderer.captureScreenshotClipRaw.bind(renderer),
   compare: renderer.compareImagePixels.bind(renderer),
+  capturePng: renderer.captureScreenshotClip.bind(renderer),
+  comparePngs: renderer.compareImages.bind(renderer),
 }
 
 renderer.flush = (() => {
@@ -100,6 +104,14 @@ renderer.captureScreenshotClipRaw = ((...args: Parameters<typeof renderer.captur
   phases.cropMs += timing.cropMs
   return timing
 }) as typeof renderer.captureScreenshotClipRaw
+renderer.captureScreenshotClip = ((...args: Parameters<typeof renderer.captureScreenshotClip>) => {
+  const timing = original.capturePng(...args)
+  phases.captureMs += timing.captureMs
+  phases.cropMs += timing.cropMs
+  phases.encodeMs += timing.encodeMs
+  phases.nativeWriteMs += timing.writeMs
+  return timing
+}) as typeof renderer.captureScreenshotClip
 renderer.compareImagePixels = ((...args: Parameters<typeof renderer.compareImagePixels>) => {
   const start = performance.now()
   try {
@@ -126,6 +138,22 @@ function median(values: number[]): number {
   return (sorted[sorted.length / 2 - 1]! + sorted[sorted.length / 2]!) / 2
 }
 
+function settleAnimations(): void {
+  const wasPaused = renderer.isClockPaused()
+  renderer.clockPause()
+  let elapsed = 0
+  try {
+    while (true) {
+      renderer.flush()
+      if (renderer.getActiveAnimationCount() === 0 || elapsed >= 10_000) break
+      renderer.advanceAsyncClock(16)
+      elapsed += 16
+    }
+  } finally {
+    if (!wasPaused) renderer.clockResume()
+  }
+}
+
 function print(label: string, measurements: Measurement[]): void {
   const value = (field: keyof Measurement): number[] => measurements.map((row) => row[field])
   console.log(`${label}: ${measurements.length} calls; median total ${median(value("totalMs")).toFixed(2)} ms`)
@@ -133,7 +161,8 @@ function print(label: string, measurements: Measurement[]): void {
     `  settle ${median(value("settleMs")).toFixed(2)} ms; draws ${median(value("settleDraws")).toFixed(0)}; ` +
       `native capture ${median(value("captureMs")).toFixed(2)} ms; crop ${median(value("cropMs")).toFixed(2)} ms; ` +
       `PNG encode ${median(value("encodeMs")).toFixed(2)} ms; file I/O ${median(value("fileIoMs")).toFixed(2)} ms; ` +
-      `compare ${median(value("compareMs")).toFixed(2)} ms`
+      `compare ${median(value("compareMs")).toFixed(2)} ms; ` +
+      `unaccounted ${median(value("unaccountedMs")).toFixed(2)} ms`
   )
 }
 
@@ -152,11 +181,59 @@ async function measure(label: string, activeTransition: boolean): Promise<void> 
     })
     fileIoMs = 0
     const before = performance.now()
-    const result = await toMatchScreenshot.call(context, element, {
-      resolveScreenshotPath: () => golden,
+    let passed: boolean
+    if (baseline) {
+      const scratchStart = performance.now()
+      const scratch = mkdtempSync(path.join(os.tmpdir(), "gpuix-screenshot-call-"))
+      fileIoMs += performance.now() - scratchStart
+      try {
+        settleAnimations()
+        renderer.prepareScreenshotCapture()
+        const rect = element.getBoundingClientRect()
+        const scale = renderer.getWindowSize().scaleFactor
+        const actual = path.join(scratch, "actual.png")
+        renderer.captureScreenshotClip(
+          actual,
+          Math.round(rect.left * scale),
+          Math.round(rect.top * scale),
+          Math.round(rect.width * scale),
+          Math.round(rect.height * scale)
+        )
+        const referenceBytes = readFileSync(golden)
+        const actualBytes = readFileSync(actual)
+        readPngSize(referenceBytes, golden)
+        readPngSize(actualBytes, actual)
+        const compareStart = performance.now()
+        const comparison = original.comparePngs(golden, actual, 0)
+        phases.compareMs += performance.now() - compareStart
+        passed = comparison.differingPixelRatio === 0
+      } finally {
+        const cleanupStart = performance.now()
+        rmSync(scratch, { recursive: true, force: true })
+        fileIoMs += performance.now() - cleanupStart
+      }
+    } else {
+      const result = await toMatchScreenshot.call(context, element, {
+        resolveScreenshotPath: () => golden,
+      })
+      passed = result.pass
+    }
+    const totalMs = performance.now() - before
+    const measuredPhaseMs =
+      phases.settleMs +
+      phases.captureMs +
+      phases.cropMs +
+      phases.encodeMs +
+      fileIoMs +
+      phases.nativeWriteMs +
+      phases.compareMs
+    measurements.push({
+      ...phases,
+      totalMs,
+      fileIoMs: fileIoMs + phases.nativeWriteMs,
+      unaccountedMs: totalMs - measuredPhaseMs,
     })
-    measurements.push({ ...phases, totalMs: performance.now() - before, fileIoMs })
-    if (!result.pass) throw new Error(`${label} screenshot did not match its reference:\n${result.message()}`)
+    if (!passed) throw new Error(`${label} screenshot did not match its reference`)
   }
   print(label, measurements)
 }
@@ -174,6 +251,11 @@ try {
     Math.round(rect.height * scale)
   )
   readFileSync(golden)
+  console.log(
+    `mode: ${baseline ? "legacy PNG round-trip" : "native RGBA compare"}; ` +
+      `fixture: 2560x1600; calls per case: ${CALLS}; machine: ${os.type()} ${os.arch()}; ` +
+      `runtime: Bun ${process.versions.bun}`
+  )
   await measure("settled", false)
   Object.keys(phases).forEach((key) => {
     phases[key as keyof typeof phases] = 0
