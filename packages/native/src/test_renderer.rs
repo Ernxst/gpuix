@@ -3365,6 +3365,19 @@ impl TestGpuixRenderer {
             .as_ref()
             .or(transitioned_style.as_ref())
             .unwrap_or(&style);
+        let group_resolved_style = (effective_style.hover_within_group.is_some()
+            || effective_style.focus_within_group.is_some())
+        .then(|| {
+            crate::renderer::effective_group_state_style(
+                effective_style,
+                hover_within,
+                active_within,
+                group_focus,
+                group_focus && keyboard_input,
+                group_focus_within,
+            )
+        });
+        let effective_style = group_resolved_style.as_ref().unwrap_or(effective_style);
         let mut resolved = style_object(effective_style)?;
         if focus_within {
             refine_style_object(&mut resolved, effective_style.focus_within.as_deref())?;

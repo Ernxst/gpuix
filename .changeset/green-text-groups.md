@@ -4,8 +4,8 @@
 '@gpuix/react': patch
 ---
 
-Paint inherited text colour and `currentColor` consistently when CSS module
-`:focus`, `:focus-visible`, or `:focus-within` descendant selectors match.
+Resolve inherited text styles from CSS module ancestor states before building
+descendant text, and preserve stylesheet order when several ancestor states match.
 
 Fixes #747
 Fixes #748

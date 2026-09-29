@@ -9753,7 +9753,6 @@ fn resolved_current_color(
     hover_within: bool,
     hovered: bool,
     active: bool,
-    focus_group: Option<&InheritedHoverGroup>,
 ) -> Option<gpui::Rgba> {
     let style = style?;
     let mut color = style
@@ -9782,17 +9781,6 @@ fn resolved_current_color(
     }
     if active {
         refine(style.active.as_deref());
-    }
-    if let Some(group) = focus_group {
-        if group.focused {
-            refine(style.group_focus.as_deref());
-        }
-        if group.focus_visible {
-            refine(style.group_focus_visible.as_deref());
-        }
-        if group.focus_within {
-            refine(style.group_focus_within.as_deref());
-        }
     }
     color
 }
@@ -12222,9 +12210,28 @@ fn build_element_with_parent_layout(
         .or(transitioned_style.as_ref())
         .or(declared_style);
 
+    // Group selectors are compiled into metadata on their descendant class.
+    // Resolve only those states here so inherited text styles are current
+    // before child runs are built; elements without group selectors take the
+    // existing style path without a tree walk or state merge.
+    let group_focus = focus_groups.focus_paint_group;
+    let group_resolved_style = layered_style
+        .filter(|style| style.hover_within_group.is_some() || style.focus_within_group.is_some())
+        .map(|style| {
+            effective_group_state_style(
+                style,
+                hover_groups.hover_within,
+                hover_groups.active_within,
+                group_focus.is_some_and(|group| group.focused),
+                group_focus.is_some_and(|group| group.focus_visible),
+                group_focus.is_some_and(|group| group.focus_within),
+            )
+        });
+    let inherited_style = group_resolved_style.as_ref().or(layered_style);
+
     // Inheritable style resolves once here so both built-ins and custom
     // elements see the same cascade.
-    let font = parent_inherited.font_for(layered_style, window);
+    let font = parent_inherited.font_for(inherited_style, window);
     let interaction = ctx
         .interactive_style_states
         .get(&id)
@@ -12241,7 +12248,7 @@ fn build_element_with_parent_layout(
     // algorithm supplies the containing block's content size. Only `ch`, `vw`,
     // and `vh` are reduced here, using the inherited font chain above.
     let mut resolved_style =
-        layered_style.map(|style| resolve_length_expressions(style, window, &font));
+        inherited_style.map(|style| resolve_length_expressions(style, window, &font));
     if ctx.measuring {
         // An orphan intrinsic probe has no live pointer state for GPUI to use
         // while laying out its descendants. Resolve each descendant's current
@@ -12311,15 +12318,19 @@ fn build_element_with_parent_layout(
         box_insets_for_style(&effective)
     });
     let hover_group = style.and_then(|style| style.hover_group.as_deref());
-    let current_color = resolved_current_color(
-        style,
-        focused,
-        focus_visible,
-        hover_within,
-        interaction.hovered,
-        interaction.is_active(),
-        focus_groups.focus_paint_group,
-    );
+    let current_color = layered_style
+        .is_some_and(|style| style.hover_within_group.is_some() || style.focus_within_group.is_some())
+        .then(|| {
+            resolved_current_color(
+                style,
+                focused,
+                focus_visible,
+                hover_within,
+                interaction.hovered,
+                interaction.is_active(),
+            )
+        })
+        .flatten();
     ctx.inherited = parent_inherited
         .clone()
         .descend(
@@ -13231,6 +13242,62 @@ fn merge_intrinsic_state_style(merged: &mut StyleDesc, overlay: &StyleDesc) {
     merged.active = None;
     merged.focus = None;
     merged.focus_visible = None;
+}
+
+pub(crate) fn effective_group_state_style(
+    style: &StyleDesc,
+    hover_within: bool,
+    active_within: bool,
+    group_focus: bool,
+    group_focus_visible: bool,
+    group_focus_within: bool,
+) -> StyleDesc {
+    let mut effective = style.clone();
+    let fallback_order = [
+        "hoverWithin",
+        "activeWithin",
+        "groupFocus",
+        "groupFocusVisible",
+        "groupFocusWithin",
+    ];
+    let order = if style.group_state_order.is_empty() {
+        fallback_order.as_slice()
+    } else {
+        style.group_state_order.as_slice()
+    };
+    for state in order {
+        let overlay = match state.as_str() {
+            "hoverWithin" if hover_within => style.hover_within.as_deref(),
+            "activeWithin" if active_within => style.active_within.as_deref(),
+            "groupFocus" if group_focus => style.group_focus.as_deref(),
+            "groupFocusVisible" if group_focus_visible => {
+                style.group_focus_visible.as_deref()
+            }
+            "groupFocusWithin" if group_focus_within => {
+                style.group_focus_within.as_deref()
+            }
+            _ => None,
+        };
+        if let Some(overlay) = overlay {
+            merge_intrinsic_state_style(&mut effective, overlay);
+        }
+    }
+
+    // Keep element-local states for GPUI's interaction refinements. Group
+    // states have already been folded into the base style in CSS source order.
+    effective.hover = style.hover.clone();
+    effective.active = style.active.clone();
+    effective.focus = style.focus.clone();
+    effective.focus_visible = style.focus_visible.clone();
+    effective.focus_within = style.focus_within.clone();
+    effective.drag_over = style.drag_over.clone();
+    effective.hover_within = None;
+    effective.active_within = None;
+    effective.group_focus = None;
+    effective.group_focus_visible = None;
+    effective.group_focus_within = None;
+    effective.group_state_order.clear();
+    effective
 }
 
 fn effective_intrinsic_state_style(style: &StyleDesc, state: InteractionProbeState) -> StyleDesc {

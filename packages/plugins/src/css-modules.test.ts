@@ -808,6 +808,7 @@ test("compiles a pressed ancestor selector into the shared group and activeWithi
         "gpuix-css-module:hover-group:%2Ffixture%2Fcard.module.css:card",
       hoverWithin: { color: "#ffffff" },
       activeWithin: { backgroundColor: "#22c55e" },
+      groupStateOrder: ["hoverWithin", "activeWithin"],
     },
   })
 })
@@ -847,6 +848,7 @@ test("combines ancestor focus and pointer states for one descendant", async () =
       hoverWithin: { color: "white" },
       focusWithinGroup: group,
       groupFocus: { backgroundColor: "red" },
+      groupStateOrder: ["hoverWithin", "groupFocus"],
     },
   })
 })
@@ -1107,6 +1109,7 @@ test("binds one child to hover and focus styles from different ancestors", async
       focusWithinGroup:
         "gpuix-css-module:hover-group:%2Ffixture%2Fmultiple-ancestor-groups.module.css:b",
       groupFocusVisible: { opacity: 0.8 },
+      groupStateOrder: ["hoverWithin", "groupFocusVisible"],
       opacity: 1,
     },
     a: {
@@ -1118,6 +1121,16 @@ test("binds one child to hover and focus styles from different ancestors", async
         "gpuix-css-module:hover-group:%2Ffixture%2Fmultiple-ancestor-groups.module.css:b",
     },
   })
+})
+
+test("preserves source order for competing ancestor group states", async () => {
+  const styles = await transformGpuixCssModule(
+    `.b:focus-visible .child { opacity: 0.8; }
+     .a:hover .child { opacity: 0.3; }`,
+    "/fixture/multiple-ancestor-groups-reversed.module.css",
+  )
+
+  expect(styles.child.groupStateOrder).toEqual(["groupFocusVisible", "hoverWithin"])
 })
 
 test("rejects hovered descendant rules from different ancestors", async () => {

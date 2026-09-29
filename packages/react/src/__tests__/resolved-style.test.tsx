@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest"
 import type { NativeStateStyleKey, StyleDesc } from "../index.js"
 import type { GpuixFocusEvent } from "../reconciler/synthetic-event.js"
 import { createTestRoot } from "../testing.js"
-import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils.js"
+import { expectScreenshotsDiffer, expectScreenshotsEqual, SHOTS_DIR } from "./test-utils.js"
 
 type SharedStyle = CSSProperties &
   Pick<StyleDesc, Extract<keyof CSSProperties, keyof StyleDesc>>
@@ -204,6 +204,143 @@ describe("resolved test-renderer styles", () => {
       expect(root.renderer.getResolvedStyle(child.id)?.color).toBe("#ff00ff")
       root.renderer.captureScreenshot(focused)
       expectScreenshotsDiffer(idle, focused)
+    } finally {
+      root.unmount()
+    }
+  })
+
+  it.each(["focus", "focus-visible", "focus-within"] as const)(
+    "resolves inherited font styles before building descendant text for :%s and resets them",
+    async (state) => {
+      const source = new URL("../../../plugins/src/css-modules.ts", import.meta.url).href
+      const { transformGpuixCssModule } = await import(source)
+      const styles = await transformGpuixCssModule(
+        `.group { display: flex; flex-direction: column; }
+       .child { color: #0011ff; font-size: 12px; font-weight: 400; text-decoration: none; }
+       .group:${state} .child { color: #ff00ff; font-size: 32px; font-weight: 900; text-decoration: underline; }`,
+        `/fixture/${state}-inherited-font.module.css`,
+      )
+      for (const style of Object.values(styles)) {
+        Object.defineProperty(style, Symbol.for("gpuix.compiledStyle"), { value: true })
+      }
+
+      const root = createTestRoot()
+      try {
+        root.render(
+          <>
+            <button ariaLabel="Keyboard start" type="button"><text>Start</text></button>
+            <div
+              className={styles.group}
+              data-testid="inherited-font-group"
+              tabIndex={state === "focus-within" ? undefined : 0}
+            >
+              {state === "focus-within" && (
+                <button data-testid="inherited-font-target" type="button">
+                  <text>Focus target</text>
+                </button>
+              )}
+              <div className={styles.child} data-testid="inherited-font-child">
+                <text>Focus-within evidence</text>
+              </div>
+            </div>
+            <button data-testid="inherited-font-outside" type="button"><text>Outside</text></button>
+          </>,
+        )
+        const child = root.renderer.findByTestId("inherited-font-child")!
+        const target = root.renderer.findByTestId(
+          state === "focus-within" ? "inherited-font-target" : "inherited-font-group",
+        )!
+        const outside = root.renderer.findByTestId("inherited-font-outside")!
+        const idle = path.join(SHOTS_DIR, `module-${state}-inherited-font-idle.png`)
+        const focused = path.join(SHOTS_DIR, `module-${state}-inherited-font-focused.png`)
+        const reset = path.join(SHOTS_DIR, `module-${state}-inherited-font-reset.png`)
+        const resolved = () => root.renderer.getResolvedStyle(child.id)
+
+        expect(resolved()).toMatchObject({
+          color: "#0011ff",
+          fontSize: 12,
+          fontWeight: 400,
+          textDecoration: "none",
+        })
+        root.renderer.captureScreenshot(idle)
+        root.renderer.simulateKeystrokes("tab")
+        root.renderer.simulateKeystrokes("tab")
+        expect(root.renderer.getActiveElement()).toBe(target.id)
+        expect(resolved()).toMatchObject({
+          color: "#ff00ff",
+          fontSize: 32,
+          fontWeight: 900,
+          textDecoration: "underline",
+        })
+        root.renderer.captureScreenshot(focused)
+        expectScreenshotsDiffer(idle, focused)
+
+        root.renderer.focusElement(outside.id)
+        expect(resolved()).toMatchObject({
+          color: "#0011ff",
+          fontSize: 12,
+          fontWeight: 400,
+          textDecoration: "none",
+        })
+        root.renderer.captureScreenshot(reset)
+        expectScreenshotsEqual(idle, reset)
+      } finally {
+        root.unmount()
+      }
+    },
+  )
+
+  it.each([
+    {
+      name: "focus-visible rule comes later",
+      rules: `.a:hover .child { opacity: 0.3; }
+       .b:focus-visible .child { opacity: 0.8; }`,
+      expected: 0.8,
+    },
+    {
+      name: "hover rule comes later",
+      rules: `.b:focus-visible .child { opacity: 0.8; }
+       .a:hover .child { opacity: 0.3; }`,
+      expected: 0.3,
+    },
+  ])("resolves competing hover and focus group rules in source order: $name", async ({ rules, expected }) => {
+    const source = new URL("../../../plugins/src/css-modules.ts", import.meta.url).href
+    const { transformGpuixCssModule } = await import(source)
+    const styles = await transformGpuixCssModule(
+      `.a { width: 240px; height: 120px; display: flex; }
+       .b { width: 220px; height: 100px; display: flex; }
+       .child { width: 160px; height: 40px; opacity: 1; }
+       ${rules}`,
+      "/fixture/group-state-source-order.module.css",
+    )
+    for (const style of Object.values(styles)) {
+      Object.defineProperty(style, Symbol.for("gpuix.compiledStyle"), { value: true })
+    }
+
+    const root = createTestRoot()
+    try {
+      root.render(
+        <>
+          <button ariaLabel="Keyboard start" type="button"><text>Start</text></button>
+          <div className={styles.a} data-testid="source-order-hover-group">
+            <div className={styles.b} data-testid="source-order-focus-group" tabIndex={0}>
+              <div className={styles.child} data-testid="source-order-child">
+                <text>Competing group states</text>
+              </div>
+            </div>
+          </div>
+        </>,
+      )
+      const hoverGroup = root.renderer.findByTestId("source-order-hover-group")!
+      const focusGroup = root.renderer.findByTestId("source-order-focus-group")!
+      const child = root.renderer.findByTestId("source-order-child")!
+      const bounds = root.renderer.getElementBounds(hoverGroup.id)!
+
+      root.renderer.nativeSimulateMouseMove(bounds.x + 4, bounds.y + 4)
+      root.renderer.simulateKeystrokes("tab")
+      root.renderer.simulateKeystrokes("tab")
+      expect(root.renderer.getActiveElement()).toBe(focusGroup.id)
+      expect(root.renderer.getResolvedStyle(child.id)?.opacity).toBe(expected)
     } finally {
       root.unmount()
     }

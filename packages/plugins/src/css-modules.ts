@@ -315,6 +315,7 @@ async function parseCssModule(
   const classNames = new Set<string>()
   const contributions: StyleContribution[] = []
   const accumulatedStyles: CssModuleStyles = {}
+  const groupStateOrders = new Map<string, string[]>()
   const groupRelations = new Map<
     string,
     {
@@ -452,6 +453,14 @@ async function parseCssModule(
       contributions.push({ className: name, style: contribution })
       mergeStyle(accumulatedStyles[name] ??= {}, contribution)
 
+      if (parsed.kind === "groupDescendant" && hasDeclarations) {
+        const order = groupStateOrders.get(name) ?? []
+        const previousIndex = order.indexOf(parsed.state)
+        if (previousIndex !== -1) order.splice(previousIndex, 1)
+        order.push(parsed.state)
+        groupStateOrders.set(name, order)
+      }
+
       if (parsed.kind === "groupDescendant") {
         classNames.add(parsed.ancestor)
         const ancestorStyle = accumulatedStyles[parsed.ancestor] ??= {}
@@ -489,6 +498,13 @@ async function parseCssModule(
       contributions.push({ className: descendant, style: binding })
       mergeStyle(descendantStyle, binding)
     }
+  }
+
+  for (const [descendant, order] of groupStateOrders) {
+    if (order.length < 2) continue
+    const metadata = { groupStateOrder: order }
+    contributions.push({ className: descendant, style: metadata })
+    mergeStyle(accumulatedStyles[descendant] ??= {}, metadata)
   }
 
   for (const className of compositions.keys()) classNames.add(className)
@@ -685,6 +701,16 @@ function formatCompositionKey(key: string): string {
 function mergeStyle(target: Record<string, unknown>, source: Record<string, unknown>): void {
   for (const [property, value] of Object.entries(source)) {
     const previous = target[property]
+    if (property === "groupStateOrder" && Array.isArray(previous) && Array.isArray(value)) {
+      const order = [...previous]
+      for (const state of value) {
+        const previousIndex = order.indexOf(state)
+        if (previousIndex !== -1) order.splice(previousIndex, 1)
+        order.push(state)
+      }
+      target[property] = order
+      continue
+    }
     if (STATE_STYLE_KEYS.has(property) && isPlainObject(previous) && isPlainObject(value)) {
       target[property] = { ...previous, ...value }
     } else {
