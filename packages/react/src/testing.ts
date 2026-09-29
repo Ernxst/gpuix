@@ -133,6 +133,7 @@ export interface AccessKitNodeSnapshot {
     level?: number
     row_index?: number
     column_index?: number
+    sort_direction?: "Ascending" | "Descending" | "Other"
     row_count?: number
     column_count?: number
     row_span?: number

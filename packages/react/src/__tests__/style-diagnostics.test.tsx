@@ -548,6 +548,32 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     }
   })
 
+  it("reports malformed ariaSort values", () => {
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    testRoot.render(
+      <text
+        role="columnheader"
+        ariaLabel="Malformed sort"
+        ariaSort={"sideways" as unknown as "ascending"}
+      />
+    )
+
+    expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([
+      expect.objectContaining({
+        property: "ariaSort",
+        message: expect.stringContaining(
+          'expected one of "ascending", "descending", "other", or "none"'
+        )
+      })
+    ])
+    expect(
+      Object.values(testRoot.renderer.getAccessibilityTree().nodes).find(
+        (node) => node.aria.label === "Malformed sort"
+      )?.aria
+    ).not.toHaveProperty("sort_direction")
+  })
+
   it("omits every well-formed state that its role does not support", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const testRoot = createTestRoot({ strictStyles: true })

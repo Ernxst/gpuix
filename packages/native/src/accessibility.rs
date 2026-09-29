@@ -32,6 +32,7 @@ const ACCESSIBILITY_PROPS: &[&str] = &[
     "ariaLevel",
     "ariaRowIndex",
     "ariaColIndex",
+    "ariaSort",
     "ariaRowCount",
     "ariaColCount",
     "ariaRowSpan",
@@ -328,6 +329,7 @@ impl AccessibilityRole {
                 self.role,
                 Role::Cell | Role::ColumnHeader | Role::GridCell | Role::Row | Role::RowHeader
             ),
+            "ariaSort" => matches!(self.role, Role::ColumnHeader | Role::RowHeader),
             "ariaRowCount" | "ariaColCount" => {
                 matches!(self.role, Role::Grid | Role::Table | Role::TreeGrid)
             }
@@ -554,6 +556,16 @@ fn parse_aria_current(value: &serde_json::Value) -> Option<gpui::accesskit::Aria
         "location" => Some(gpui::accesskit::AriaCurrent::Location),
         "date" => Some(gpui::accesskit::AriaCurrent::Date),
         "time" => Some(gpui::accesskit::AriaCurrent::Time),
+        _ => None,
+    }
+}
+
+fn parse_aria_sort(value: &serde_json::Value) -> Option<gpui::accesskit::SortDirection> {
+    match value.as_str()? {
+        "ascending" => Some(gpui::accesskit::SortDirection::Ascending),
+        "descending" => Some(gpui::accesskit::SortDirection::Descending),
+        "other" => Some(gpui::accesskit::SortDirection::Other),
+        "none" => None,
         _ => None,
     }
 }
@@ -943,6 +955,7 @@ struct AccessibilityProps<'a> {
     level: Option<usize>,
     row_index: Option<usize>,
     column_index: Option<usize>,
+    sort_direction: Option<gpui::accesskit::SortDirection>,
     row_count: Option<usize>,
     column_count: Option<usize>,
     row_span: Option<usize>,
@@ -1051,6 +1064,10 @@ impl<'a> AccessibilityProps<'a> {
             level: positive_integer(element.custom_props.get("ariaLevel")),
             row_index: positive_integer(element.custom_props.get("ariaRowIndex")),
             column_index: positive_integer(element.custom_props.get("ariaColIndex")),
+            sort_direction: element
+                .custom_props
+                .get("ariaSort")
+                .and_then(parse_aria_sort),
             row_count: positive_integer(element.custom_props.get("ariaRowCount")),
             column_count: positive_integer(element.custom_props.get("ariaColCount")),
             row_span: positive_integer(
@@ -1491,6 +1508,10 @@ pub(crate) fn element_problems(
                     ))
             }
             "ariaCurrent" => parse_aria_current(value).is_none(),
+            "ariaSort" => !matches!(
+                value.as_str(),
+                Some("ascending" | "descending" | "other" | "none")
+            ),
             "ariaLive" => parse_aria_live(value).is_none(),
             "ariaExpanded" | "ariaSelected" | "ariaAtomic" | "ariaDisabled" | "ariaHidden"
             | "ariaReadOnly" | "ariaRequired" => parse_booleanish(value).is_none(),
@@ -1520,6 +1541,7 @@ pub(crate) fn element_problems(
                 "ariaCurrent" => {
                     "one of \"page\", \"step\", \"location\", \"date\", \"time\", \"true\", or \"false\""
                 }
+                "ariaSort" => "one of \"ascending\", \"descending\", \"other\", or \"none\"",
                 "ariaLive" => "one of \"off\", \"polite\", or \"assertive\"",
                 "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => "a finite number",
                 "ariaLevel"
@@ -1883,6 +1905,9 @@ where
         .filter(|_| props.supports("ariaColIndex"))
     {
         el = el.aria_column_index(index);
+    }
+    if let Some(direction) = props.sort_direction.filter(|_| props.supports("ariaSort")) {
+        el = el.aria_sort(direction);
     }
     if let Some(count) = props.row_count.filter(|_| props.supports("ariaRowCount")) {
         el = el.aria_row_count(count);

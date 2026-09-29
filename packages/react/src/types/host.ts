@@ -1016,6 +1016,9 @@ export type AriaCurrent =
   | "true"
   | "false"
 
+/** Sort order for a column or row header. */
+export type AriaSort = "ascending" | "descending" | "other" | "none"
+
 /** How urgently a screen reader announces a change inside a live region. */
 export type AriaLive = "off" | "polite" | "assertive"
 
@@ -1143,6 +1146,10 @@ export interface AccessibilityProps {
   ariaColIndex?: number
   /** DOM-compatible alias for ariaColIndex. */
   "aria-colindex"?: number
+  /** Sort direction for a column or row header. */
+  ariaSort?: AriaSort
+  /** DOM-compatible alias for ariaSort. */
+  "aria-sort"?: AriaSort
   /** Total rows represented by a table, grid, or treegrid. */
   ariaRowCount?: number
   /** DOM-compatible alias for ariaRowCount. */
