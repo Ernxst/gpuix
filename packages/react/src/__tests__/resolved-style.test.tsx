@@ -209,7 +209,7 @@ describe("resolved test-renderer styles", () => {
     }
   })
 
-  it.each(["focus", "focus-visible", "focus-within"] as const)(
+  it.each(["hover", "active", "focus", "focus-visible", "focus-within"] as const)(
     "resolves inherited font styles before building descendant text for :%s and resets them",
     async (state) => {
       const source = new URL("../../../plugins/src/css-modules.ts", import.meta.url).href
@@ -232,7 +232,7 @@ describe("resolved test-renderer styles", () => {
             <div
               className={styles.group}
               data-testid="inherited-font-group"
-              tabIndex={state === "focus-within" ? undefined : 0}
+              tabIndex={state === "focus" || state === "focus-visible" ? 0 : undefined}
             >
               {state === "focus-within" && (
                 <button data-testid="inherited-font-target" type="button">
@@ -247,6 +247,7 @@ describe("resolved test-renderer styles", () => {
           </>,
         )
         const child = root.renderer.findByTestId("inherited-font-child")!
+        const group = root.renderer.findByTestId("inherited-font-group")!
         const target = root.renderer.findByTestId(
           state === "focus-within" ? "inherited-font-target" : "inherited-font-group",
         )!
@@ -263,9 +264,16 @@ describe("resolved test-renderer styles", () => {
           textDecoration: "none",
         })
         root.renderer.captureScreenshot(idle)
-        root.renderer.simulateKeystrokes("tab")
-        root.renderer.simulateKeystrokes("tab")
-        expect(root.renderer.getActiveElement()).toBe(target.id)
+        const bounds = root.renderer.getElementBounds(group.id)!
+        if (state === "hover") {
+          root.renderer.nativeSimulateMouseMove(bounds.x + 4, bounds.y + 4)
+        } else if (state === "active") {
+          root.renderer.nativeSimulateMouseDown(bounds.x + 4, bounds.y + 4)
+        } else {
+          root.renderer.simulateKeystrokes("tab")
+          root.renderer.simulateKeystrokes("tab")
+          expect(root.renderer.getActiveElement()).toBe(target.id)
+        }
         expect(resolved()).toMatchObject({
           color: "#ff00ff",
           fontSize: 32,
@@ -275,8 +283,87 @@ describe("resolved test-renderer styles", () => {
         root.renderer.captureScreenshot(focused)
         expectScreenshotsDiffer(idle, focused)
 
-        root.renderer.focusElement(outside.id)
+        if (state === "hover") {
+          root.renderer.nativeSimulateMouseMove(-1, -1)
+        } else if (state === "active") {
+          root.renderer.nativeSimulateMouseUp(bounds.x + 4, bounds.y + 4)
+          root.renderer.nativeSimulateMouseMove(-1, -1)
+        } else {
+          root.renderer.focusElement(outside.id)
+        }
         expect(resolved()).toMatchObject({
+          color: "#0011ff",
+          fontSize: 12,
+          fontWeight: "400",
+          textDecoration: "none",
+        })
+        root.renderer.captureScreenshot(reset)
+        expectScreenshotsEqual(idle, reset)
+      } finally {
+        root.unmount()
+      }
+    },
+  )
+
+  it.each(["hover", "active"] as const)(
+    "paints inherited typography for :%s when text colour stays the same",
+    async (state) => {
+      const source = new URL("../../../plugins/src/css-modules.ts", import.meta.url).href
+      const { transformGpuixCssModule } = await import(source)
+      const styles = await transformGpuixCssModule(
+        `.group { display: flex; flex-direction: column; }
+       .child { color: #0011ff; font-size: 12px; font-weight: 400; text-decoration: none; }
+       .group:${state} .child { font-size: 32px; font-weight: 900; text-decoration: underline; }`,
+        `/fixture/${state}-inherited-font-paint.module.css`,
+      )
+      for (const style of Object.values(styles)) {
+        Object.defineProperty(style, Symbol.for("gpuix.compiledStyle"), { value: true })
+      }
+
+      const root = createTestRoot()
+      try {
+        root.render(
+          <div className={styles.group} data-testid="inherited-font-paint-group">
+            <div className={styles.child} data-testid="inherited-font-paint-child">
+              <text>Typography paint evidence</text>
+            </div>
+          </div>,
+        )
+        const group = root.renderer.findByTestId("inherited-font-paint-group")!
+        const child = root.renderer.findByTestId("inherited-font-paint-child")!
+        const bounds = root.renderer.getElementBounds(group.id)!
+        const idle = path.join(SHOTS_DIR, `module-${state}-inherited-font-paint-idle.png`)
+        const focused = path.join(SHOTS_DIR, `module-${state}-inherited-font-paint-active.png`)
+        const reset = path.join(SHOTS_DIR, `module-${state}-inherited-font-paint-reset.png`)
+
+        root.renderer.captureScreenshot(idle)
+        expect(root.renderer.getResolvedStyle(child.id)).toMatchObject({
+          color: "#0011ff",
+          fontSize: 12,
+          fontWeight: "400",
+          textDecoration: "none",
+        })
+        if (state === "hover") {
+          root.renderer.nativeSimulateMouseMove(bounds.x + 4, bounds.y + 4)
+        } else {
+          root.renderer.nativeSimulateMouseDown(bounds.x + 4, bounds.y + 4)
+        }
+        expect(root.renderer.getResolvedStyle(child.id)).toMatchObject({
+          color: "#0011ff",
+          fontSize: 32,
+          fontWeight: "900",
+          textDecoration: "underline",
+        })
+        root.renderer.captureScreenshot(focused)
+        expectScreenshotsDiffer(idle, focused)
+
+        if (state === "hover") {
+          root.renderer.nativeSimulateMouseMove(-1, -1)
+        } else {
+          root.renderer.nativeSimulateMouseUp(bounds.x + 4, bounds.y + 4)
+          root.renderer.nativeSimulateMouseMove(-1, -1)
+        }
+        expect(root.renderer.getResolvedStyle(child.id)).toMatchObject({
           color: "#0011ff",
           fontSize: 12,
           fontWeight: "400",
