@@ -784,7 +784,8 @@ export interface StyleDesc {
  * them alongside a `SharedStyle`.
  */
 export type SharedStyle = CSSProperties &
-  Pick<StyleDesc, Extract<keyof CSSProperties, keyof StyleDesc>>
+  Pick<StyleDesc, Extract<keyof CSSProperties, keyof StyleDesc>> &
+  Pick<StyleDesc, `--${string}`>
 
 // Element types supported by GPUIX
 export type ElementType =
@@ -1071,7 +1072,7 @@ export type AccessibilityAction = "increment" | "decrement" | "focus"
 /** Keep a semantic node in the accessibility tree while omitting its visual box. */
 export type VisuallyHidden = true
 
-export interface AccessibilityProps {
+interface AccessibilityPropsBase {
   // ── Accessibility ───────────────────────────────────────────────
   /** Explicit native accessibility role. `<button>` and `<a>` infer `button` and `link` when omitted. */
   role?: AccessibilityRole
@@ -1226,10 +1227,16 @@ export interface AccessibilityProps {
   onAccessibilityAction?: (event: GpuixElementEvent) => void
 }
 
+type AllowUndefinedForOptional<T> = {
+  [K in keyof T]: {} extends Pick<T, K> ? T[K] | undefined : T[K]
+}
+
+export interface AccessibilityProps extends AllowUndefinedForOptional<AccessibilityPropsBase> {}
+
 // Props passed to elements.
 // Element IDs are auto-generated numeric IDs (not user-settable).
 // Use React refs to get an element's ID: ref.current.id
-export interface Props extends AccessibilityProps {
+interface PropsBase extends AccessibilityProps {
   // `key` must live here, not in `JSX.IntrinsicAttributes`. TypeScript 5 ignores
   // that member for intrinsic elements, and React's DOM types work only because
   // `DetailedHTMLProps` already carries `key`. Without this field every
@@ -1384,6 +1391,8 @@ export interface Props extends AccessibilityProps {
   motion?: MotionProps
 }
 
+export interface Props extends AllowUndefinedForOptional<PropsBase> {}
+
 /**
  * The `<input>` types this renderer implements. `checkbox` and `radio` are
  * choice controls, `range` is a slider, `hidden` renders nothing and only
@@ -1475,7 +1484,7 @@ export interface FormProps extends Props {
 }
 
 /** A variable-height list that builds only rows near its viewport. */
-export interface VirtualListProps
+interface VirtualListPropsBase
   extends AccessibilityProps, Pick<Props, "key" | "id"> {
   /** No `hover`, `active`, or `dragOver`: gpui's `List` has no interactive
    *  element identity, so it cannot hold the pressed, hovered, or drag-over
@@ -1495,6 +1504,11 @@ export interface VirtualListProps
   windowStart?: number
   onVisibleRange?: (event: GpuixElementEvent) => void
 }
+
+export interface VirtualListProps
+  extends AllowUndefinedForOptional<
+    VirtualListPropsBase & Pick<Props, "className" | `data-${string}`>
+  > {}
 
 export type ImageMimeType =
   | "image/png"

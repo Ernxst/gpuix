@@ -248,7 +248,9 @@ export function decideScreenshotOutcome({
   const comparison = compare()
   const withinBudget = comparison.differingPixelRatio <= comparator.differingPixelBudget
   const withinCeiling = comparison.maxChannelDelta <= comparator.maxChannelDelta
-  if (withinBudget && withinCeiling) return { type: "matched", pass: true, message: null }
+  if (withinBudget && withinCeiling) {
+    return { type: "matched", pass: true, message: null }
+  }
 
   if (updateSnapshot === "all") return { type: "update-reference", pass: true, message: null }
 
@@ -618,9 +620,6 @@ export async function toMatchScreenshot(
   maybeOptions?: ToMatchScreenshotOptions
 ): Promise<ScreenshotMatcherResult> {
   // Both refusals are vitest's, wording included.
-  if (this.isNot === true) {
-    throw new Error(`'toMatchScreenshot' cannot be used with "not"`)
-  }
   if (this.task === undefined || this.currentTestName === undefined || this.testPath === undefined) {
     throw new Error(`'toMatchScreenshot' cannot be used without test context`)
   }
@@ -656,7 +655,9 @@ export async function toMatchScreenshot(
   const outcome = decideScreenshotOutcome({
     reference: referenceSize,
     actual: actualSize,
-    updateSnapshot: updateMode(this),
+    // Snapshot update mode still controls positive assertions. A negated
+    // assertion must compare an existing golden instead of replacing it.
+    updateSnapshot: this.isNot === true ? "none" : updateMode(this),
     comparator,
     compare: () =>
       target.renderer.compareImagePixels(
@@ -670,12 +671,19 @@ export async function toMatchScreenshot(
 
   switch (outcome.type) {
     case "matched":
-      return { pass: true, message: () => "" }
+      return {
+        pass: true,
+        message: () =>
+          this.isNot === true
+            ? failureMessage(this, "Screenshot matches the stored reference, but was expected to differ.", {})
+            : "",
+      }
     case "update-reference": {
       write(referencePath, actualBytes())
       return { pass: true, message: () => "" }
     }
     case "missing-reference": {
+      if (this.isNot === true) throw new Error(outcome.message)
       const written = outcome.location === "reference" ? referencePath : diffPaths.reference
       write(written, actualBytes())
       return {

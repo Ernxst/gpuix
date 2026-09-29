@@ -153,7 +153,8 @@ Not provided: `toHaveClass`, `toHaveStyle`, `toContainElement`, `toContainHTML`,
 
 ## `toMatchScreenshot`
 
-Await it; `.not.toMatchScreenshot` throws. It needs Vitest's test context.
+Await it; `.not.toMatchScreenshot` asserts that a capture differs from an
+existing golden. A missing golden still fails. It needs Vitest's test context.
 
 - **Receiver**: a `render()` result or `TestRenderer` captures the window; a `TestElement` crops to its border box. Automation `Locator`s are not accepted.
 - **Golden path**: `<root>/<test dir>/__screenshots__/<test file>/<name>.png`. Unnamed calls are named `"<test name> <n>"`.

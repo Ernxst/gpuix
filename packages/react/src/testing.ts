@@ -1737,6 +1737,11 @@ export class TestRenderer implements NativeRenderer {
     return JSON.parse(this.native.getAccessibilityTree())
   }
 
+  /** Read the title GPUI last exposed in its drawn accessibility tree. */
+  getWindowTitle(): string | null {
+    return this.getAccessibilityTree().frame?.window_title ?? null
+  }
+
   /** Every element the native tree holds, reachable or not. `toJSON()` walks
    *  from the root, so only this can see a node that was detached and leaked. */
   getRetainedElementCount(): number {

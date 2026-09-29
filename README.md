@@ -3364,6 +3364,8 @@ draws. `render()` and an explicit `renderer.flush()` establish the rendered
 state boundary; reads and action injection use that last snapshot and its
 installed listeners until the next explicit draw. This is not a parallel
 reconstruction from React props.
+`renderer.getWindowTitle()` reads the window title from that same last-drawn
+accessibility frame, or returns `null` when the frame has no title.
 See [the platform accessibility smoke guide](./docs/accessibility-smoke.md) for
 the manual OS and screen-reader checks that snapshots cannot prove.
 
@@ -4782,6 +4784,10 @@ type accepted by both renderers. Prefer a state style that reduces to shared
 declarations when possible. For example, a focus ring using `outlineColor`,
 `outlineWidth`, and `outlineOffset` needs no renderer-specific escape because
 those properties exist in both systems.
+
+`SharedStyle` also accepts `--${string}` custom property keys, matching
+`StyleDesc`; GPU-IX ignores these values but retains the type for CSS tooling
+and shared web/native declarations.
 
 When a native state key is needed, choose one of these escapes:
 
@@ -6324,6 +6330,10 @@ browser mode clip to, so a border-colour regression is caught by the golden —
 scaled by the window's `scaleFactor`. An element golden is therefore in device
 pixels like the window one, and an element that painted nothing throws rather
 than comparing an empty box.
+
+Use `.not.toMatchScreenshot()` to assert that the captured image differs from
+an existing golden. A matching image fails the negated assertion; a missing
+golden still fails because there is no reference to differ from.
 
 Both are therefore sized by the window, whose default is a fixed 1280x800 at
 `scaleFactor: 2` — a golden's pixel dimensions do not move with the display the

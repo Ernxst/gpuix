@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "disableSourceOfProjectReferenceRedirect": true,
+    "noEmit": true
+  },
+  "files": ["src/__tests__/exact-optional.types.ts"],
+  "include": ["src/__tests__/exact-optional.types.ts"]
+}

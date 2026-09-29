@@ -36,10 +36,13 @@
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "peerDependencies": {
-    "@gpuix/react": "0.25.0-fork.17",
+    "@gpuix/react": ">=0.25.0-fork.18 <0.25.0",
     "vite": "^8.2.1"
   },
   "peerDependenciesMeta": {
+    "@gpuix/react": {
+      "optional": true
+    },
     "vite": {
       "optional": true
     }
