@@ -22,6 +22,7 @@ const validStyle = {
   textTransform: "uppercase",
   textWrap: "wrap",
   interpolateSize: "allow-keywords",
+  scrollbarWidth: "none",
   hoverGroup: "destination-row",
   hoverWithin: {
     borderColor: "#7c86ff",
@@ -55,6 +56,9 @@ const validNestedCustomProperty = {
 } satisfies StyleDesc
 
 void validNestedCustomProperty
+
+const sharedScrollbarStyle: SharedStyle = { scrollbarWidth: "none" }
+void sharedScrollbarStyle
 
 const numericAspectRatio = { aspectRatio: 1 } satisfies StyleDesc
 void numericAspectRatio

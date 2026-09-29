@@ -47,6 +47,7 @@ test("converts simple CSS module classes into GPUIX style objects", async () => 
           padding: 1rem 2px;
           color: #ffffff;
           font-size: 14px;
+          scrollbar-width: none;
         }
       `,
       "/fixture/panel.module.css",
@@ -60,6 +61,7 @@ test("converts simple CSS module classes into GPUIX style objects", async () => 
       paddingLeft: 2,
       color: "#ffffff",
       fontSize: 14,
+      scrollbarWidth: "none",
     },
   })
 })

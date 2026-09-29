@@ -282,6 +282,7 @@ export type AlignContent =
 export type JustifyContent = Exclude<AlignContent, "normal" | "stretch">
 export type Position = "relative" | "absolute"
 export type Overflow = "visible" | "hidden" | "scroll" | "auto"
+export type ScrollbarWidth = "auto" | "none"
 export type Cursor = "default" | "pointer"
 
 export interface MotionStyle {
@@ -688,6 +689,8 @@ export interface StyleDesc {
   overflow?: Overflow
   overflowX?: Overflow
   overflowY?: Overflow
+  /** Shared CSS values. Native GPUI has no CSS-equivalent width for `thin`. */
+  scrollbarWidth?: ScrollbarWidth
   /** CSS `clip-path`, limited to `inset()` with non-negative px, %, or zero insets. */
   clipPath?: string
 
