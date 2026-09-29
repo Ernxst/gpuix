@@ -3389,9 +3389,9 @@ Each primitive has a dedicated namespace entry point:
 
 | Import | Main parts |
 |---|---|
-| `@gpuix/react/select` | `Root`, `Trigger`, `Value`, `Icon`, `Content`, `List`, `Item`, `ItemText`, `ItemIndicator` |
-| `@gpuix/react/combobox` | `Root`, `Input`, `Content`, `List`, `Item`, `Empty` |
-| `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Content` |
+| `@gpuix/react/select` | `Root`, `Trigger`, `Value`, `Icon`, `Popup`, `List`, `Item`, `ItemText`, `ItemIndicator` |
+| `@gpuix/react/combobox` | `Root`, `Input`, `Popup`, `List`, `Item`, `Empty` |
+| `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Popup` |
 | `@gpuix/react/floating` | `FloatingLayer`, `renderSlot` |
 
 ### Build a local Select
@@ -3429,11 +3429,11 @@ export const SelectTrigger = React.forwardRef<
   />
 ))
 
-export const SelectContent = React.forwardRef<
-  React.ElementRef<typeof SelectPrimitive.Content>,
-  SelectPrimitive.SelectContentProps
+export const SelectPopup = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Popup>,
+  SelectPrimitive.SelectPopupProps
 >(({ style, ...props }, ref) => (
-  <SelectPrimitive.Content
+  <SelectPrimitive.Popup
     ref={ref}
     sideOffset={6}
     {...props}
@@ -3479,7 +3479,7 @@ else its plain-text children.
 ```tsx
 import {
   Select,
-  SelectContent,
+  SelectPopup,
   SelectGroup,
   SelectItem,
   SelectTrigger,
@@ -3495,7 +3495,7 @@ const models = [
   <SelectTrigger>
     <SelectValue placeholder="Select a model" />
   </SelectTrigger>
-  <SelectContent>
+  <SelectPopup>
     <SelectGroup>
       {models.map((item) => (
         <SelectItem key={item.value} value={item.value}>
@@ -3503,7 +3503,7 @@ const models = [
         </SelectItem>
       ))}
     </SelectGroup>
-  </SelectContent>
+  </SelectPopup>
 </Select>
 ```
 
@@ -3521,7 +3521,7 @@ receives the complete selected array after each toggle:
     <SelectValue>{(selected) => Array.isArray(selected) && selected.length > 0 ? selected.join(', ') : 'Select resources'}</SelectValue>
     <SelectIcon>⌄</SelectIcon>
   </SelectTrigger>
-  <SelectContent>
+  <SelectPopup>
     <SelectList>
       {resources.map((resource) => (
         <SelectItem key={resource.value} value={resource.value}>
@@ -3530,7 +3530,7 @@ receives the complete selected array after each toggle:
         </SelectItem>
       ))}
     </SelectList>
-  </SelectContent>
+  </SelectPopup>
 </Select>
 ```
 
@@ -3577,7 +3577,7 @@ object:
 ```tsx
 <ComboboxPrimitive.Root items={['Next.js', 'SvelteKit', 'Astro']}>
   <ComboboxPrimitive.Input style={{ width: 220, height: 36, padding: 8 }} />
-  <ComboboxPrimitive.Content style={{ width: 220 }}>
+  <ComboboxPrimitive.Popup style={{ width: 220 }}>
     <ComboboxPrimitive.Empty>No frameworks found.</ComboboxPrimitive.Empty>
     <ComboboxPrimitive.List>
       {(item) => (
@@ -3586,19 +3586,19 @@ object:
         </ComboboxPrimitive.Item>
       )}
     </ComboboxPrimitive.List>
-  </ComboboxPrimitive.Content>
+  </ComboboxPrimitive.Popup>
 </ComboboxPrimitive.Root>
 ```
 
 ```tsx
-<TooltipPrimitive.Provider delayDuration={350}>
+<TooltipPrimitive.Provider delay={350}>
   <TooltipPrimitive.Root>
     <TooltipPrimitive.Trigger asChild>
       <div tabIndex={0} style={{ padding: 8 }}>Copy</div>
     </TooltipPrimitive.Trigger>
-    <TooltipPrimitive.Content side="top" sideOffset={6}>
+    <TooltipPrimitive.Popup side="top" sideOffset={6}>
       Copy message
-    </TooltipPrimitive.Content>
+    </TooltipPrimitive.Popup>
   </TooltipPrimitive.Root>
 </TooltipPrimitive.Provider>
 ```
@@ -3610,7 +3610,7 @@ snaps inside the window, and occludes controls behind it.
 
 ### Overlay menus
 
-Menus, tooltips, and dialogs must use **`SelectContent`**, **`ComboboxContent`**,
+Menus, tooltips, and dialogs must use **`SelectPopup`**, **`ComboboxPopup`**,
 or `<anchored deferred>`. Those paint in a later pass, on top of
 `<virtual-list>` and the rest of the page.
 
@@ -3624,9 +3624,9 @@ markdown through the menu, and clicks hit the text behind it.
     <SelectTrigger>
       <SelectValue />
     </SelectTrigger>
-    <SelectContent side="top" sideOffset={4} style={{ backgroundColor: '#232323' }}>
+    <SelectPopup side="top" sideOffset={4} style={{ backgroundColor: '#232323' }}>
       <SelectItem value="flash">DeepSeek V4 Flash</SelectItem>
-    </SelectContent>
+    </SelectPopup>
   </div>
 </Select>
 ```

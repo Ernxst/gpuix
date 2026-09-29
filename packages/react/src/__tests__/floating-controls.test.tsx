@@ -9,13 +9,13 @@ import * as SelectPrimitive from "../components/select"
 import * as TooltipPrimitive from "../components/tooltip"
 import {
   Combobox,
-  ComboboxContent,
+  ComboboxPopup,
   ComboboxEmpty,
   ComboboxInput,
   ComboboxItem,
   ComboboxList,
   Select,
-  SelectContent,
+  SelectPopup,
   SelectGroup,
   SelectItem,
   SelectLabel,
@@ -23,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
   Tooltip,
-  TooltipContent,
+  TooltipPopup,
   TooltipProvider,
   TooltipTrigger,
 } from "../index"
@@ -178,7 +178,7 @@ describeNative("floating controls", () => {
             <SelectPrimitive.Trigger style={triggerStyle}>
               <SelectPrimitive.Value placeholder="Choose" />
             </SelectPrimitive.Trigger>
-            <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+            <SelectPrimitive.Popup side="bottom" sideOffset={4} style={contentStyle}>
               <SelectPrimitive.Group>
                 <SelectPrimitive.Label style={{ height: 24 }}>Models</SelectPrimitive.Label>
                 <SelectPrimitive.Item value="alpha" style={itemStyle}>Alpha</SelectPrimitive.Item>
@@ -188,7 +188,7 @@ describeNative("floating controls", () => {
                 <SelectPrimitive.Separator style={{ height: 1, backgroundColor: "#475569" }} />
                 <SelectPrimitive.Item value="beta" style={itemStyle}>Beta</SelectPrimitive.Item>
               </SelectPrimitive.Group>
-            </SelectPrimitive.Content>
+            </SelectPrimitive.Popup>
           </SelectPrimitive.Root>
           <text>{`Value: ${value}`}</text>
         </div>
@@ -225,10 +225,10 @@ describeNative("floating controls", () => {
             <SelectTrigger style={triggerStyle}>
               <SelectValue />
             </SelectTrigger>
-            <SelectContent sideOffset={4} style={contentStyle}>
+            <SelectPopup sideOffset={4} style={contentStyle}>
               <SelectItem value="one" style={itemStyle}>One</SelectItem>
               <SelectItem value="two" style={itemStyle}>Two</SelectItem>
-            </SelectContent>
+            </SelectPopup>
           </Select>
         </div>
       )
@@ -350,7 +350,7 @@ describeNative("floating controls", () => {
     expect(testRoot.renderer.getAllText()).toContain("Behind: 1")
   })
 
-  it("occludes controls behind SelectContent", () => {
+  it("occludes controls behind SelectPopup", () => {
     function Demo() {
       const [clicks, setClicks] = useState(0)
       const [value, setValue] = useState("one")
@@ -364,10 +364,10 @@ describeNative("floating controls", () => {
           </div>
           <Select items={[{ value: "one", label: "One" }, { value: "two", label: "Two" }]} value={value} onValueChange={setValue}>
             <SelectTrigger style={triggerStyle}><SelectValue /></SelectTrigger>
-            <SelectContent sideOffset={4} style={contentStyle}>
+            <SelectPopup sideOffset={4} style={contentStyle}>
               <SelectItem value="one" style={itemStyle}>One</SelectItem>
               <SelectItem value="two" style={itemStyle}>Two</SelectItem>
-            </SelectContent>
+            </SelectPopup>
           </Select>
           <text>{`Behind clicks: ${clicks}`}</text>
         </div>
@@ -382,7 +382,7 @@ describeNative("floating controls", () => {
     expect(testRoot.renderer.getAllText()).toContain("Two")
   })
 
-  it("does not occlude controls behind a closed SelectContent", () => {
+  it("does not occlude controls behind a closed SelectPopup", () => {
     function Demo() {
       const [clicks, setClicks] = useState(0)
       const [value, setValue] = useState("one")
@@ -396,10 +396,10 @@ describeNative("floating controls", () => {
           </div>
           <Select value={value} onValueChange={setValue}>
             <SelectTrigger style={triggerStyle}><SelectValue /></SelectTrigger>
-            <SelectContent sideOffset={4} style={contentStyle}>
+            <SelectPopup sideOffset={4} style={contentStyle}>
               <SelectItem value="one" style={itemStyle}>One</SelectItem>
               <SelectItem value="two" style={itemStyle}>Two</SelectItem>
-            </SelectContent>
+            </SelectPopup>
           </Select>
           <text>{`Behind clicks: ${clicks}`}</text>
         </div>
@@ -424,7 +424,7 @@ describeNative("floating controls", () => {
               placeholder="Select a framework"
               style={triggerStyle}
             />
-            <ComboboxPrimitive.Content sideOffset={4} style={contentStyle}>
+            <ComboboxPrimitive.Popup sideOffset={4} style={contentStyle}>
               <ComboboxPrimitive.Empty>No items found.</ComboboxPrimitive.Empty>
               <ComboboxPrimitive.List>
                 {(item) => (
@@ -433,7 +433,7 @@ describeNative("floating controls", () => {
                   </ComboboxPrimitive.Item>
                 )}
               </ComboboxPrimitive.List>
-            </ComboboxPrimitive.Content>
+            </ComboboxPrimitive.Popup>
           </ComboboxPrimitive.Root>
           <text>{`Selected: ${value ?? "none"}`}</text>
         </div>
@@ -466,12 +466,12 @@ describeNative("floating controls", () => {
         <div style={{ width: 400, height: 240, padding: 12 }}>
           <Combobox items={["Alpha", "Beta"]}>
             <ComboboxInput style={triggerStyle} />
-            <ComboboxContent sideOffset={4} style={contentStyle}>
+            <ComboboxPopup sideOffset={4} style={contentStyle}>
               <ComboboxEmpty>Nothing found</ComboboxEmpty>
               <ComboboxList>
                 {(item) => <ComboboxItem key={item} value={item}>{item}</ComboboxItem>}
               </ComboboxList>
-            </ComboboxContent>
+            </ComboboxPopup>
           </Combobox>
         </div>
       )
@@ -493,7 +493,7 @@ describeNative("floating controls", () => {
         <div style={{ width: 400, height: 240, padding: 12 }}>
           <Combobox items={items} value={value} onValueChange={setValue}>
             <ComboboxInput style={triggerStyle} />
-            <ComboboxContent sideOffset={4} style={contentStyle}>
+            <ComboboxPopup sideOffset={4} style={contentStyle}>
               <ComboboxList>
                 {(item) => (
                   <ComboboxItem key={item} value={item} disabled={item === "Disabled"}>
@@ -501,7 +501,7 @@ describeNative("floating controls", () => {
                   </ComboboxItem>
                 )}
               </ComboboxList>
-            </ComboboxContent>
+            </ComboboxPopup>
           </Combobox>
           <text>{`Selected: ${value ?? "none"}`}</text>
         </div>
@@ -524,9 +524,9 @@ describeNative("floating controls", () => {
         <div style={{ width: 400, height: 240 }}>
           <Combobox disabled items={["Alpha"]} value={value} onValueChange={setValue}>
             <ComboboxInput style={triggerStyle} />
-            <ComboboxContent><ComboboxList>{(item) => (
+            <ComboboxPopup><ComboboxList>{(item) => (
               <ComboboxItem key={item} value={item}>{item}</ComboboxItem>
-            )}</ComboboxList></ComboboxContent>
+            )}</ComboboxList></ComboboxPopup>
           </Combobox>
           <text>{`Selected: ${value ?? "none"}`}</text>
         </div>
@@ -546,20 +546,20 @@ describeNative("floating controls", () => {
     function Demo() {
       return (
         <div style={{ width: 400, height: 240, padding: 12 }}>
-          <TooltipPrimitive.Provider delayDuration={0} disableHoverableContent>
+          <TooltipPrimitive.Provider delay={0} disableHoverableContent>
             <TooltipPrimitive.Root>
               <TooltipPrimitive.Trigger asChild>
                 <div ref={(instance) => { triggerRef = instance }} style={triggerStyle}>
                   Hover me
                 </div>
               </TooltipPrimitive.Trigger>
-              <TooltipPrimitive.Content
+              <TooltipPrimitive.Popup
                 side="bottom"
                 sideOffset={4}
                 style={{ width: 120, height: 28, padding: 6, backgroundColor: "#020617" }}
               >
                 Tooltip body
-              </TooltipPrimitive.Content>
+              </TooltipPrimitive.Popup>
             </TooltipPrimitive.Root>
           </TooltipPrimitive.Provider>
         </div>
@@ -663,10 +663,10 @@ describeNative("floating controls", () => {
             <SelectTrigger style={triggerStyle}>
               <SelectValue placeholder="Choose" />
             </SelectTrigger>
-            <SelectContent sideOffset={4} style={contentStyle}>
+            <SelectPopup sideOffset={4} style={contentStyle}>
               <SelectItem value="one" style={itemStyle}>One</SelectItem>
               <SelectItem value="two" style={itemStyle}>Two</SelectItem>
-            </SelectContent>
+            </SelectPopup>
           </Select>
           <text>{`Value: ${value}`}</text>
         </div>
@@ -699,10 +699,10 @@ describeNative("floating controls", () => {
             <SelectTrigger style={triggerStyle}>
               <SelectValue placeholder="Choose" />
             </SelectTrigger>
-            <SelectContent sideOffset={4} style={contentStyle}>
+            <SelectPopup sideOffset={4} style={contentStyle}>
               <StyledItem value="one">One</StyledItem>
               <StyledItem value="two">Two</StyledItem>
-            </SelectContent>
+            </SelectPopup>
           </Select>
           <text>{`Value: ${value}`}</text>
         </div>
@@ -729,7 +729,7 @@ describeNative("floating controls", () => {
             <SelectTrigger style={triggerStyle}>
               <SelectValue />
             </SelectTrigger>
-            <SelectContent sideOffset={4} style={contentStyle}>
+            <SelectPopup sideOffset={4} style={contentStyle}>
               <SelectItem value="one" style={itemStyle}>One</SelectItem>
               {showTwo ? <SelectItem value="two" style={itemStyle}>Two</SelectItem> : null}
               <div
@@ -739,7 +739,7 @@ describeNative("floating controls", () => {
               >
                 Hide
               </div>
-            </SelectContent>
+            </SelectPopup>
           </Select>
           <text>{`Value: ${value}`}</text>
         </div>
@@ -764,10 +764,10 @@ describeNative("floating controls", () => {
             <SelectTrigger style={triggerStyle}>
               <SelectValue />
             </SelectTrigger>
-            <SelectContent sideOffset={4} style={contentStyle}>
+            <SelectPopup sideOffset={4} style={contentStyle}>
               {showOne ? <SelectItem value="one" style={itemStyle}>One</SelectItem> : null}
               <SelectItem value="two" style={itemStyle}>Two</SelectItem>
-            </SelectContent>
+            </SelectPopup>
           </Select>
           <text>{`Value: ${value}`}</text>
         </div>
@@ -791,7 +791,7 @@ describeNative("floating controls", () => {
             <SelectTrigger style={triggerStyle}>
               <SelectValue />
             </SelectTrigger>
-            <SelectContent sideOffset={4} style={contentStyle}>
+            <SelectPopup sideOffset={4} style={contentStyle}>
               <SelectItem value="one" style={itemStyle}>One</SelectItem>
               <SelectItem value="two" style={itemStyle}>{`Two ${tick}`}</SelectItem>
               <SelectItem value="three" style={itemStyle}>Three</SelectItem>
@@ -802,7 +802,7 @@ describeNative("floating controls", () => {
               >
                 Nudge
               </div>
-            </SelectContent>
+            </SelectPopup>
           </Select>
           <text>{`Value: ${value}`}</text>
         </div>
@@ -827,10 +827,10 @@ describeNative("floating controls", () => {
             <SelectTrigger style={triggerStyle}>
               <SelectValue />
             </SelectTrigger>
-            <SelectContent sideOffset={4} style={contentStyle}>
+            <SelectPopup sideOffset={4} style={contentStyle}>
               <SelectItem value="one" style={itemStyle}>One</SelectItem>
               <SelectItem value="two" data-testid="two" style={itemStyle}>Two</SelectItem>
-            </SelectContent>
+            </SelectPopup>
           </Select>
           <text>{`Value: ${value}`}</text>
         </div>

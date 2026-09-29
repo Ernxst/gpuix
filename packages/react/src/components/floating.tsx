@@ -15,7 +15,7 @@ export type FloatingSide = "top" | "right" | "bottom" | "left"
 export type FloatingAlign = "start" | "center" | "end"
 export type StateStyle<State> = StyleDesc | ((state: State) => StyleDesc)
 
-export interface FloatingContentProps extends Omit<Props, "children"> {
+export interface FloatingPopupProps extends Omit<Props, "children"> {
   children?: ReactNode
   side?: FloatingSide
   sideOffset?: number
@@ -212,7 +212,7 @@ export function renderSlot({
   return cloneElement(child, merged)
 }
 
-export const FloatingLayer = forwardRef<PublicInstance, FloatingContentProps>(
+export const FloatingLayer = forwardRef<PublicInstance, FloatingPopupProps>(
   function FloatingLayer(
     {
       side = "bottom",
