@@ -178,7 +178,7 @@ export type {
 } from "./hooks/use-text-search.js"
 export {
   Select,
-  SelectContent,
+  SelectPopup,
   SelectGroup,
   SelectIcon,
   SelectItem,
@@ -186,14 +186,14 @@ export {
   SelectItemText,
   SelectList,
   SelectLabel,
-  SelectScrollDownButton,
-  SelectScrollUpButton,
+  SelectScrollDownArrow,
+  SelectScrollUpArrow,
   SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "./components/select.js"
 export type {
-  SelectContentProps,
+  SelectPopupProps,
   SelectIconProps,
   SelectIconState,
   SelectItemData,
@@ -212,7 +212,7 @@ export type {
 } from "./components/select.js"
 export {
   Combobox,
-  ComboboxContent,
+  ComboboxPopup,
   ComboboxEmpty,
   ComboboxGroup,
   ComboboxInput,
@@ -232,9 +232,9 @@ export type {
   ComboboxTriggerProps,
   ComboboxValueProps,
 } from "./components/combobox.js"
-export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/tooltip.js"
+export { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./components/tooltip.js"
 export type {
-  TooltipContentProps,
+  TooltipPopupProps,
   TooltipProps,
   TooltipProviderProps,
   TooltipTriggerProps,
