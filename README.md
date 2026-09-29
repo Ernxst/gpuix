@@ -3095,7 +3095,7 @@ equivalents:
 | `visuallyHidden` | Keeps the roled node and its name in AccessKit while painting nothing and reserving no layout space |
 | `ariaHasPopup` | The popup the element opens: `"menu"` (or `true`), `"listbox"`, `"tree"`, `"grid"` or `"dialog"`; `false` declares none. Projected on the roles WAI-ARIA allows it on: `button`, `combobox`, `gridcell`, `link`, `menuitem` and its checkbox and radio variants, `slider`, `tab`, `textbox`, `searchbox`, `treeitem` and `application` |
 | `ariaRoleDescription` | A localized name for the role, such as Base UI NumberField's `"Number field"`; not projected on a generic node or when empty |
-| `ariaControls` | Space-separated `id`s of the elements this one controls; retained for `getAttribute` and `toHaveAttribute`, not projected, since AccessKit has no field for it |
+| `ariaControls` | Space-separated `id`s of the elements this one controls; projected as an AccessKit controls relationship when the referenced element is in the accessibility tree |
 | `ariaRelevant` | Which live-region changes are announced; retained for `getAttribute` and `toHaveAttribute`, not projected, since AccessKit has no field for it, so every change is announced |
 
 `ariaLabelledBy` and `ariaDescribedBy` take space-separated author `id`s and are
@@ -3516,9 +3516,17 @@ const models = [
 </Select>
 ```
 
-The trigger participates in normal tab navigation. Opening the Select focuses
-its content. `Up`, `Down`, `Ctrl+P`, `Ctrl+N`, `Enter`, and `Escape` control the
-menu. Closing it restores focus to the trigger. Disabled items are skipped.
+`Select` Root renders no wrapper element, and its Popup is positioned against
+the Trigger. The trigger participates in normal tab navigation and exposes a
+`combobox` role controlling the List's `listbox`. Opening the Select focuses
+its content. Typing highlights a matching item; `Up`, `Down`, `Ctrl+P`,
+`Ctrl+N`, `Enter`, and `Escape` control the menu. Closing it restores focus to
+the trigger. Disabled items are skipped. The highlighted item scrolls into
+view, and scroll arrows appear only while the list can scroll further in that
+direction. Home/End and PageUp/PageDown are not handled.
+
+Select parts accept `className` and `style` functions with state matching the
+corresponding Base UI part. `Root` renders no element and takes neither prop.
 
 Set `multiple` on `Select` to keep the popup open while items are toggled. The
 controlled and uncontrolled values are string arrays, and `onValueChange`

@@ -169,7 +169,8 @@ Base UI 1.8.0 keyboard navigation below was run with its real package in a nativ
 | Base UI Checkbox, Switch, Radio clicks, Slider, NumberField, Collapsible/Accordion styles | Work in shaped fixtures. |
 | Base UI `CompositeList` keyboard navigation | Works with the real Base UI 1.8.0 package in a native TestRoot; refs expose `isConnected` and Right Arrow moves focus. |
 | Base UI Autocomplete | Typing does not update the value (#579). |
-| Base UI Popover, Menu, Select, Tooltip, Dialog, Combobox; Floating UI; Radix; React Aria | Expected to fail (not run): they need more than the supported `getComputedStyle` subset, `documentElement`, element listeners, document `pointerdown`/`keydown`/`focusin`, `MutationObserver`, portals into `document.body`, or blur `relatedTarget`. |
+| Base UI Select 1.8.0 | Fails at mount: `isTypeableElement` in `useListNavigation` calls `Element.matches()` with `'input:not([type='hidden']):not([disabled]),[contenteditable]:not([contenteditable='false']),textarea:not([disabled])'`, which throws `SyntaxError: Failed to execute 'matches' on 'Element': 'input:not([type='hidden']):not([disabled]),[contenteditable]:not([contenteditable='false']),textarea:not([disabled])' is not a supported selector. Supported: :focus`. |
+| Base UI Popover, Menu, Tooltip, Dialog, Combobox; Floating UI; Radix; React Aria | Expected to fail (not run): they need more than the supported `getComputedStyle` subset, `documentElement`, element listeners, document `pointerdown`/`keydown`/`focusin`, `MutationObserver`, portals into `document.body`, or blur `relatedTarget`. |
 
 Use the built-ins instead (`components.md`): `@gpuix/react/select`, `/combobox`, `/tooltip`, `/floating`, and `<anchored>` for other overlays.
 

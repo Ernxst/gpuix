@@ -60,6 +60,22 @@ describeNative("SelectPopup background", () => {
     })
   })
 
+  it("lets a state className background replace the fallback", () => {
+    screen.render(
+      <Fruit
+        popup={{
+          className: (state) => (state.open ? compiled({ backgroundColor: "#123456" }) : undefined),
+        }}
+      />
+    )
+    screen.renderer.nativeSimulateClick(30, 25)
+    screen.renderer.drawPendingFrame()
+
+    expect(screen.renderer.getResolvedStyle(screen.getByTestId("popup").id)).toMatchObject({
+      backgroundColor: "#123456",
+    })
+  })
+
   it("keeps an opaque fallback when the popup has no background", () => {
     screen.render(<Fruit />)
     screen.renderer.nativeSimulateClick(30, 25)

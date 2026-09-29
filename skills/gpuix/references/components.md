@@ -19,14 +19,19 @@ Each component is importable two ways: as a namespace from its subpath (`import 
 
 - **Style state through `style` functions, not `data-*` attributes.** No component sets `data-open`, `data-highlighted`, `data-selected` or `data-side`, and CSS modules cannot select attributes. These parts take `style={(state) => …}`:
 
-  | Part | State |
+  | Part | State passed to `className` and `style` functions |
   |---|---|
-  | `SelectTrigger` | `{ open, disabled, placeholder }` |
+  | `SelectTrigger` | `{ disabled, touched, dirty, valid, filled, focused, open, readOnly, popupSide, value, placeholder }` |
   | `SelectIcon` | `{ open }` |
+  | `SelectValue` | `{ value, placeholder }` |
+  | `SelectPopup` | `{ side, align, open, transitionStatus }` |
+  | `SelectList`, `SelectItemText`, `SelectGroup`, scroll arrows | `{}` |
   | `SelectItem`, `ComboboxItem` | `{ selected, highlighted, disabled }` (also accepted as a `children` function) |
-  | `SelectItemIndicator` | `{ selected }` |
+  | `SelectItemIndicator` | `{ selected, transitionStatus }` |
+  | `SelectLabel` | `{ disabled, touched, dirty, valid, filled, focused }` |
+  | `SelectSeparator` | `{ orientation }` |
 
-  `SelectPopup`, `ComboboxTrigger`, `ComboboxInput` and the Tooltip parts take plain styles; track their state yourself with `open`/`onOpenChange`.
+  `ComboboxTrigger`, `ComboboxInput` and the Tooltip parts take plain styles; track their state yourself with `open`/`onOpenChange`. `Select.Root` renders no wrapper element and does not accept `className` or `style`.
 
   ```tsx
   <SelectItem value="a" style={({ highlighted, selected }) => ({ backgroundColor: highlighted ? "#2c2c2c" : "#1a1a1a", color: selected ? "#fff" : "#bbb" })}>
@@ -35,12 +40,12 @@ Each component is importable two ways: as a namespace from its subpath (`import 
   ```
 
 - **`asChild`, not `render`.** Only `SelectTrigger`, `ComboboxTrigger` and `TooltipTrigger` accept `asChild`. `SelectItem` and `ComboboxItem` always render their own `div`. The `asChild` child must be exactly one element that forwards its ref and host props.
-- **Each Root renders a wrapper `div`** with `display: flex; position: relative; alignItems: start` ahead of your `style`, and the popup is placed against that box. Base UI's Root renders nothing. Keep only the trigger and Popup inside Root, or override Root's `style`.
+- **Select Root renders no wrapper element.** Its Popup is positioned against the Trigger.
 - **Popups have no Portal, cannot leave the window, and shift rather than flip.** Popup is a deferred `<anchored fit="snap">` rendered in place; there is no `Portal`, `Positioner`, `Arrow` or `Backdrop` part.
 - **Give Popup an opaque background.** It defaults to `#1A1A1A` when neither `style` nor a compiled `className` sets a background. A background supplied by either wins; a translucent colour lets the page show through.
 - **Combobox filtering and keyboard navigation need `items: string[]` on Root and a function child on `ComboboxList`.** Static `ComboboxItem` children are never filtered, and one is keyboard-highlighted only when its value is in `items` and passes the filter, and `ComboboxEmpty` shows whenever the filtered list is empty (always, without `items`). This is the opposite of Select, where `items` is optional.
 - **A controlled Select cannot be cleared with `value={undefined}`**: `undefined` means uncontrolled, so it shows `defaultValue`, or the last value picked while it was uncontrolled. Values are `string` or `string[]`; there is no `null`. Remount with a new `key` to reset.
-- **Select keyboard support is minimal**: Up/Down, Ctrl+N/Ctrl+P, Enter, Space, Escape. No typeahead, Home/End or PageUp/PageDown, and the highlighted item is not scrolled into view.
+- **Select keyboard support is minimal**: typeahead, Up/Down, Ctrl+N/Ctrl+P, Enter, Space and Escape. Home/End and PageUp/PageDown are not handled.
 - **Combobox and Tooltip set no ARIA roles**; add `role`, `ariaExpanded` and `ariaSelected` yourself. Select sets them.
 - **Tooltip opens instantly by default** (`delayDuration` 0; Base UI waits 600 ms), and opens on any focus, not only keyboard focus. Its delays use `setTimeout` on wall time, so `advanceAsyncClock` in tests does not move them.
 - **Combobox `autoHighlight` defaults to `false`**, so typing and pressing Enter selects nothing until an item is arrowed to. Pass `autoHighlight` for type-and-Enter.
@@ -66,12 +71,13 @@ Exports `FloatingLayer`, `floatingRootStyle`, `mergeStyles`, `renderSlot`, `reso
 
 Parts (prefixed names; drop `Select` for the namespace form): `Select` (Root), `SelectTrigger`, `SelectValue`, `SelectIcon`, `SelectPopup`, `SelectList`, `SelectItem`, `SelectItemText`, `SelectItemIndicator`, `SelectGroup`, `SelectLabel` (a group label), `SelectSeparator`, `SelectScrollUpArrow`, `SelectScrollDownArrow` (both inert).
 
-**Root props**: `value`/`defaultValue` (`string`, or `string[]` with `multiple`), `onValueChange(value)` (fires only on change), `open`/`defaultOpen`/`onOpenChange`, `multiple`, `disabled`, `items?: { value, label?, textValue? }[]`, and host props.
+**Root props**: `value`/`defaultValue` (`string`, or `string[]` with `multiple`), `onValueChange(value)` (fires only on change), `open`/`defaultOpen`/`onOpenChange`, `multiple`, `disabled`, and `items?: { value, label?, textValue? }[]`. Root renders no host element.
 
 - **`items` is optional.** Keyboard navigation and clicks use the mounted `SelectItem`s, which register even while closed (Popup stays mounted as `display: none`), in document order, including items wrapped in your own components. `SelectValue` shows the matching `items` entry's label (an entry with no `label` or `textValue` shows the raw value), else the registered item's `SelectItemText`, `textValue` or plain-text children, else the raw value. Pass `items` only when the closed label must be a rich node. Multiple values join with `", "`.
 - **Behaviour**: opening highlights the selected item and focuses Popup; closing refocuses the Trigger; single mode closes on select, multiple mode toggles and stays open; a press outside closes (and the same press on the Trigger does not reopen); hovering highlights; disabled items are skipped; navigation wraps; Escape calls `onEscapeKeyDown` then closes.
-- **ARIA**: Trigger `role="button"`, `ariaExpanded`, `ariaHasPopup="listbox"`; List `role="listbox"`; Item `role="option"`, `ariaSelected`.
-- **Missing from Base UI**: Root renders an element; no field `Label`, `GroupLabel`, `Portal`, `Positioner`, `Arrow`, `Backdrop`; no `name`, `form`, `required`, `readOnly`, `modal`, `isItemEqualToValue`, `itemToStringLabel`, `alignItemWithTrigger`, flip or sticky positioning; string values only; `onValueChange` has no event details.
+- **ARIA**: Trigger `role="combobox"`, `ariaExpanded`, `ariaHasPopup="listbox"` and `ariaControls` pointing to its List; List `role="listbox"`; Item `role="option"`, `ariaSelected`.
+- **Typeahead and scrolling**: Typing highlights a matching item and scrolls it into view. Scroll arrows appear only when the list can scroll further in their direction.
+- **Missing from Base UI**: no field `Label`, `GroupLabel`, `Portal`, `Positioner`, `Arrow`, `Backdrop`; no `name`, `form`, `required`, `readOnly`, `modal`, `isItemEqualToValue`, `itemToStringLabel`, `alignItemWithTrigger`, flip or sticky positioning; string values only; `onValueChange` has no event details.
 
 ## Combobox (`@gpuix/react/combobox`)
 

@@ -18,6 +18,7 @@ export type StateStyle<State> = StyleDesc | ((state: State) => StyleDesc)
 
 export interface FloatingPopupProps extends Omit<Props, "children"> {
   children?: ReactNode
+  position?: { x: number; y: number }
   side?: FloatingSide
   sideOffset?: number
   align?: FloatingAlign
@@ -246,6 +247,7 @@ export const FloatingLayer = forwardRef<PublicInstance, FloatingPopupProps>(
       align = "start",
       alignOffset = 0,
       collisionPadding = 8,
+      position,
       children,
       ...props
     },
@@ -263,6 +265,7 @@ export const FloatingLayer = forwardRef<PublicInstance, FloatingPopupProps>(
 
     return (
       <anchored
+        position={position}
         style={floatingSurfaceStyle(props.style)}
         side={side}
         align={align}

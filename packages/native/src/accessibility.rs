@@ -21,6 +21,7 @@ const ACCESSIBILITY_PROPS: &[&str] = &[
     "ariaRequired",
     "ariaInvalid",
     "ariaExpanded",
+    "ariaControls",
     "ariaCurrent",
     "ariaLive",
     "ariaAtomic",
@@ -313,7 +314,7 @@ impl AccessibilityRole {
                     | Role::Switch
                     | Role::TreeGrid
             ),
-            "ariaExpanded" => matches!(self.role, Role::Button | Role::Link),
+            "ariaExpanded" => matches!(self.role, Role::Button | Role::ComboBox | Role::Link),
             "ariaSelected" => matches!(self.role, Role::ListBoxOption | Role::Tab),
             "ariaValueText" | "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
                 matches!(
@@ -940,6 +941,7 @@ struct AccessibilityProps<'a> {
     required: Option<bool>,
     invalid: Option<gpui::accesskit::Invalid>,
     expanded: Option<bool>,
+    controls: Option<&'a str>,
     current: Option<gpui::accesskit::AriaCurrent>,
     live: Option<gpui::Live>,
     atomic: Option<bool>,
@@ -1025,6 +1027,10 @@ impl<'a> AccessibilityProps<'a> {
                 .custom_props
                 .get("ariaExpanded")
                 .and_then(parse_booleanish),
+            controls: element
+                .custom_props
+                .get("ariaControls")
+                .and_then(serde_json::Value::as_str),
             current: element
                 .custom_props
                 .get("ariaCurrent")
@@ -1496,6 +1502,7 @@ pub(crate) fn element_problems(
             | "ariaLabelledBy"
             | "ariaDescribedBy"
             | "ariaRoleDescription" => !value.is_string(),
+            "ariaControls" => !value.is_string(),
             "ariaHasPopup" => parse_has_popup(value).is_none(),
             "ariaChecked" | "ariaPressed" => {
                 !(value.is_boolean() || value.as_str() == Some("mixed"))
@@ -1533,7 +1540,9 @@ pub(crate) fn element_problems(
                 "ariaHasPopup" => {
                     "a boolean or one of \"true\", \"false\", \"menu\", \"listbox\", \"tree\", \"grid\", or \"dialog\""
                 }
-                "ariaLabelledBy" | "ariaDescribedBy" => "a string of space-separated element ids",
+                "ariaLabelledBy" | "ariaDescribedBy" | "ariaControls" => {
+                    "a string of space-separated element ids"
+                }
                 "ariaChecked" | "ariaPressed" => "a boolean or \"mixed\"",
                 "ariaOrientation" => "one of \"horizontal\" or \"vertical\"",
                 "ariaInvalid" => {
@@ -1849,6 +1858,9 @@ where
     }
     if let Some(expanded) = props.expanded.filter(|_| props.supports("ariaExpanded")) {
         el = el.aria_expanded(expanded);
+    }
+    if let Some(controls) = props.controls {
+        el = el.aria_controls(controls.split_whitespace().map(str::to_owned));
     }
     if let Some(current) = props.current.filter(|_| props.supports("ariaCurrent")) {
         el = el.aria_current(current);

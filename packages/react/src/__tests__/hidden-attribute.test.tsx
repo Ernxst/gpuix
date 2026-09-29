@@ -322,24 +322,41 @@ describeNative("tabs", () => {
     expect(testRoot.renderer.getAllText()).toContain("Second panel")
   })
 
-  it("keeps aria-controls off the accessibility snapshot and drops it on removal", () => {
+  it("projects aria-controls into the accessibility snapshot and drops it on removal", () => {
     const ref = React.createRef<PublicInstance>()
     let clear: (() => void) | undefined
 
     function Tab() {
       const [controls, setControls] = useState<string | undefined>("panel")
       clear = () => setControls(undefined)
-      return <div ref={ref} role="tab" aria-controls={controls} ariaLabel="Tab" />
+      return (
+        <>
+          <div ref={ref} data-testid="tab" role="tab" aria-controls={controls} ariaLabel="Tab" />
+          <div data-testid="panel" id="panel" role="tabpanel" ariaLabel="Panel" />
+        </>
+      )
     }
 
     testRoot.render(<Tab />)
     expect(ref.current!.getAttribute("aria-controls")).toBe("panel")
     const [tab] = tabs(testRoot)
-    expect(Object.keys(tab!).some((key) => key.toLowerCase().includes("control"))).toBe(false)
+    const tabHost = testRoot.getByTestId("tab")
+    const panelHost = testRoot.getByTestId("panel")
+    const tree = testRoot.renderer.getAccessibilityTree()
+    const tabNode = Object.values(tree.nodes).find((node) => node.host_id === tabHost.id)
+    const [panelTreeId] = Object.entries(tree.nodes).find(
+      ([, node]) => node.host_id === panelHost.id
+    ) ?? []
+    expect(tab).toBeDefined()
+    expect(tabNode?.aria.controls).toEqual([panelTreeId])
 
     flushSync(() => clear!())
     testRoot.renderer.flush()
     expect(ref.current!.getAttribute("aria-controls")).toBeNull()
     expect(testRoot.getByRole("tab", { name: "Tab" })).not.toHaveAttribute("aria-controls")
+    const updatedNode = Object.values(testRoot.renderer.getAccessibilityTree().nodes).find(
+      (node) => node.host_id === tabHost.id
+    )
+    expect(updatedNode?.aria.controls).toBeUndefined()
   })
 })
