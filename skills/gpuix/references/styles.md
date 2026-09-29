@@ -57,7 +57,7 @@ Override with `render(<App />, { strictStyles })` or `createRoot(renderer, { str
 |---|---|
 | `display` | `none`, `flex`, `grid` |
 | `visibility` | `visible`, `hidden` |
-| `flexDirection` | `row`, `column` (no `-reverse`) |
+| `flexDirection` | `row`, `row-reverse`, `column`, `column-reverse` |
 | `flexWrap` | `nowrap`, `wrap`, `wrap-reverse` |
 | `flexGrow`, `flexShrink` | number ≥ 0 |
 | `flexBasis` | number (px) |

@@ -4415,7 +4415,7 @@ panels for CSS animations. It ignores these keys: GPU-IX does not implement
 `var()` resolution, custom-property inheritance, CSS selectors, or computed
 custom-property values.
 
-**Layout:** `display` (`"none"` | `"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridAutoFlow`, `gridAutoRows`, `gridAutoColumns`, `justifyItems`, `justifySelf`, `gridColumn`, `gridRow`, `gridColumnStart`, `gridColumnEnd`, `gridRowStart`, `gridRowEnd`, `gridArea`
+**Layout:** `display` (`"none"` | `"flex"` | `"grid"`), `flexDirection` (`"row"` | `"row-reverse"` | `"column"` | `"column-reverse"`), `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridAutoFlow`, `gridAutoRows`, `gridAutoColumns`, `justifyItems`, `justifySelf`, `gridColumn`, `gridRow`, `gridColumnStart`, `gridColumnEnd`, `gridRowStart`, `gridRowEnd`, `gridArea`
 
 `display: "none"` removes the element and its subtree from layout, painting, hit
 testing, accessibility, and text collection. It is not transitioned. A hidden

@@ -1482,6 +1482,32 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     testRoot.unmount()
   })
 
+  it("accepts reverse flex directions from style props and CSS modules in strict mode", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const source = new URL("../../../plugins/src/css-modules.ts", import.meta.url).href
+    const { transformGpuixCssModule } = await import(source)
+    const styles = await transformGpuixCssModule(
+      ".reverse { display: flex; flex-direction: column-reverse; }",
+      "/fixture/reverse.module.css",
+    )
+    for (const style of Object.values(styles)) {
+      Object.defineProperty(style, COMPILED_STYLE, { value: true })
+    }
+
+    const testRoot = createTestRoot({ strictStyles: true })
+    testRoot.render(
+      <>
+        <div style={{ display: "flex", flexDirection: "row-reverse" }} />
+        <div className={styles.reverse as unknown as string} />
+      </>,
+    )
+
+    expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+    expect(error).not.toHaveBeenCalled()
+    testRoot.unmount()
+    error.mockRestore()
+  })
+
   it("lets the style prop outrank a compiled className", () => {
     const testRoot = createTestRoot({ strictStyles: true })
     const card = {
