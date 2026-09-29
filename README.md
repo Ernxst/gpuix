@@ -4697,7 +4697,7 @@ a state override such as `hover`:
 />
 ```
 
-**Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` and `"auto"` create a native scrollable container with persistent scroll state (`"auto"` is identical to `"scroll"`: no scrollbar gutter is painted either way, so there is nothing to reserve)
+**Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` and `"auto"` create a native scrollable container with persistent scroll state (`"auto"` is identical to `"scroll"`: no scrollbar gutter is painted either way, so there is nothing to reserve). `scrollbarWidth` accepts the shared CSS values `"auto"` and `"none"`; `"thin"` is rejected because GPUI's numeric reserved width has no CSS-equivalent meaning for it.
 
 **Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `fontVariantNumeric` (`"normal"` or a space-separated set of `lining-nums` | `oldstyle-nums`, `proportional-nums` | `tabular-nums`, `diagonal-fractions` | `stacked-fractions`, `ordinal`, `slashed-zero`; inherited), `textDecoration` (`"underline"` | `"line-through"` | `"none"`), `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`. A bare number or numeric string, such as `1.4` or `"1.4"`, multiplies the resolved font size, matching `lineHeight` in React DOM; `"20px"` is an absolute length.
 

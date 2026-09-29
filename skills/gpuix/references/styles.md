@@ -73,6 +73,7 @@ Override with `render(<App />, { strictStyles })` or `createRoot(renderer, { str
 | `aspectRatio` | positive number or `"16 / 9"` |
 | `padding*`, `margin*` | number; padding ≥ 0, margin may be negative |
 | `position` | `relative`, `absolute`, `fixed` (lays out as `absolute`; the TS type omits it) |
+| `scrollbarWidth` | `auto`, `none`; `thin` has no GPUI numeric equivalent and is rejected |
 | `top`, `right`, `bottom`, `left` | number |
 | `opacity` | 0–1 |
 | `overflow`, `overflowX`, `overflowY` | `visible`, `hidden`, `scroll`, `auto` (`auto` behaves as `scroll`); only `scroll`/`auto` make a ref scrollable |
