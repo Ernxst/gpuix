@@ -774,6 +774,10 @@ export declare class TestGpuixRenderer {
    * Supported on macOS through Metal and Windows through DirectX.
    */
   captureScreenshot(path: string): void
+  /** Capture the current rendered state as RGBA pixels without encoding a PNG. */
+  captureScreenshotRaw(): ScreenshotImageData
+  /** Capture and crop a rectangle in device pixels, returning RGBA pixels. */
+  captureScreenshotClipRaw(x: number, y: number, width: number, height: number): ScreenshotImageData
   /** Capture and crop to a rectangle in device pixels before PNG encoding. */
   captureScreenshotClip(path: string, x: number, y: number, width: number, height: number): ScreenshotCaptureTimings
   /**
@@ -786,6 +790,8 @@ export declare class TestGpuixRenderer {
    * straight-alpha comparison policy; the current committed scenes intentionally remain opaque.
    */
   compareImages(pathA: string, pathB: string, tolerance: number): ImageComparisonResult
+  /** Compare a reference PNG with raw screenshot pixels without encoding or decoding the actual. */
+  compareImagePixels(referencePath: string, actualPixels: Buffer, width: number, height: number, tolerance: number): ScreenshotComparisonResult
   /**
    * Return and clear all collected events since the last drain.
    * Events are collected synchronously — no event loop queuing.
@@ -1275,6 +1281,20 @@ export interface ScreenshotCaptureTimings {
   captureMs: number
   cropMs: number
   encodeMs: number
+  writeMs: number
+}
+
+export interface ScreenshotComparisonResult {
+  differingPixelRatio: number
+  maxChannelDelta: number
+}
+
+export interface ScreenshotImageData {
+  pixels: Buffer
+  width: number
+  height: number
+  captureMs: number
+  cropMs: number
 }
 
 export interface ScrollWheelModifiers {

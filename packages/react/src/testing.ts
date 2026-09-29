@@ -172,6 +172,15 @@ interface NativeTestRendererApi extends Omit<NativeRenderer, "requestFrame"> {
   installTestGpuCanvas(id: number, width: number, height: number, rgba: number): void
   advanceTestGpuCanvas(id: number, rgba: number): void
   getTestGpuCanvasState(): { installed: number; presentations: number; released: number }
+  captureScreenshotRaw(): ScreenshotImageData
+  captureScreenshotClipRaw(x: number, y: number, width: number, height: number): ScreenshotImageData
+  compareImagePixels(
+    referencePath: string,
+    actualPixels: Buffer,
+    width: number,
+    height: number,
+    tolerance: number
+  ): ScreenshotComparisonResult
   loadCanvasImage(observerId: number, sourceJson: string): void
   getCanvasImageLoadState(observerId: number): CanvasImageLoadState | null
   releaseCanvasImage(observerId: number): void
@@ -308,9 +317,22 @@ interface NativeTestRendererApi extends Omit<NativeRenderer, "requestFrame"> {
     y: number,
     width: number,
     height: number
-  ): { captureMs: number; cropMs: number; encodeMs: number }
+  ): { captureMs: number; cropMs: number; encodeMs: number; writeMs: number }
   compareImages(goldenPath: string, actualPath: string, tolerance: number): ImageComparisonResult
   simulateResize(width: number, height: number): void
+}
+
+interface ScreenshotImageData {
+  pixels: Buffer
+  width: number
+  height: number
+  captureMs: number
+  cropMs: number
+}
+
+interface ScreenshotComparisonResult {
+  differingPixelRatio: number
+  maxChannelDelta: number
 }
 
 interface NativeTestRendererConstructor {
@@ -2058,8 +2080,29 @@ export class TestRenderer implements NativeRenderer {
     y: number,
     width: number,
     height: number
-  ): { captureMs: number; cropMs: number; encodeMs: number } {
+  ): { captureMs: number; cropMs: number; encodeMs: number; writeMs: number } {
     return this.native.captureScreenshotClip(path, x, y, width, height)
+  }
+
+  /** @internal Capture RGBA pixels without encoding a PNG or writing a file. */
+  captureScreenshotRaw(): ScreenshotImageData {
+    return this.native.captureScreenshotRaw()
+  }
+
+  /** @internal Capture a device-pixel rectangle as RGBA pixels. */
+  captureScreenshotClipRaw(x: number, y: number, width: number, height: number): ScreenshotImageData {
+    return this.native.captureScreenshotClipRaw(x, y, width, height)
+  }
+
+  /** @internal Compare RGBA screenshot pixels with a reference PNG. */
+  compareImagePixels(
+    referencePath: string,
+    actualPixels: Buffer,
+    width: number,
+    height: number,
+    tolerance: number
+  ): ScreenshotComparisonResult {
+    return this.native.compareImagePixels(referencePath, actualPixels, width, height, tolerance)
   }
 
   /** Decode two PNGs natively and compare their RGBA pixels. */
