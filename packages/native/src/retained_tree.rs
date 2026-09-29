@@ -208,6 +208,7 @@ impl StyleTable {
 pub struct RetainedTree {
     pub elements: ElementMap,
     pub styles: StyleTable,
+    focus_group_refcounts: HashMap<String, usize>,
     /// The root element ID set by appendChildToContainer.
     pub root_id: Option<u64>,
     /// Advances only when a retained-tree operation changes state. Consumers
@@ -245,6 +246,7 @@ impl RetainedTree {
         Self {
             elements: ElementMap::default(),
             styles: StyleTable::default(),
+            focus_group_refcounts: HashMap::default(),
             root_id: None,
             next_revision: 1,
         }
@@ -271,6 +273,19 @@ impl RetainedTree {
         let revision = self.next_revision;
         self.next_revision = self.next_revision.wrapping_add(1).max(1);
         revision
+    }
+
+    pub(crate) fn has_focus_group(&self, name: &str) -> bool {
+        self.focus_group_refcounts.contains_key(name)
+    }
+
+    fn remove_focus_group_reference(&mut self, name: &str) {
+        if let Some(count) = self.focus_group_refcounts.get_mut(name) {
+            *count -= 1;
+            if *count == 0 {
+                self.focus_group_refcounts.remove(name);
+            }
+        }
     }
 
     /// Invalidate `id` and its ancestors, including their searchable text.
@@ -328,6 +343,13 @@ impl RetainedTree {
 
     fn destroy_element_recursive(&mut self, id: u64, destroyed: &mut Vec<u64>) {
         if let Some(element) = self.elements.remove(&id) {
+            if let Some(name) = element
+                .style
+                .as_deref()
+                .and_then(|style| style.focus_within_group.as_deref())
+            {
+                self.remove_focus_group_reference(name);
+            }
             destroyed.push(id);
             for child_id in element.children {
                 self.destroy_element_recursive(child_id, destroyed);
@@ -453,6 +475,12 @@ impl RetainedTree {
     /// are two `Arc`s holding the same style. Only a pointer miss pays for the
     /// ~80-field compare, which is what decides whether this repaints.
     pub fn set_style(&mut self, id: u64, style: Arc<StyleDesc>) {
+        let old_focus_group = self
+            .elements
+            .get(&id)
+            .and_then(|element| element.style.as_deref())
+            .and_then(|style| style.focus_within_group.clone());
+        let new_focus_group = style.focus_within_group.clone();
         let mut changed = false;
         if let Some(element) = self.elements.get_mut(&id) {
             let same = element
@@ -465,6 +493,14 @@ impl RetainedTree {
             }
         }
         if changed {
+            if old_focus_group != new_focus_group {
+                if let Some(name) = old_focus_group.as_deref() {
+                    self.remove_focus_group_reference(name);
+                }
+                if let Some(name) = new_focus_group {
+                    *self.focus_group_refcounts.entry(name).or_default() += 1;
+                }
+            }
             self.mark_render_changed(id);
         }
     }
@@ -812,6 +848,29 @@ fn element_to_json(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tracks_referenced_focus_groups_across_style_changes_and_destruction() {
+        let mut tree = RetainedTree::new();
+        tree.create_element(1, "div".to_string());
+        tree.create_element(2, "div".to_string());
+        let group_style = || {
+            Arc::new(StyleDesc {
+                focus_within_group: Some("card".to_string()),
+                ..StyleDesc::default()
+            })
+        };
+
+        assert!(!tree.has_focus_group("card"));
+        tree.set_style(1, group_style());
+        tree.set_style(2, group_style());
+        assert!(tree.has_focus_group("card"));
+
+        tree.set_style(1, Arc::new(StyleDesc::default()));
+        assert!(tree.has_focus_group("card"));
+        tree.destroy_element(2);
+        assert!(!tree.has_focus_group("card"));
+    }
 
     fn apply(tree: &mut RetainedTree, json: &str) {
         crate::renderer::apply_batch_to_tree(tree, json.as_bytes()).expect("valid batch");

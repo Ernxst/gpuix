@@ -19,7 +19,7 @@ A declaration that compiles is not always one the renderer accepts. The compiler
 ## Traps
 
 - **Import CSS modules from JS by relative path only.** Bun resolves a JS-level `.module.css` import with `path.resolve(importer dir, id)`, so `@/ui/x.module.css` and `pkg/x.module.css` resolve to the wrong file. A `#ui/x.module.css` specifier fails in both: the plugin strips everything after `#` (`css.ts` `cleanId`), so Bun resolves it to the importer's directory and Vite hands it to its own CSS handling, which yields class-name strings. Inside CSS, `@import` and `composes … from` do resolve package and `#` imports.
-- **Only two descendant forms exist: `.a:hover .b` and `.a:active .b`.** Plain descendants, children (`>`), compound classes (`.a.b`), attribute selectors, and descendants of `:focus`/`:focus-visible`/`:focus-within` fail the build (#670). There are no `data-*` state attributes to target anyway. For `.card:focus-within .title`, give `.card` its own `:focus-within` rule and drive the title from React state (`styles.md`, State styles).
+- **Only the supported descendant forms compile.** `.a:hover .b`, `.a:active .b`, `.a:focus .b`, `.a:focus-visible .b`, and `.a:focus-within .b` are supported. Plain descendants, children (`>`), compound classes (`.a.b`), and attribute selectors fail the build. There are no `data-*` state attributes to target anyway.
 - **One ancestor per descendant class.** `.card:hover .title` together with `.panel:hover .title` fails: `selector ".panel:hover .title" conflicts with selector ".card:hover .title"`.
 - **A descendant rendered outside its selector ancestor does not match.** `.a:hover .b` gives `.a` a generated `hoverGroup` and `.b` a `hoverWithinGroup`; if an element with class `b` has no `a` ancestor, the state never applies and no diagnostic is emitted, matching CSS selector behaviour.
 - **Custom properties are substituted only from `:root` or `html`.** A class-scoped `--c` is left as the literal string `var(--c)`, and the renderer implements no `var()`, so the value is dropped at runtime. A token file that wraps `:root` in `@media (prefers-color-scheme: dark)` fails the build.
@@ -56,6 +56,7 @@ Class names match `[A-Za-z_][A-Za-z0-9_-]*`. Every rejection reads `[gpuix] cann
 | `.a` | The class style. |
 | `.a:hover`, `:active`, `:focus`, `:focus-visible`, `:focus-within` | `hover`, `active`, `focus`, `focusVisible`, `focusWithin` inside `.a`. A state rule with no base rule still creates the class. |
 | `.a:hover .b` | `.a` gets a generated `hoverGroup`; `.b` gets `hoverWithinGroup` and `hoverWithin`. |
+| `.a:focus .b`, `.a:focus-visible .b`, `.a:focus-within .b` | `.a` gets a generated `hoverGroup`; `.b` gets `focusWithinGroup` and the matching `groupFocus`, `groupFocusVisible`, or `groupFocusWithin` state. |
 | `.a:active .b` | The same group; `.b` gets `activeWithin`. Added on `main` by #671; releases up to 0.25.0-fork.4 reject it. |
 | `.a, .b:hover` | Applied to each selector in the list. |
 
@@ -88,9 +89,6 @@ These selectors fail when paired with native declarations (as the drift test che
 .a.b
 .a:hover > .b
 .a:hover .b .c
-.a:focus .b
-.a:focus-visible .b
-.a:focus-within .b
 .a:hover:focus
 .a::before
 .a[data-state="open"]
@@ -285,5 +283,4 @@ import { cn } from "@gpuix/react/cn"
 
 | Issue | Gap |
 |---|---|
-| #670 | Descendant styles from ancestor `:focus`, `:focus-visible`, `:focus-within`. |
 | #632 | Whether to keep the React Native translator, the source of the `box-shadow`, `font` and `em` failures. |

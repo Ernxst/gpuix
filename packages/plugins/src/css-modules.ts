@@ -140,7 +140,7 @@ const CLASS_SELECTOR = new RegExp(
   `^\\.(${CLASS_NAME})(?::(hover|active|focus|focus-visible|focus-within))?$`,
 )
 const GROUP_DESCENDANT_SELECTOR = new RegExp(
-  `^\\.(${CLASS_NAME}):(hover|active)\\s+\\.(${CLASS_NAME})$`,
+  `^\\.(${CLASS_NAME}):(hover|active|focus|focus-visible|focus-within)\\s+\\.(${CLASS_NAME})$`,
 )
 
 type CssModuleStyles = Record<string, Record<string, unknown>>
@@ -150,7 +150,12 @@ type CssModuleSelector =
       kind: "groupDescendant"
       ancestor: string
       descendant: string
-      state: "hoverWithin" | "activeWithin"
+      state:
+        | "hoverWithin"
+        | "activeWithin"
+        | "groupFocus"
+        | "groupFocusVisible"
+        | "groupFocusWithin"
     }
 
 type StyleContribution = { className: string; style: Record<string, unknown> }
@@ -181,6 +186,9 @@ const STATE_STYLE_KEYS = new Set([
   "focusWithin",
   "hoverWithin",
   "activeWithin",
+  "groupFocus",
+  "groupFocusVisible",
+  "groupFocusWithin",
 ])
 
 /**
@@ -307,7 +315,10 @@ async function parseCssModule(
   const classNames = new Set<string>()
   const contributions: StyleContribution[] = []
   const accumulatedStyles: CssModuleStyles = {}
-  const groupRelations = new Map<string, { ancestor: string; selector: string }>()
+  const groupRelations = new Map<
+    string,
+    { ancestor: string; selector: string; states: Set<string> }
+  >()
 
   root.walkRules((rule) => {
     for (const selector of rule.selectors) {
@@ -323,9 +334,12 @@ async function parseCssModule(
             `selector ${JSON.stringify(trimmedSelector)} conflicts with selector ${JSON.stringify(previousRelation.selector)}`,
           )
         }
+        const states = previousRelation?.states ?? new Set<string>()
+        states.add(parsed.state)
         groupRelations.set(parsed.descendant, {
           ancestor: parsed.ancestor,
-          selector: trimmedSelector,
+          selector: previousRelation?.selector ?? trimmedSelector,
+          states,
         })
       }
 
@@ -445,16 +459,26 @@ async function parseCssModule(
   // Bind the descendant state to the marker on its matching ancestor. The
   // marker may be declared after the relation, so derive it after all rules
   // have contributed in stylesheet order.
-  for (const [descendant, { ancestor }] of groupRelations) {
+  for (const [descendant, { ancestor, states }] of groupRelations) {
     const hoverGroup = accumulatedStyles[ancestor]?.hoverGroup
     if (typeof hoverGroup !== "string") continue
 
     const descendantStyle = accumulatedStyles[descendant] ??= {}
-    if ("hoverWithinGroup" in descendantStyle) continue
-
-    const binding = { hoverWithinGroup: hoverGroup }
-    contributions.push({ className: descendant, style: binding })
-    mergeStyle(descendantStyle, binding)
+    const binding: Record<string, unknown> = {}
+    if (states.has("hoverWithin") || states.has("activeWithin")) {
+      if (!("hoverWithinGroup" in descendantStyle)) binding.hoverWithinGroup = hoverGroup
+    }
+    if (
+      states.has("groupFocus") ||
+      states.has("groupFocusVisible") ||
+      states.has("groupFocusWithin")
+    ) {
+      if (!("focusWithinGroup" in descendantStyle)) binding.focusWithinGroup = hoverGroup
+    }
+    if (Object.keys(binding).length > 0) {
+      contributions.push({ className: descendant, style: binding })
+      mergeStyle(descendantStyle, binding)
+    }
   }
 
   for (const className of compositions.keys()) classNames.add(className)
@@ -716,7 +740,16 @@ function parseSelector(selector: string): CssModuleSelector | undefined {
       kind: "groupDescendant",
       ancestor,
       descendant,
-      state: pseudoClass === "hover" ? "hoverWithin" : "activeWithin",
+      state:
+        pseudoClass === "hover"
+          ? "hoverWithin"
+          : pseudoClass === "active"
+            ? "activeWithin"
+            : pseudoClass === "focus"
+              ? "groupFocus"
+              : pseudoClass === "focus-visible"
+                ? "groupFocusVisible"
+                : "groupFocusWithin",
     }
   }
 }

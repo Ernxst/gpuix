@@ -935,18 +935,21 @@ function authoredStyle(instance: Instance, container: Container, props: Props): 
     if (style == null) return fromClassName
 
     const authoredStyleValues = definedStyleValues(style)
-    const merged = { ...fromClassName, ...authoredStyleValues }
+    const merged = { ...fromClassName, ...authoredStyleValues } as StyleDesc &
+      Record<string, unknown>
+    const classStates = fromClassName as StyleDesc & Record<string, unknown>
+    const authoredStates = style as StyleDesc & Record<string, unknown>
     const authoredProperties = new Set(Object.keys(authoredStyleValues))
     for (const key of NATIVE_STATE_STYLE_KEYS) {
-      const classState = fromClassName[key]
+      const classState = classStates[key] as Record<string, unknown> | undefined
       if (classState === undefined) continue
 
       const state = { ...classState }
       for (const property of authoredProperties) {
-        delete state[property as keyof typeof state]
+        delete state[property]
       }
-      Object.assign(state, definedStyleValues(style[key] ?? {}))
-      merged[key] = state
+      Object.assign(state, definedStyleValues((authoredStates[key] as object | undefined) ?? {}))
+      ;(merged as Record<string, unknown>)[key] = state
     }
     return merged
   }
@@ -978,8 +981,16 @@ const NATIVE_STATE_STYLE_KEYS = [
   "focus",
   "focusVisible",
   "focusWithin",
+  "groupFocus",
+  "groupFocusVisible",
+  "groupFocusWithin",
   "dragOver",
-] as const satisfies readonly NativeStateStyleKey[]
+] as const satisfies readonly (
+  | NativeStateStyleKey
+  | "groupFocus"
+  | "groupFocusVisible"
+  | "groupFocusWithin"
+)[]
 
 /**
  * Styles a GPUIX build put in `className`.
