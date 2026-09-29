@@ -22,11 +22,12 @@ describeNative("Base UI composite keyboard navigation", () => {
     const screen = createTestRoot()
     try {
       screen.render(
-        <ToggleGroup aria-label="Text alignment">
+        <ToggleGroup aria-label="Text alignment" defaultValue={["left"]}>
           <Toggle ref={first} value="left">Left</Toggle>
           <Toggle ref={second} value="center">Center</Toggle>
         </ToggleGroup>
       )
+      expect(first.current!.getAttribute("aria-pressed")).toBe("true")
       screen.renderer.nativeSimulateKeystrokes(first.current!.id, "right")
       await Promise.resolve()
 
