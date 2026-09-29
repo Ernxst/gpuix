@@ -114,6 +114,7 @@ export const SUPPORTED_PROPERTIES = new Set([
   "overflow",
   "overflowX",
   "overflowY",
+  "scrollbarWidth",
   "clipPath",
   "cursor",
   "pointerEvents",

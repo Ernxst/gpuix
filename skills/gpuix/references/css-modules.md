@@ -226,6 +226,7 @@ line-clamp
 overflow
 overflow-x
 overflow-y
+scrollbar-width
 clip-path
 cursor
 pointer-events
@@ -237,6 +238,10 @@ hover-group
 hover-within-group
 interpolate-size
 ```
+
+`scrollbar-width` accepts `auto` and `none`, which preserve their CSS meaning
+in both browser and native styles. `thin` is not accepted because GPUI's
+numeric reserved width has no equivalent CSS meaning.
 
 Being on this list means the property name compiles. The Traps section lists values that still fail. Other conversions to know:
 

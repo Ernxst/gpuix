@@ -74,6 +74,7 @@ Override with `render(<App />, { strictStyles })` or `createRoot(renderer, { str
 | `padding*`, `margin*` | number (px), `"<n>px"` or `"<n>%"`; padding ≥ 0, margin may be negative |
 | `position` | `relative`, `absolute`, `fixed` (lays out as `absolute`; the TS type omits it) |
 | `top`, `right`, `bottom`, `left` | number (px), `"<n>px"` or `"<n>%"` |
+| `scrollbarWidth` | `auto`, `none`; `thin` has no GPUI numeric equivalent and is rejected |
 | `opacity` | 0–1 |
 | `overflow`, `overflowX`, `overflowY` | `visible`, `hidden`, `scroll`, `auto` (`auto` behaves as `scroll`); only `scroll`/`auto` make a ref scrollable |
 | `clipPath` | `inset()` with 1–4 non-negative `px`, `%` or `0` values |

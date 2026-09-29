@@ -31,7 +31,7 @@ import {
   setRefs,
   useControllableState,
 } from "./floating.js"
-import type { FloatingContentProps, StateStyle } from "./floating.js"
+import type { FloatingPopupProps, StateStyle } from "./floating.js"
 
 export interface SelectItemData {
   value: string
@@ -175,7 +175,7 @@ export function Select<Multiple extends boolean | undefined = false>({
   const triggerRef = useRef<PublicInstance | null>(null)
   // SelectItem registers itself here (instead of Select walking the element
   // tree), so an item wrapped in a user component is still discovered.
-  // SelectContent keeps its children mounted even while closed - like Radix's
+  // SelectPopup keeps its children mounted even while closed - like Radix's
   // detached collection - painting nothing until open, so an item registers
   // at mount time regardless of open state and Value can resolve a label
   // before the Select has ever opened. SelectItem always carries a host node
@@ -408,16 +408,16 @@ export const SelectValue = forwardRef<PublicInstance, SelectValueProps>(
   }
 )
 
-export interface SelectContentProps extends FloatingContentProps {
+export interface SelectPopupProps extends FloatingPopupProps {
   onEscapeKeyDown?: (event: GpuixKeyboardEvent) => void
 }
 
-export const SelectContent = forwardRef<PublicInstance, SelectContentProps>(
-  function SelectContent(
+export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
+  function SelectPopup(
     { children, onMouseDownOutside, onKeyDown, onEscapeKeyDown, tabIndex = 0, ...props },
     forwardedRef
   ) {
-    const context = useSelectContext("SelectContent")
+    const context = useSelectContext("SelectPopup")
     // Children stay mounted while closed - like Radix's detached collection -
     // so SelectItem registers at mount time regardless of open state. Both
     // states render the same FloatingLayer element type on the path to
@@ -674,21 +674,21 @@ export const SelectSeparator = forwardRef<PublicInstance, Props>(
   }
 )
 
-export const SelectScrollUpButton = forwardRef<PublicInstance, Props>(
-  function SelectScrollUpButton(props, ref) {
+export const SelectScrollUpArrow = forwardRef<PublicInstance, Props>(
+  function SelectScrollUpArrow(props, ref) {
     return <div {...props} ref={ref} />
   }
 )
 
-export const SelectScrollDownButton = forwardRef<PublicInstance, Props>(
-  function SelectScrollDownButton(props, ref) {
+export const SelectScrollDownArrow = forwardRef<PublicInstance, Props>(
+  function SelectScrollDownArrow(props, ref) {
     return <div {...props} ref={ref} />
   }
 )
 
 export {
   Select as Root,
-  SelectContent as Content,
+  SelectPopup as Popup,
   SelectGroup as Group,
   SelectIcon as Icon,
   SelectItem as Item,
@@ -696,8 +696,8 @@ export {
   SelectItemText as ItemText,
   SelectList as List,
   SelectLabel as Label,
-  SelectScrollDownButton as ScrollDownButton,
-  SelectScrollUpButton as ScrollUpButton,
+  SelectScrollDownArrow as ScrollDownArrow,
+  SelectScrollUpArrow as ScrollUpArrow,
   SelectSeparator as Separator,
   SelectTrigger as Trigger,
   SelectValue as Value,

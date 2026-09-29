@@ -68,10 +68,10 @@ describeNative("Select item registration", () => {
             <SelectPrimitive.Trigger style={triggerStyle}>
               <SelectPrimitive.Value placeholder="Choose" />
             </SelectPrimitive.Trigger>
-            <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+            <SelectPrimitive.Popup side="bottom" sideOffset={4} style={contentStyle}>
               <WrappedItem value="alpha" style={itemStyle}>Alpha</WrappedItem>
               <WrappedItem value="beta" style={itemStyle}>Beta</WrappedItem>
-            </SelectPrimitive.Content>
+            </SelectPrimitive.Popup>
           </SelectPrimitive.Root>
           <text>{`Value: ${value ?? "none"}`}</text>
         </div>
@@ -98,12 +98,12 @@ describeNative("Select item registration", () => {
             <SelectPrimitive.Trigger style={triggerStyle}>
               <SelectPrimitive.Value placeholder="Choose" />
             </SelectPrimitive.Trigger>
-            <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+            <SelectPrimitive.Popup side="bottom" sideOffset={4} style={contentStyle}>
               <WrappedItem value="disabled" disabled style={itemStyle}>
                 Disabled
               </WrappedItem>
               <WrappedItem value="enabled" style={itemStyle}>Enabled</WrappedItem>
-            </SelectPrimitive.Content>
+            </SelectPrimitive.Popup>
           </SelectPrimitive.Root>
           <text>{`Value: ${value ?? "none"}`}</text>
         </div>
@@ -128,12 +128,12 @@ describeNative("Select item registration", () => {
             <SelectPrimitive.Trigger style={triggerStyle}>
               <SelectPrimitive.Value placeholder="Choose" />
             </SelectPrimitive.Trigger>
-            <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+            <SelectPrimitive.Popup side="bottom" sideOffset={4} style={contentStyle}>
               <WrappedItem value="alpha" style={itemStyle}>Alpha</WrappedItem>
               {showBeta ? (
                 <WrappedItem value="beta" style={itemStyle}>Beta</WrappedItem>
               ) : null}
-            </SelectPrimitive.Content>
+            </SelectPrimitive.Popup>
           </SelectPrimitive.Root>
           <text>{`Value: ${value ?? "none"}`}</text>
         </div>
@@ -162,11 +162,11 @@ describeNative("Select item registration", () => {
             <SelectPrimitive.Trigger style={triggerStyle}>
               <SelectPrimitive.Value placeholder="Choose" />
             </SelectPrimitive.Trigger>
-            <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+            <SelectPrimitive.Popup side="bottom" sideOffset={4} style={contentStyle}>
               <StyledWrapper testId="styled-wrapper" value="alpha" style={itemStyle}>
                 Alpha
               </StyledWrapper>
-            </SelectPrimitive.Content>
+            </SelectPrimitive.Popup>
           </SelectPrimitive.Root>
           <text>{`Value: ${value ?? "none"}`}</text>
         </div>
@@ -208,13 +208,13 @@ describeNative("Select item order (issue #387)", () => {
           <SelectPrimitive.Trigger data-testid="trigger" style={triggerStyle}>
             <SelectPrimitive.Value placeholder="Choose" />
           </SelectPrimitive.Trigger>
-          <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+          <SelectPrimitive.Popup side="bottom" sideOffset={4} style={contentStyle}>
             <SelectPrimitive.Item value="alpha" style={itemStyle}>Alpha</SelectPrimitive.Item>
             {show ? (
               <SelectPrimitive.Item value="beta" style={itemStyle}>Beta</SelectPrimitive.Item>
             ) : null}
             <SelectPrimitive.Item value="gamma" style={itemStyle}>Gamma</SelectPrimitive.Item>
-          </SelectPrimitive.Content>
+          </SelectPrimitive.Popup>
         </SelectPrimitive.Root>
         <text>{`Value: ${value ?? "none"}`}</text>
       </div>
@@ -261,13 +261,13 @@ describeNative("Select item order (issue #387)", () => {
             <SelectPrimitive.Trigger data-testid="trigger" style={triggerStyle}>
               <SelectPrimitive.Value placeholder="Choose" />
             </SelectPrimitive.Trigger>
-            <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+            <SelectPrimitive.Popup side="bottom" sideOffset={4} style={contentStyle}>
               {order.map((itemValue) => (
                 <SelectPrimitive.Item key={itemValue} value={itemValue} style={itemStyle}>
                   {itemValue === "alpha" ? "Alpha" : "Beta"}
                 </SelectPrimitive.Item>
               ))}
-            </SelectPrimitive.Content>
+            </SelectPrimitive.Popup>
           </SelectPrimitive.Root>
           <text>{`Value: ${value ?? "none"}`}</text>
         </div>
@@ -310,7 +310,7 @@ describeNative("Select item identity (issue #420)", () => {
             <SelectPrimitive.Trigger data-testid="trigger" style={triggerStyle}>
               <SelectPrimitive.Value placeholder="Choose" />
             </SelectPrimitive.Trigger>
-            <SelectPrimitive.Content
+            <SelectPrimitive.Popup
               ref={contentRef}
               side="bottom"
               sideOffset={4}
@@ -324,7 +324,7 @@ describeNative("Select item identity (issue #420)", () => {
                   Beta
                 </SelectPrimitive.Item>
               </SelectPrimitive.Group>
-            </SelectPrimitive.Content>
+            </SelectPrimitive.Popup>
           </SelectPrimitive.Root>
           <text>{`Value: ${value ?? "none"}`}</text>
         </div>
@@ -367,13 +367,13 @@ describeNative("Select multiple selection (issue #612)", () => {
 
   function Options() {
     return (
-      <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+      <SelectPrimitive.Popup side="bottom" sideOffset={4} style={contentStyle}>
         <SelectPrimitive.List>
           <SelectPrimitive.Item value="alpha" style={itemStyle}>Alpha</SelectPrimitive.Item>
           <SelectPrimitive.Item value="beta" style={itemStyle}>Beta</SelectPrimitive.Item>
           <SelectPrimitive.Item value="gamma" style={itemStyle}>Gamma</SelectPrimitive.Item>
         </SelectPrimitive.List>
-      </SelectPrimitive.Content>
+      </SelectPrimitive.Popup>
     )
   }
 
@@ -452,14 +452,14 @@ describeNative("Select multiple selection (issue #612)", () => {
             <SelectPrimitive.Value />
             <SelectPrimitive.Icon ref={iconRef}>Icon</SelectPrimitive.Icon>
           </SelectPrimitive.Trigger>
-          <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+          <SelectPrimitive.Popup side="bottom" sideOffset={4} style={contentStyle}>
             <SelectPrimitive.List ref={listRef}>
               <SelectPrimitive.Item ref={itemRef} value="alpha" style={itemStyle}>
                 <SelectPrimitive.ItemIndicator ref={indicatorRef}>Check</SelectPrimitive.ItemIndicator>
                 <SelectPrimitive.ItemText ref={textRef}>Alpha</SelectPrimitive.ItemText>
               </SelectPrimitive.Item>
             </SelectPrimitive.List>
-          </SelectPrimitive.Content>
+          </SelectPrimitive.Popup>
         </SelectPrimitive.Root>
       </div>
     )

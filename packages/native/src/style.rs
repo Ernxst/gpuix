@@ -984,6 +984,7 @@ pub struct StyleDesc {
     pub overflow: Option<String>,
     pub overflow_x: Option<String>,
     pub overflow_y: Option<String>,
+    pub scrollbar_width: Option<String>,
     pub clip_path: Option<gpui::ClipPath>,
 
     pub cursor: Option<String>,
@@ -3312,6 +3313,13 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             "userSelect",
             user_select,
             ["auto", "text", "none"]
+        );
+        enum_field!(
+            key,
+            value,
+            "scrollbarWidth",
+            scrollbar_width,
+            ["auto", "none"]
         );
         // Browsers use touch-action to decide which built-in gestures to
         // withhold. GPUI has no corresponding gesture handling, so shared

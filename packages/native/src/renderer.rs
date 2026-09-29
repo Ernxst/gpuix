@@ -16589,6 +16589,11 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         Some("visible") => el = el.visible(),
         _ => {}
     }
+    match style.scrollbar_width.as_deref() {
+        Some("auto") => el = el.scrollbar_width(gpui::AbsoluteLength::default()),
+        Some("none") => el = el.scrollbar_width(gpui::px(0.)),
+        _ => {}
+    }
     el.style().clip_path.clone_from(&style.clip_path);
     match style.display.as_deref() {
         Some("none") => el = el.hidden(),
@@ -17019,6 +17024,33 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     }
 
     el
+}
+
+#[cfg(test)]
+mod scrollbar_width_style_tests {
+    use super::*;
+    use gpui::prelude::*;
+
+    #[test]
+    fn maps_shared_scrollbar_width_keywords_to_gpui_lengths() {
+        let mut auto = apply_styles(
+            gpui::div(),
+            &StyleDesc {
+                scrollbar_width: Some("auto".into()),
+                ..StyleDesc::default()
+            },
+        );
+        assert_eq!(auto.style().scrollbar_width, Some(gpui::AbsoluteLength::default()));
+
+        let mut none = apply_styles(
+            gpui::div(),
+            &StyleDesc {
+                scrollbar_width: Some("none".into()),
+                ..StyleDesc::default()
+            },
+        );
+        assert_eq!(none.style().scrollbar_width, Some(gpui::px(0.).into()));
+    }
 }
 
 // ── Event emission ───────────────────────────────────────────────────

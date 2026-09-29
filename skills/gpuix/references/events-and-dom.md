@@ -20,10 +20,10 @@ GPU-IX dispatches its own synthetic events over the retained host tree (`package
 
 - **`FocusEvent.relatedTarget` is always `null`.** "Close on blur unless focus moved inside me" treats every blur as focus leaving.
 - **`ref.current.id` is a number**, the native element id. The authored `id` is `ref.current.getAttribute("id")` or `ref.current.props.id`.
-- **Refs have no `isConnected` (#660), `closest`, `querySelector`, `dataset`, `style`, `classList`, `children`, `parentNode`, `textContent`, `addEventListener`, `setAttribute` or `offsetWidth`.** `el.contains(el)` reports whether a ref is still mounted.
+- **Refs have no `closest`, `querySelector`, `dataset`, `style`, `classList`, `children`, `parentNode`, `textContent`, `addEventListener`, `setAttribute` or `offsetWidth`.** `isConnected` reports whether the ref is mounted in its root.
 - **`window` is `globalThis`.** Under Bun `window.addEventListener("resize" | "keydown" | "blur", …)` registers without error and never fires. Use `useWindowSize()` for resize and a root `onKeyDown` for shortcuts.
 - **`document` answers `getElementById`, `activeElement`, `body`, `defaultView`, and `pointerup`/`pointercancel` listeners only.** Other listener types are ignored with one warning; `documentElement` is `undefined`, and `createElement`, `querySelector` and `dispatchEvent` are undefined and throw when called.
-- **Not installed anywhere**: `getComputedStyle`, `matchMedia`, `MutationObserver`, `IntersectionObserver`, `innerWidth`/`innerHeight`, `devicePixelRatio`, `DOMRect`, `CSS`, `KeyboardEvent`, `MouseEvent`, `FocusEvent`, `requestIdleCallback`.
+- **Not installed anywhere**: `matchMedia`, `MutationObserver`, `IntersectionObserver`, `innerWidth`/`innerHeight`, `devicePixelRatio`, `DOMRect`, `CSS`, `KeyboardEvent`, `MouseEvent`, `FocusEvent`, `requestIdleCallback`.
 - **Keys pressed with nothing focused reach only the root element's own `onKeyDown`/`onKeyUp`.** Render one top-level element and put app shortcuts on it. With several top-level children (`<><App /><Toaster /></>`) GPU-IX inserts an implicit root with no handlers, and no-focus shortcuts are lost (#619).
 - **Only elements with a focus handle can take focus.** A handle comes from `tabIndex`, a key/focus/blur listener (capture forms included), `onAccessibilityAction`, or a `focusWithin` style; inputs, textareas and choice/range inputs have one already. `ref.focus()` on a bare `div` does nothing, and so does `autoFocus`: it focuses only an element that is already focusable. Adding `onKeyDown` makes an element focusable but not a Tab stop.
 - **Enter and Space fire `onClick` on a focused element that has one or sits inside one**: focus on a `tabIndex` child inside a clickable row, and Enter fires the row's `onClick`. An `<a href>` takes Enter only; checkboxes and radios take Space only. In the DOM only buttons and links activate this way. Code that also calls its own click on Enter fires twice unless it calls `preventDefault()` on that keydown.
@@ -105,7 +105,7 @@ A ref is the host instance itself. Type refs as `PublicInstance`, `InputPublicIn
 | `scrollTop`, `scrollLeft` (read/write), `scrollWidth`, `scrollHeight`, `clientWidth`, `clientHeight`, `scrollTo()` | Only `overflow: scroll`/`auto` and `virtual-list` scroll; `overflow: hidden` reports 0 and ignores writes. `scrollTo` is instant. |
 | `scrollIntoView(opts)` | `block: "start"` or `"nearest"`; `center`, `end`, `false` and any `inline` other than `nearest` fall back to nearest with a warning, and throw in strict mode. |
 | `getBoundingClientRect()` | Plain object in window coordinates; all zeros when unpainted. `getBounds()` returns `null` instead. |
-| `matches(selector)` | `:focus`, `:focus-visible`, `:hover`, `:active` only; anything else throws `SyntaxError`. |
+| `matches(selector)` | `:focus`, `:focus-visible`, `:hover`, `:active`, `:disabled`, `:enabled`; disabled-state selectors follow `disabled` on `button`, `input`, and `textarea`. Anything else throws `SyntaxError`. |
 | `contains(other)`, `compareDocumentPosition(other)` | Retained-tree answers; `DOCUMENT_POSITION_*` constants are exported from `@gpuix/react` and exposed on the `Node` shim. |
 | `getAttribute(name)`, `hasAttribute(name)` | Read props case-insensitively (`aria-*`, `data-*`, `id`, `for`, `hidden`); `class` and `style` return `null`. |
 | Inputs | `value`, `selectionStart`, `selectionEnd`, `selectionDirection`, `setSelectionRange()`, `select()`, `checked`, `defaultChecked`, `indeterminate`, `valueAsNumber` (range only), `form`, `validity`, `validationMessage`, `setCustomValidity()`; see `elements.md`. |
@@ -122,6 +122,7 @@ Absent: see Traps. `instanceof HTMLElement` works only after `import "@gpuix/rea
 | `requestAnimationFrame`, `cancelAnimationFrame` | The native frame clock. |
 | `window`, `self` | `globalThis`. |
 | `scrollTo` | No-op. |
+| `getComputedStyle(element)` | `display` and `visibility` from resolved inline or compiled CSS module styles; defaults to `block` / `visible`. No other properties. |
 | `ResizeObserver` | Native-backed; observes refs; entries are plain objects delivered a frame after paint; types still claim DOM shapes (#650). |
 | `Image` | Canvas image loader (`src`, `decode()`, `naturalWidth`, `naturalHeight`). |
 | `Node`, `Element`, `HTMLElement`, `HTMLDivElement`, `HTMLButtonElement`, `HTMLInputElement`, `HTMLTextAreaElement` | `instanceof` only; empty prototypes; `new` throws; no `Node.*` constants. |
@@ -148,7 +149,8 @@ The globals are typed as full DOM types although the objects are partial (#649).
 | `document.createElement`, `createTextNode`, `createTreeWalker`, `querySelector(All)`, `getElementsBy*`, `documentElement`, `hasFocus`, `getSelection`, `dispatchEvent` | absent |
 | `window.addEventListener` (resize, keydown, blur, focus) | registers, never fires |
 | `window.innerWidth`/`innerHeight`/`devicePixelRatio`/`visualViewport` | absent; use `useWindowSize()` |
-| `getComputedStyle`, `matchMedia`, `MutationObserver`, `IntersectionObserver`, `requestIdleCallback`, `DOMRect`, `CSS.supports`/`CSS.escape` | absent |
+| `getComputedStyle` | partial: `display` and `visibility` from resolved inline or compiled CSS module styles; defaults to `block` / `visible` |
+| `matchMedia`, `MutationObserver`, `IntersectionObserver`, `requestIdleCallback`, `DOMRect`, `CSS.supports`/`CSS.escape` | absent |
 | `KeyboardEvent`, `MouseEvent`, `FocusEvent` constructors | absent |
 | `ResizeObserver`, `requestAnimationFrame`, `PointerEvent`, `navigator.clipboard.readText`/`writeText` | present (via `globals`) |
 | `HTMLAnchorElement`, `HTMLSelectElement`, `HTMLLabelElement`, `HTMLFormElement`, `SVGElement`, `ShadowRoot` | absent |
@@ -158,15 +160,16 @@ The globals are typed as full DOM types although the objects are partial (#649).
 
 ## Third-party headless libraries
 
-No headless UI library runs in the repository's test suite. The Base UI rows come from fixtures that copy Base UI 1.8.0's DOM calls, except where an issue records a real run.
+Base UI 1.8.0 keyboard navigation below was run with its real package in a native TestRoot. Other rows marked as shaped fixtures copy the package's DOM calls.
 
 | Library | Status |
 |---|---|
 | TanStack Router `Link`, `createLink` | Works (real package; needs `globals` for `window` and `scrollTo`). |
-| Base UI Tabs, Checkbox, Switch, Radio clicks, ToggleGroup and Toolbar roving focus, Slider, NumberField, Collapsible/Accordion styles | Work in shaped fixtures. |
-| Base UI RadioGroup and other `CompositeList` keyboard navigation | Fails: no `isConnected`, so the list is empty (#660). |
+| Base UI ToggleGroup Right Arrow, Toolbar Right Arrow, RadioGroup Right Arrow, Tabs Right Arrow | Work with the real Base UI 1.8.0 package in a native TestRoot; focus moves to the next item. |
+| Base UI Checkbox, Switch, Radio clicks, Slider, NumberField, Collapsible/Accordion styles | Work in shaped fixtures. |
+| Base UI `CompositeList` keyboard navigation | Works with the real Base UI 1.8.0 package in a native TestRoot; refs expose `isConnected` and Right Arrow moves focus. |
 | Base UI Autocomplete | Typing does not update the value (#579). |
-| Base UI Popover, Menu, Select, Tooltip, Dialog, Combobox; Floating UI; Radix; React Aria | Expected to fail (not run): they need `getComputedStyle`, `documentElement`, element listeners, document `pointerdown`/`keydown`/`focusin`, `MutationObserver`, portals into `document.body`, or blur `relatedTarget`. |
+| Base UI Popover, Menu, Select, Tooltip, Dialog, Combobox; Floating UI; Radix; React Aria | Expected to fail (not run): they need more than the supported `getComputedStyle` subset, `documentElement`, element listeners, document `pointerdown`/`keydown`/`focusin`, `MutationObserver`, portals into `document.body`, or blur `relatedTarget`. |
 
 Use the built-ins instead (`components.md`): `@gpuix/react/select`, `/combobox`, `/tooltip`, `/floating`, and `<anchored>` for other overlays.
 
@@ -174,7 +177,6 @@ Use the built-ins instead (`components.md`): `@gpuix/react/select`, `/combobox`,
 
 | Issue | Gap |
 |---|---|
-| #660 | Refs lack `isConnected`. |
 | #649 | `globals` installs partial facades under full DOM types. |
 | #650 | `ResizeObserver` types claim DOM targets and entries. |
 | #652 | No shared object-ref type across React DOM and GPU-IX; callback refs are the adapter. |

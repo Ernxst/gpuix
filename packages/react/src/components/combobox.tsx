@@ -24,7 +24,7 @@ import {
   setRefs,
   useControllableState,
 } from "./floating.js"
-import type { FloatingContentProps, StateStyle } from "./floating.js"
+import type { FloatingPopupProps, StateStyle } from "./floating.js"
 
 export type ComboboxValue = string | string[] | null
 
@@ -337,9 +337,9 @@ export const ComboboxValue = forwardRef<PublicInstance, ComboboxValueProps>(
   }
 )
 
-export const ComboboxContent = forwardRef<PublicInstance, FloatingContentProps>(
-  function ComboboxContent({ children, onMouseDownOutside, ...props }, ref) {
-    const context = useComboboxContext("ComboboxContent")
+export const ComboboxPopup = forwardRef<PublicInstance, FloatingPopupProps>(
+  function ComboboxPopup({ children, onMouseDownOutside, ...props }, ref) {
+    const context = useComboboxContext("ComboboxPopup")
     if (!context.open) return null
     return (
       <FloatingLayer
@@ -448,7 +448,7 @@ export const ComboboxSeparator = forwardRef<PublicInstance, Props>(
 
 export {
   Combobox as Root,
-  ComboboxContent as Content,
+  ComboboxPopup as Popup,
   ComboboxEmpty as Empty,
   ComboboxGroup as Group,
   ComboboxInput as Input,

@@ -18,7 +18,7 @@ import {
   render,
   requestAnimationFrame,
   Select,
-  SelectContent,
+  SelectPopup,
   SelectItem,
   SelectLabel,
   SelectTrigger,
@@ -1298,9 +1298,9 @@ function ChipSelect({
           </text>
           {caret && <Icon name="chevronDown" size={10.5} color={C.ghost} />}
         </SelectTrigger>
-        <SelectContent side="top" sideOffset={4} style={{ ...MENU, minWidth: menuWidth ?? 220 }}>
+        <SelectPopup side="top" sideOffset={4} style={{ ...MENU, minWidth: menuWidth ?? 220 }}>
           {children}
-        </SelectContent>
+        </SelectPopup>
       </div>
     </Select>
   )

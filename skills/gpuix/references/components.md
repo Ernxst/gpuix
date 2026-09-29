@@ -1,6 +1,6 @@
 # Built-in components and hooks
 
-GPU-IX ships its own headless Select, Combobox and Tooltip (`packages/react/src/components/`), a shared floating layer (`packages/react/src/floating.ts`), file pickers (`dialogs.ts`), `motion`/`AnimatePresence` and a few hooks. The repository's goal is Base UI parity, but the parts and props today are closer to Radix/shadcn. Use these rather than a DOM headless library, which does not run (`events-and-dom.md`).
+GPU-IX ships its own headless Select, Combobox and Tooltip (`packages/react/src/components/`), a shared floating layer (`packages/react/src/floating.ts`), file pickers (`dialogs.ts`), `motion`/`AnimatePresence` and a few hooks. The repository's goal is Base UI parity, but the parts and props today are closer to Radix/shadcn. Use these rather than relying on full DOM support from a third-party headless library; some Base UI components work in tested cases (`events-and-dom.md`).
 
 Each component is importable two ways: as a namespace from its subpath (`import * as Select from "@gpuix/react/select"`, then `Select.Root`, `Select.Item`, `Select.ItemText`), or as prefixed names from `@gpuix/react` (`Select`, `SelectItem`, `SelectItemText`; likewise `Combobox*` and `Tooltip*`).
 
@@ -26,7 +26,7 @@ Each component is importable two ways: as a namespace from its subpath (`import 
   | `SelectItem`, `ComboboxItem` | `{ selected, highlighted, disabled }` (also accepted as a `children` function) |
   | `SelectItemIndicator` | `{ selected }` |
 
-  Content, `ComboboxTrigger`, `ComboboxInput` and the Tooltip parts take plain styles; track their state yourself with `open`/`onOpenChange`.
+  `SelectPopup`, `ComboboxTrigger`, `ComboboxInput` and the Tooltip parts take plain styles; track their state yourself with `open`/`onOpenChange`.
 
   ```tsx
   <SelectItem value="a" style={({ highlighted, selected }) => ({ backgroundColor: highlighted ? "#2c2c2c" : "#1a1a1a", color: selected ? "#fff" : "#bbb" })}>
@@ -35,9 +35,9 @@ Each component is importable two ways: as a namespace from its subpath (`import 
   ```
 
 - **`asChild`, not `render`.** Only `SelectTrigger`, `ComboboxTrigger` and `TooltipTrigger` accept `asChild`. `SelectItem` and `ComboboxItem` always render their own `div`. The `asChild` child must be exactly one element that forwards its ref and host props.
-- **Each Root renders a wrapper `div`** with `display: flex; position: relative; alignItems: start` ahead of your `style`, and the popup is placed against that box. Base UI's Root renders nothing. Keep only the trigger and Content inside Root, or override Root's `style`.
-- **Popups have no Portal, cannot leave the window, and shift rather than flip.** Content is a deferred `<anchored fit="snap">` rendered in place; there is no `Portal`, `Positioner`, `Popup`, `Arrow` or `Backdrop` part.
-- **Give Content an opaque background.** It defaults to `#1A1A1A`; a translucent colour you set replaces that default and lets the page show through.
+- **Each Root renders a wrapper `div`** with `display: flex; position: relative; alignItems: start` ahead of your `style`, and the popup is placed against that box. Base UI's Root renders nothing. Keep only the trigger and Popup inside Root, or override Root's `style`.
+- **Popups have no Portal, cannot leave the window, and shift rather than flip.** Popup is a deferred `<anchored fit="snap">` rendered in place; there is no `Portal`, `Positioner`, `Arrow` or `Backdrop` part.
+- **Give Popup an opaque background.** It defaults to `#1A1A1A`; a translucent colour you set replaces that default and lets the page show through.
 - **Combobox filtering and keyboard navigation need `items: string[]` on Root and a function child on `ComboboxList`.** Static `ComboboxItem` children are never filtered, and one is keyboard-highlighted only when its value is in `items` and passes the filter, and `ComboboxEmpty` shows whenever the filtered list is empty (always, without `items`). This is the opposite of Select, where `items` is optional.
 - **A controlled Select cannot be cleared with `value={undefined}`**: `undefined` means uncontrolled, so it shows `defaultValue`, or the last value picked while it was uncontrolled. Values are `string` or `string[]`; there is no `null`. Remount with a new `key` to reset.
 - **Select keyboard support is minimal**: Up/Down, Ctrl+N/Ctrl+P, Enter, Space, Escape. No typeahead, Home/End or PageUp/PageDown, and the highlighted item is not scrolled into view.
@@ -48,9 +48,9 @@ Each component is importable two ways: as a namespace from its subpath (`import 
 
 ## Floating layer (`@gpuix/react/floating`)
 
-Exports `FloatingLayer`, `floatingRootStyle`, `mergeStyles`, `renderSlot`, `resolveStyle`, `setRefs`, and the types `FloatingContentProps`, `FloatingSide`, `FloatingAlign`, `StateStyle`. Select, Combobox and Tooltip Content are built on `FloatingLayer`.
+Exports `FloatingLayer`, `floatingRootStyle`, `mergeStyles`, `renderSlot`, `resolveStyle`, `setRefs`, and the types `FloatingPopupProps`, `FloatingSide`, `FloatingAlign`, `StateStyle`. Select, Combobox and Tooltip Popup parts are built on `FloatingLayer`.
 
-| `FloatingContentProps` | Default | Meaning |
+| `FloatingPopupProps` | Default | Meaning |
 |---|---|---|
 | `side` | `"bottom"` | `top`, `right`, `bottom`, `left` |
 | `align` | `"start"` | `start`, `center`, `end` |
@@ -59,33 +59,33 @@ Exports `FloatingLayer`, `floatingRootStyle`, `mergeStyles`, `renderSlot`, `reso
 | `collisionPadding` | 8 | Margin kept from the window edge when snapping inside it. |
 
 - The outer anchored surface takes only `visibility`, `opacity` and the border radii; everything else styles the inner content. Nested opacity is not multiplied.
-- An open Content blocks clicks on controls behind it; a closed one does not. `pointerEvents: "none"` turns that off.
+- An open Popup blocks clicks on controls behind it; a closed one does not. `pointerEvents: "none"` turns that off.
 - `renderSlot` (behind `asChild`) merges props onto its one child, composes event handlers rather than replacing them, shallow-merges `style`, and merges refs. It throws `asChild requires exactly one React element` otherwise.
 
 ## Select (`@gpuix/react/select`)
 
-Parts (prefixed names; drop `Select` for the namespace form): `Select` (Root), `SelectTrigger`, `SelectValue`, `SelectIcon`, `SelectContent`, `SelectList`, `SelectItem`, `SelectItemText`, `SelectItemIndicator`, `SelectGroup`, `SelectLabel` (a group label), `SelectSeparator`, `SelectScrollUpButton`, `SelectScrollDownButton` (both inert).
+Parts (prefixed names; drop `Select` for the namespace form): `Select` (Root), `SelectTrigger`, `SelectValue`, `SelectIcon`, `SelectPopup`, `SelectList`, `SelectItem`, `SelectItemText`, `SelectItemIndicator`, `SelectGroup`, `SelectLabel` (a group label), `SelectSeparator`, `SelectScrollUpArrow`, `SelectScrollDownArrow` (both inert).
 
 **Root props**: `value`/`defaultValue` (`string`, or `string[]` with `multiple`), `onValueChange(value)` (fires only on change), `open`/`defaultOpen`/`onOpenChange`, `multiple`, `disabled`, `items?: { value, label?, textValue? }[]`, and host props.
 
-- **`items` is optional.** Keyboard navigation and clicks use the mounted `SelectItem`s, which register even while closed (Content stays mounted as `display: none`), in document order, including items wrapped in your own components. `SelectValue` shows the matching `items` entry's label (an entry with no `label` or `textValue` shows the raw value), else the registered item's `SelectItemText`, `textValue` or plain-text children, else the raw value. Pass `items` only when the closed label must be a rich node. Multiple values join with `", "`.
-- **Behaviour**: opening highlights the selected item and focuses Content; closing refocuses the Trigger; single mode closes on select, multiple mode toggles and stays open; a press outside closes (and the same press on the Trigger does not reopen); hovering highlights; disabled items are skipped; navigation wraps; Escape calls `onEscapeKeyDown` then closes.
+- **`items` is optional.** Keyboard navigation and clicks use the mounted `SelectItem`s, which register even while closed (Popup stays mounted as `display: none`), in document order, including items wrapped in your own components. `SelectValue` shows the matching `items` entry's label (an entry with no `label` or `textValue` shows the raw value), else the registered item's `SelectItemText`, `textValue` or plain-text children, else the raw value. Pass `items` only when the closed label must be a rich node. Multiple values join with `", "`.
+- **Behaviour**: opening highlights the selected item and focuses Popup; closing refocuses the Trigger; single mode closes on select, multiple mode toggles and stays open; a press outside closes (and the same press on the Trigger does not reopen); hovering highlights; disabled items are skipped; navigation wraps; Escape calls `onEscapeKeyDown` then closes.
 - **ARIA**: Trigger `role="button"`, `ariaExpanded`, `ariaHasPopup="listbox"`; List `role="listbox"`; Item `role="option"`, `ariaSelected`.
-- **Missing from Base UI**: Root renders an element; no field `Label`, `Portal`, `Positioner`, `Popup`, `Arrow`, `Backdrop`; no `name`, `form`, `required`, `readOnly`, `modal`, `isItemEqualToValue`, `itemToStringLabel`, `alignItemWithTrigger`, flip or sticky positioning; string values only; `onValueChange` has no event details.
+- **Missing from Base UI**: Root renders an element; no field `Label`, `GroupLabel`, `Portal`, `Positioner`, `Arrow`, `Backdrop`; no `name`, `form`, `required`, `readOnly`, `modal`, `isItemEqualToValue`, `itemToStringLabel`, `alignItemWithTrigger`, flip or sticky positioning; string values only; `onValueChange` has no event details.
 
 ## Combobox (`@gpuix/react/combobox`)
 
-Parts: `Root`, `Input`, `Trigger`, `Value`, `Content`, `List`, `Item`, `Empty`, `Group`, `Label`, `Separator` (the last three are plain `div`s).
+Parts: `Root`, `Input`, `Trigger`, `Value`, `Popup`, `List`, `Item`, `Empty`, `Group`, `Label`, `Separator` (the last three are plain `div`s).
 
 ```tsx
 import * as Combobox from "@gpuix/react/combobox"
 
 <Combobox.Root items={frameworks}>
   <Combobox.Input placeholder="Framework" />
-  <Combobox.Content>
+  <Combobox.Popup>
     <Combobox.Empty>No match</Combobox.Empty>
     <Combobox.List>{(item) => <Combobox.Item key={item} value={item}>{item}</Combobox.Item>}</Combobox.List>
-  </Combobox.Content>
+  </Combobox.Popup>
 </Combobox.Root>
 ```
 
@@ -93,21 +93,21 @@ import * as Combobox from "@gpuix/react/combobox"
 - **Default filter**: trimmed, case-insensitive substring; prefix matches first, then `items` order.
 - **Input** is a native `<input>`; click, focus and typing each open the popup. Escape closes; Up/Down and Ctrl+N/Ctrl+P move the highlight (wrapping, skipping disabled) but do not reopen after Escape; Enter selects the highlighted item, and does nothing with no highlight.
 - **Selection**: single mode sets the value, writes it into the input and closes; multiple mode toggles, clears the input and stays open.
-- **Content** unmounts while closed; a press outside closes it; focus stays in the input.
-- **Missing from Base UI**: `InputGroup`, `Icon`, `Clear`, `Chips`, `Chip`, `ItemIndicator`, `Status`, `Portal`, `Positioner`, `Popup`, `Arrow`; `limit`, `virtualized`, `openOnInputClick`, `grid`, `inline`, `readOnly`, `required`, `name`; non-string items; ARIA.
+- **Popup** unmounts while closed; a press outside closes it; focus stays in the input.
+- **Missing from Base UI**: `InputGroup`, `Icon`, `Clear`, `Chips`, `Chip`, `ItemIndicator`, `Status`, `Portal`, `Positioner`, `GroupLabel`, `Arrow`; `limit`, `virtualized`, `openOnInputClick`, `grid`, `inline`, `readOnly`, `required`, `name`; non-string items; ARIA.
 
 ## Tooltip (`@gpuix/react/tooltip`)
 
-Parts: `Provider`, `Root`, `Trigger`, `Content`.
+Parts: `Provider`, `Root`, `Trigger`, `Popup`.
 
 | Part | Props | Behaviour |
 |---|---|---|
-| `Provider` | `delayDuration` (0), `skipDelayDuration` (300), `disableHoverableContent` | Within `skipDelayDuration` of a close, the next tooltip opens without delay. |
-| `Root` | `open`/`defaultOpen`/`onOpenChange`, `delayDuration`, `disableHoverableContent` | Wrapper `div`. |
+| `Provider` | `delay` (0), `timeout` (300), `disableHoverableContent` | Within `timeout` of a close, the next tooltip opens without delay. |
+| `Root` | `open`/`defaultOpen`/`onOpenChange`, `delayDuration`, `disableHoverablePopup` | Wrapper `div`. |
 | `Trigger` | `asChild`; `tabIndex` 0 unless `asChild` | Hover schedules open; leave schedules close (80 ms when content is hoverable); press closes; focus opens immediately; blur closes; Escape closes while the trigger has focus. |
-| `Content` | `FloatingContentProps` with `side="top"`, `align="center"` | Unmounts while closed; hovering it keeps it open unless `disableHoverableContent`. |
+| `Popup` | `FloatingPopupProps` with `side="top"`, `align="center"` | Unmounts while closed; hovering it keeps it open unless `disableHoverablePopup`. |
 
-Base UI names these `delay`/`closeDelay`/`timeout`; there is no `disabled`, `closeOnClick` or per-trigger delay.
+Base UI names the provider's opening delay and sibling-tooltip timeout `delay` and `timeout`. It also has `closeDelay`, which GPU-IX's fixed 80 ms close timer does not expose. GPU-IX keeps `delayDuration` on Root, and `disableHoverableContent` on Provider, because those props do not have the same part boundary in Base UI.
 
 ## File pickers (`@gpuix/react/dialogs`)
 
@@ -137,7 +137,6 @@ All from `@gpuix/react`.
 
 | Issue | Gap |
 |---|---|
-| #660 | Base UI composite lists drop items (refs lack `isConnected`). |
 | #579 | Base UI Autocomplete typing does not update the value. |
 | #578 | No focus trap. |
 | #536 | No `ariaModal`. |

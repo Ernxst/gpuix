@@ -1948,7 +1948,7 @@ ref.current.scrollIntoView({ block: "nearest" })   // smallest revealing scroll
 
 ref.current.getBoundingClientRect()                // DOMRect-shaped measurement
 ref.current.getBounds()                            // the same box as {x, y, width, height}
-ref.current.matches(":focus")                     // :focus, :focus-visible, :hover, or :active
+ref.current.matches(":focus")                     // interaction and disabled-state pseudo-classes
 ref.current.tagName                               // "DIV" (aliases keep their authored name)
 ref.current.localName                             // "div"
 ref.current.hasAttribute("data-state")           // agrees with getAttribute()
@@ -1970,10 +1970,10 @@ element with no painted box reports an all-zero rect, as the DOM does. Use
 it returns `null` for the former.
 
 `ref.current.matches()` reads the live native interaction state for `:focus`,
-`:focus-visible`, `:hover`, and `:active`, so it stays current as focus and
-pointer state change. The same line works under `react-dom` for these four
-selectors. Other selectors throw a `SyntaxError` because this renderer
-deliberately supports only these state pseudo-classes.
+`:focus-visible`, `:hover`, and `:active`, and checks `:disabled` / `:enabled`
+from the `disabled` prop on `button`, `input`, and `textarea`. Other selectors
+throw a `SyntaxError` because this renderer deliberately supports only these
+pseudo-classes.
 
 `ref.current.compareDocumentPosition(other)` matches
 `Node.compareDocumentPosition()`: it returns the same bitmask a browser does —
@@ -2952,6 +2952,11 @@ add semantics and focus behavior, but no visual defaults.
 | `<blockquote>` | `blockquote` |
 | `<s>`, `<del>` | `deletion` |
 | `<dfn>` | `term`, named from its contents |
+| `<dl>` | `list` in HTML-AAM; AccessKit and Chromium expose `DescriptionList` |
+| `<dt>` | `term`, named from its contents |
+| `<dd>` | `definition` |
+| `<search>` | `search` landmark |
+| `<hr>` | horizontal `separator` |
 | `<figure>` | `figure` |
 | `<figcaption>` | `caption` |
 | `<mark>` | `mark` |
@@ -3389,9 +3394,9 @@ Each primitive has a dedicated namespace entry point:
 
 | Import | Main parts |
 |---|---|
-| `@gpuix/react/select` | `Root`, `Trigger`, `Value`, `Icon`, `Content`, `List`, `Item`, `ItemText`, `ItemIndicator` |
-| `@gpuix/react/combobox` | `Root`, `Input`, `Content`, `List`, `Item`, `Empty` |
-| `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Content` |
+| `@gpuix/react/select` | `Root`, `Trigger`, `Value`, `Icon`, `Popup`, `List`, `Item`, `ItemText`, `ItemIndicator` |
+| `@gpuix/react/combobox` | `Root`, `Input`, `Popup`, `List`, `Item`, `Empty` |
+| `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Popup` |
 | `@gpuix/react/floating` | `FloatingLayer`, `renderSlot` |
 
 ### Build a local Select
@@ -3429,11 +3434,11 @@ export const SelectTrigger = React.forwardRef<
   />
 ))
 
-export const SelectContent = React.forwardRef<
-  React.ElementRef<typeof SelectPrimitive.Content>,
-  SelectPrimitive.SelectContentProps
+export const SelectPopup = React.forwardRef<
+  React.ElementRef<typeof SelectPrimitive.Popup>,
+  SelectPrimitive.SelectPopupProps
 >(({ style, ...props }, ref) => (
-  <SelectPrimitive.Content
+  <SelectPrimitive.Popup
     ref={ref}
     sideOffset={6}
     {...props}
@@ -3479,7 +3484,7 @@ else its plain-text children.
 ```tsx
 import {
   Select,
-  SelectContent,
+  SelectPopup,
   SelectGroup,
   SelectItem,
   SelectTrigger,
@@ -3495,7 +3500,7 @@ const models = [
   <SelectTrigger>
     <SelectValue placeholder="Select a model" />
   </SelectTrigger>
-  <SelectContent>
+  <SelectPopup>
     <SelectGroup>
       {models.map((item) => (
         <SelectItem key={item.value} value={item.value}>
@@ -3503,7 +3508,7 @@ const models = [
         </SelectItem>
       ))}
     </SelectGroup>
-  </SelectContent>
+  </SelectPopup>
 </Select>
 ```
 
@@ -3521,7 +3526,7 @@ receives the complete selected array after each toggle:
     <SelectValue>{(selected) => Array.isArray(selected) && selected.length > 0 ? selected.join(', ') : 'Select resources'}</SelectValue>
     <SelectIcon>⌄</SelectIcon>
   </SelectTrigger>
-  <SelectContent>
+  <SelectPopup>
     <SelectList>
       {resources.map((resource) => (
         <SelectItem key={resource.value} value={resource.value}>
@@ -3530,7 +3535,7 @@ receives the complete selected array after each toggle:
         </SelectItem>
       ))}
     </SelectList>
-  </SelectContent>
+  </SelectPopup>
 </Select>
 ```
 
@@ -3577,7 +3582,7 @@ object:
 ```tsx
 <ComboboxPrimitive.Root items={['Next.js', 'SvelteKit', 'Astro']}>
   <ComboboxPrimitive.Input style={{ width: 220, height: 36, padding: 8 }} />
-  <ComboboxPrimitive.Content style={{ width: 220 }}>
+  <ComboboxPrimitive.Popup style={{ width: 220 }}>
     <ComboboxPrimitive.Empty>No frameworks found.</ComboboxPrimitive.Empty>
     <ComboboxPrimitive.List>
       {(item) => (
@@ -3586,19 +3591,19 @@ object:
         </ComboboxPrimitive.Item>
       )}
     </ComboboxPrimitive.List>
-  </ComboboxPrimitive.Content>
+  </ComboboxPrimitive.Popup>
 </ComboboxPrimitive.Root>
 ```
 
 ```tsx
-<TooltipPrimitive.Provider delayDuration={350}>
+<TooltipPrimitive.Provider delay={350}>
   <TooltipPrimitive.Root>
     <TooltipPrimitive.Trigger asChild>
       <div tabIndex={0} style={{ padding: 8 }}>Copy</div>
     </TooltipPrimitive.Trigger>
-    <TooltipPrimitive.Content side="top" sideOffset={6}>
+    <TooltipPrimitive.Popup side="top" sideOffset={6}>
       Copy message
-    </TooltipPrimitive.Content>
+    </TooltipPrimitive.Popup>
   </TooltipPrimitive.Root>
 </TooltipPrimitive.Provider>
 ```
@@ -3610,7 +3615,7 @@ snaps inside the window, and occludes controls behind it.
 
 ### Overlay menus
 
-Menus, tooltips, and dialogs must use **`SelectContent`**, **`ComboboxContent`**,
+Menus, tooltips, and dialogs must use **`SelectPopup`**, **`ComboboxPopup`**,
 or `<anchored deferred>`. Those paint in a later pass, on top of
 `<virtual-list>` and the rest of the page.
 
@@ -3624,9 +3629,9 @@ markdown through the menu, and clicks hit the text behind it.
     <SelectTrigger>
       <SelectValue />
     </SelectTrigger>
-    <SelectContent side="top" sideOffset={4} style={{ backgroundColor: '#232323' }}>
+    <SelectPopup side="top" sideOffset={4} style={{ backgroundColor: '#232323' }}>
       <SelectItem value="flash">DeepSeek V4 Flash</SelectItem>
-    </SelectContent>
+    </SelectPopup>
   </div>
 </Select>
 ```
@@ -4049,7 +4054,11 @@ surface as `div`: `main`, `header`, `footer`, `nav`, `section`, `article`,
 `aside`, `h1`–`h6`, `p`, `span`, `strong`, `em`, `ul`, `ol`, `li`, `a`,
 `button`, `kbd`, `abbr`, `address`, `b`, `blockquote`, `cite`, `del`, `dfn`,
 `figure`, `figcaption`, `i`, `ins`, `mark`, `menu`, `pre`, `s`, `samp`,
-`small`, `sub`, `sup`, `time`, `u`, and `var`.
+`small`, `sub`, `sup`, `time`, `u`, `var`, `dl`, `dt`, `dd`, `search`, and `hr`.
+
+Description lists and search landmarks keep their implicit accessibility roles.
+`<hr>` is a void horizontal separator with no default line; style its height and
+background or border to draw one.
 
 As with the existing aliases, the native renderer does not apply browser user
 agent styles. Author the presentation explicitly: for example, `pre` needs
@@ -4697,7 +4706,7 @@ a state override such as `hover`:
 />
 ```
 
-**Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` and `"auto"` create a native scrollable container with persistent scroll state (`"auto"` is identical to `"scroll"`: no scrollbar gutter is painted either way, so there is nothing to reserve)
+**Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` and `"auto"` create a native scrollable container with persistent scroll state (`"auto"` is identical to `"scroll"`: no scrollbar gutter is painted either way, so there is nothing to reserve). `scrollbarWidth` accepts the shared CSS values `"auto"` and `"none"`; `"thin"` is rejected because GPUI's numeric reserved width has no CSS-equivalent meaning for it.
 
 **Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `fontVariantNumeric` (`"normal"` or a space-separated set of `lining-nums` | `oldstyle-nums`, `proportional-nums` | `tabular-nums`, `diagonal-fractions` | `stacked-fractions`, `ordinal`, `slashed-zero`; inherited), `textDecoration` (`"underline"` | `"line-through"` | `"none"`), `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`. A bare number or numeric string, such as `1.4` or `"1.4"`, multiplies the resolved font size, matching `lineHeight` in React DOM; `"20px"` is an absolute length.
 
@@ -5223,11 +5232,11 @@ real platform and a native clipboard call would hit it.
 `import "@gpuix/react/globals"` is an opt-in, side-effect-only entry for code
 that assumes a browser: it installs exactly `requestAnimationFrame`,
 `cancelAnimationFrame`, `window`, `self`, `scrollTo`, `ResizeObserver`, `Image`,
-`navigator.clipboard`, `navigator.gpu`, `PointerEvent`, and the element
-constructors and `document` facade below on `globalThis`, and nothing else. Each
-name is installed only if it is not already present, so a real browser,
-Vitest's `jsdom`/`happy-dom` environment, or an earlier import of this module
-all win over the shim.
+`getComputedStyle`, `navigator.clipboard`, `navigator.gpu`, `PointerEvent`, and
+the element constructors and `document` facade below on `globalThis`, and
+nothing else. Each name is installed only if it is not already present, so a
+real browser, Vitest's `jsdom`/`happy-dom` environment, or an earlier import of
+this module all win over the shim.
 The entry also declares the WebGPU globals it installs: `navigator.gpu`,
 `GPUBufferUsage`, `GPUValidationError`, `GPUOutOfMemoryError`,
 `GPUInternalError`, and `GPUUncapturedErrorEvent`. The declarations describe
@@ -5243,6 +5252,12 @@ otherwise be undefined under GPUIX. `navigator.clipboard` is installed as the
 `clipboard` of its own, or as part of a newly defined `navigator` when none
 exists at all (Node has had a global `navigator` since v21, so the common case
 on the server is the former).
+
+`window.getComputedStyle(element)` returns a `GpuixComputedStyle` with only
+`display` and `visibility`. These values come from the element's resolved style,
+including inline `style` props and compiled CSS module `className` declarations;
+missing values default to `block` and `visible`. No other computed-style
+properties are answered.
 
 `Image` is the native-compatible constructor exported by `@gpuix/react`; its
 instances load through the most recently attached GPUIX root and support
@@ -5287,8 +5302,8 @@ same function, type, and capture flag twice registers it once, and removing it
 needs the same three. Capture listeners run first.
 
 The facade is not a DOM `Document` or `EventTarget`. It has no
-`createElement()`, `querySelector()`, or style computation, so code that needs
-them fails with a `TypeError` instead of running against a stand-in. Its
+`createElement()` or `querySelector()`. The separate `window.getComputedStyle()`
+shim answers only `display` and `visibility`. Its
 listener methods take no other event type, no `handleEvent` object, and
 neither the `once` nor the `signal` option: such a call registers nothing and
 logs one `console.warn`. There is no `dispatchEvent()` on the document, and

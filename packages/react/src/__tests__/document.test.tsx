@@ -97,6 +97,59 @@ describe("@gpuix/react/globals document", () => {
     expect(doc.body).toBeNull()
   })
 
+  it("answers Base UI's composite visibility and disabled checks on mounted refs", () => {
+    const enabled = createRef<PublicInstance>()
+    const disabled = createRef<PublicInstance>()
+    const disabledInput = createRef<PublicInstance>()
+    const disabledTextarea = createRef<PublicInstance>()
+    const hidden = createRef<PublicInstance>()
+    const app = mount(
+      <div>
+        <button ref={enabled} />
+        <button ref={disabled} disabled />
+        <input ref={disabledInput} disabled />
+        <textarea ref={disabledTextarea} disabled />
+        <div ref={hidden} style={{ display: "none", visibility: "hidden" }} />
+      </div>
+    )
+    const view = ownerDocument(enabled.current).defaultView!
+
+    expect(view.getComputedStyle(enabled.current as unknown as Element).display).toBe("block")
+    expect(view.getComputedStyle(enabled.current as unknown as Element).visibility).toBe("visible")
+    expect(view.getComputedStyle(hidden.current as unknown as Element).display).toBe("none")
+    expect(view.getComputedStyle(hidden.current as unknown as Element).visibility).toBe("hidden")
+    expect(enabled.current!.matches(":disabled")).toBe(false)
+    expect(enabled.current!.matches(":enabled")).toBe(true)
+    expect(disabled.current!.matches(":disabled")).toBe(true)
+    expect(disabled.current!.matches(":enabled")).toBe(false)
+    expect(disabledInput.current!.matches(":disabled")).toBe(true)
+    expect(disabledTextarea.current!.matches(":disabled")).toBe(true)
+
+    app.unmount()
+  })
+
+  it("answers display from a compiled CSS module className", async () => {
+    const source = new URL("../../../plugins/src/css-modules.ts", import.meta.url).href
+    const { transformGpuixCssModule } = await import(source)
+    const styles = await transformGpuixCssModule(
+      ".hidden { display: none; visibility: hidden; }",
+      "/fixture/hidden.module.css"
+    )
+    const hiddenClass = styles.hidden
+    Object.defineProperty(hiddenClass, Symbol.for("gpuix.compiledStyle"), { value: true })
+    const hidden = createRef<PublicInstance>()
+    const app = mount(<div ref={hidden} className={hiddenClass as unknown as string} />)
+
+    expect(
+      ownerDocument(hidden.current).defaultView!.getComputedStyle(hidden.current as unknown as Element).display
+    ).toBe("none")
+    expect(
+      ownerDocument(hidden.current).defaultView!.getComputedStyle(hidden.current as unknown as Element).visibility
+    ).toBe("hidden")
+
+    app.unmount()
+  })
+
   it("reads the most recently mounted root while two windows are open", () => {
     const olderRoot = createRef<PublicInstance>()
     const newerRoot = createRef<PublicInstance>()

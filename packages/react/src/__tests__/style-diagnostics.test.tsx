@@ -76,6 +76,31 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     }
   })
 
+  it("accepts shared scrollbar-width keywords and rejects browser-only thin", () => {
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    testRoot.render(
+      <>
+        <div data-testid="scrollbar-auto" style={{ scrollbarWidth: "auto" }} />
+        <div data-testid="scrollbar-none" style={{ scrollbarWidth: "none" }} />
+        <div data-testid="scrollbar-thin" style={{ scrollbarWidth: "thin" } as StyleDesc} />
+      </>,
+    )
+
+    expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([
+      expect.objectContaining({
+        elementType: "div",
+        message: expect.stringContaining('property "scrollbarWidth" rejected value "thin"'),
+      }),
+    ])
+    expect(testRoot.renderer.getResolvedStyle(
+      testRoot.renderer.findByTestId("scrollbar-auto")!.id,
+    )).toMatchObject({ scrollbarWidth: "auto" })
+    expect(testRoot.renderer.getResolvedStyle(
+      testRoot.renderer.findByTestId("scrollbar-none")!.id,
+    )).toMatchObject({ scrollbarWidth: "none" })
+  })
+
   it("diagnoses a populated virtual-list with no bounded height", () => {
     const testRoot = createTestRoot({ strictStyles: false })
 

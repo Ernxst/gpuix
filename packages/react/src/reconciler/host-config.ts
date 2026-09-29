@@ -7,6 +7,7 @@
 import { createContext } from "react"
 import { DefaultEventPriority } from "react-reconciler/constants.js"
 import { isCompiledStyle, unresolvedClassNames } from "../class-names.js"
+import { setResolvedStyle } from "../resolved-style.js"
 
 const NoEventPriority = 0
 import type {
@@ -306,6 +307,14 @@ function appendTrackedChild(parent: Instance, state: HostNodeState, child: HostN
   state.children.push(child)
   child.parentId = parent.id
   stateFor(child).parent = parent
+}
+
+function assertCanHaveChildren(parent: Instance, child: Instance | TextInstance): void {
+  if (parent.type !== "hr" && parent.type !== "input") return
+  const childDescription = "type" in child ? `<${child.type}>` : "text"
+  throw new Error(
+    `[gpuix] <${parent.type}> is a void element and cannot contain children; received ${childDescription}.`
+  )
 }
 
 /** This node and every ancestor up to (and including) its root, root first. */
@@ -670,8 +679,18 @@ function diffEventListeners(
 
 function sendStyle(container: Container, instance: Instance): void {
   const style = styleForRenderer(instance, container, instance.props)
+  setResolvedStyle(instance, style)
   if (style == null || Object.keys(style).length === 0) return
   container.renderer.setStyle(instance.id, style)
+}
+
+function isFormControl(instance: Pick<Instance, "type">): boolean {
+  return instance.type === "input" || instance.type === "textarea" || instance.type === "button"
+}
+
+function isDisabledFormControl(instance: Pick<Instance, "type" | "props">): boolean {
+  const { disabled } = instance.props
+  return isFormControl(instance) && (disabled === true || typeof disabled === "string")
 }
 
 // ── Custom prop forwarding ───────────────────────────────────────────
@@ -728,6 +747,11 @@ const DIV_ALIASES = new Set([
   "var",
   "label",
   "form",
+  "hr",
+  "dl",
+  "dt",
+  "dd",
+  "search",
 ])
 
 // Table elements keep their names in the retained tree for accessibility and
@@ -1291,7 +1315,7 @@ function nativeActivationKind(_type: string, props: Props): "anchor" | undefined
  * role (`p`, `span`, `strong`, `em`, `kbd`) or need their surroundings to
  * resolve, and are handled in `nativeRole`.
  */
-type NativeImplicitRole = NonNullable<Props["role"]> | "abbr"
+type NativeImplicitRole = NonNullable<Props["role"]> | "abbr" | "descriptionlist"
 
 const IMPLICIT_ROLES: Readonly<Record<string, NativeImplicitRole>> = {
   a: "link",
@@ -1303,6 +1327,9 @@ const IMPLICIT_ROLES: Readonly<Record<string, NativeImplicitRole>> = {
   button: "button",
   del: "deletion",
   dfn: "term",
+  dd: "definition",
+  dl: "descriptionlist",
+  dt: "term",
   figcaption: "caption",
   figure: "figure",
   h1: "heading",
@@ -1311,6 +1338,7 @@ const IMPLICIT_ROLES: Readonly<Record<string, NativeImplicitRole>> = {
   h4: "heading",
   h5: "heading",
   h6: "heading",
+  hr: "separator",
   li: "listitem",
   main: "main",
   mark: "mark",
@@ -1318,6 +1346,7 @@ const IMPLICIT_ROLES: Readonly<Record<string, NativeImplicitRole>> = {
   nav: "navigation",
   ol: "list",
   s: "deletion",
+  search: "search",
   // SVG-AAM gives a bare `<svg>` the graphics-document role.
   svg: "graphics-document",
   time: "time",
@@ -1546,6 +1575,14 @@ function customPropEntries(
   if (activationKind) entries.push(["activationKind", activationKind])
   const role = nativeRole(type, props, instance)
   if (role !== undefined) entries.push(["role", role])
+  if (
+    type === "hr" &&
+    role === "separator" &&
+    props.ariaOrientation === undefined &&
+    props["aria-orientation"] === undefined
+  ) {
+    entries.push(["ariaOrientation", "horizontal"])
+  }
   // `role` above is the *resolved* role the accessibility projection needs, so
   // an `<img>` carries one with nothing declared. The DOM has no attribute for
   // that, so the authored role is retained beside it, and it is the one a query
@@ -1721,9 +1758,7 @@ class HostElement implements Instance {
 
   focus(options?: FocusOptions): void {
     // A disabled form control cannot take focus, as in the DOM.
-    const formControl = this.type === "input" || this.type === "textarea" || this.type === "button"
-    const { disabled } = this.props
-    if (formControl && (disabled === true || typeof disabled === "string")) return
+    if (isDisabledFormControl(this)) return
     this.#container.native.focusElement?.(this.id, options?.preventScroll === true)
   }
 
@@ -1828,13 +1863,18 @@ class HostElement implements Instance {
       normalized !== ":focus" &&
       normalized !== ":focus-visible" &&
       normalized !== ":hover" &&
-      normalized !== ":active"
+      normalized !== ":active" &&
+      normalized !== ":disabled" &&
+      normalized !== ":enabled"
     ) {
       throw new SyntaxError(
         `Failed to execute 'matches' on 'Element': '${selector}' is not a supported selector. ` +
-          "Supported: :focus, :focus-visible, :hover, :active."
+          "Supported: :focus, :focus-visible, :hover, :active, :disabled, :enabled."
       )
     }
+
+    if (normalized === ":disabled") return isDisabledFormControl(this)
+    if (normalized === ":enabled") return isFormControl(this) && !isDisabledFormControl(this)
 
     const state = this.#container.native.getElementInteractionState?.(this.id)
     if (!state) return false
@@ -2381,6 +2421,9 @@ export const hostConfig = {
     rootContainerInstance: Container,
     hostContext: HostContext
   ): Instance {
+    if ((type === "hr" || type === "input") && props.children != null) {
+      throw new Error(`[gpuix] <${type}> is a void element and cannot contain children.`)
+    }
     if (hostContext?.isInsideText && type !== "text") {
       throw new InlineTextChildError(
         `GPUIX <text> can contain only strings and nested <text> elements; received <${type}>. ` +
@@ -2405,6 +2448,7 @@ export const hostConfig = {
   },
 
   appendChild(parent: Instance, child: Instance | TextInstance): void {
+    assertCanHaveChildren(parent, child)
     const parentState = materialize(parent)
     // Attach before materializing. Materializing sends the child's props, and a
     // context-dependent implicit role reads the ancestors this call installs;
@@ -2599,7 +2643,9 @@ export const hostConfig = {
     diagnoseVisuallyHiddenProp(instance, container, newProps)
     // Always resend style — per-element JSON is small, and this avoids
     // bugs from same-reference mutations or style removal.
-    container.renderer.setStyle(instance.id, styleForRenderer(instance, container, newProps) ?? {})
+    const resolvedStyle = styleForRenderer(instance, container, newProps)
+    container.renderer.setStyle(instance.id, resolvedStyle ?? {})
+    setResolvedStyle(instance, resolvedStyle)
     if (
       hasAnyEventListener(oldProps) ||
       hasAnyEventListener(newProps) ||
@@ -2644,6 +2690,7 @@ export const hostConfig = {
   },
 
   appendInitialChild(parent: Instance, child: Instance | TextInstance): void {
+    assertCanHaveChildren(parent, child)
     stateFor(parent).children.push(child)
     child.parentId = parent.id
     stateFor(child).parent = parent
@@ -2659,14 +2706,15 @@ export const hostConfig = {
     // asked to hide.
     const { hover: _hover, active: _active, ...base } =
       styleForRenderer(instance, containerFor(instance), instance.props) ?? {}
-    rendererFor(instance).setStyle(instance.id, { ...base, visibility: "hidden" })
+    const hiddenStyle = { ...base, visibility: "hidden" as const }
+    rendererFor(instance).setStyle(instance.id, hiddenStyle)
+    setResolvedStyle(instance, hiddenStyle)
   },
 
   unhideInstance(instance: Instance, props: Props): void {
-    rendererFor(instance).setStyle(
-      instance.id,
-      styleForRenderer(instance, containerFor(instance), props) ?? {},
-    )
+    const visibleStyle = styleForRenderer(instance, containerFor(instance), props)
+    rendererFor(instance).setStyle(instance.id, visibleStyle ?? {})
+    setResolvedStyle(instance, visibleStyle)
   },
 
   hideTextInstance(_textInstance: TextInstance): void {},
