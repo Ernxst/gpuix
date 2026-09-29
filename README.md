@@ -2961,7 +2961,8 @@ add semantics and focus behavior, but no visual defaults.
 `<td>` keep their element names in the native tree and expose the HTML-AAM
 table, caption, rowgroup, row, header and cell roles. A caption names its table.
 An explicit `role`, `aria-label` or `aria-labelledby` takes precedence over the
-implicit role or caption name.
+implicit role or caption name. A row takes its name from its cells; the table
+and row groups do not take names from their contents.
 
 Native table elements use the same ordinary GPUI box layout as `<div>`; they do
 not run the browser's automatic table layout algorithm. Use grid with a shared

@@ -444,7 +444,7 @@ fn resolved_role(tree: &RetainedTree, element: &RetainedElement) -> Option<Acces
         "table" => Some((gpui::Role::Table, false)),
         "caption" => Some((gpui::Role::Caption, true)),
         "thead" | "tbody" | "tfoot" => Some((gpui::Role::RowGroup, false)),
-        "tr" => Some((gpui::Role::Row, false)),
+        "tr" => Some((gpui::Role::Row, true)),
         "td" => Some((gpui::Role::Cell, true)),
         "th" => Some((table_cell_header_role(tree, element), true)),
         _ => None,

@@ -111,6 +111,23 @@ describeNative("accessibility", () => {
     )
   })
 
+  it("names native table rows from their cells without naming the table", () => {
+    testRoot.render(
+      <div style={{ width: 300, height: 200 }}>
+        <table aria-label="Parts">
+          <tbody>
+            <tr>
+              <td>Part 1</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>,
+    )
+
+    expect(testRoot.getByRole("row", { name: "Part 1" })).toBeDefined()
+    expect(testRoot.getByRole("table", { name: "Parts" })).toBeDefined()
+  })
+
   it("resolves header positions when rows are direct table children", () => {
     testRoot.render(
       <table>
