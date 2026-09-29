@@ -8,8 +8,9 @@
  * `pointercancel` function listeners, which run when a press in the window
  * ends or is cancelled; see `./document-listeners.js`. It is not a DOM
  * `Document` or `EventTarget`: it has no `createElement`, `querySelector`,
- * other event types, or style computation, and nothing here pretends
- * otherwise.
+ * other event types, or style computation. The separate
+ * `window.getComputedStyle()` shim answers only `display` and `visibility`;
+ * it does not make this facade a full DOM document.
  *
  * GPU-IX mounts one container per renderer and one renderer per native window,
  * so the facade reads the most recently attached container. Separate documents

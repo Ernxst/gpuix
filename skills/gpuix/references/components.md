@@ -1,6 +1,6 @@
 # Built-in components and hooks
 
-GPU-IX ships its own headless Select, Combobox and Tooltip (`packages/react/src/components/`), a shared floating layer (`packages/react/src/floating.ts`), file pickers (`dialogs.ts`), `motion`/`AnimatePresence` and a few hooks. The repository's goal is Base UI parity, but the parts and props today are closer to Radix/shadcn. Use these rather than a DOM headless library, which does not run (`events-and-dom.md`).
+GPU-IX ships its own headless Select, Combobox and Tooltip (`packages/react/src/components/`), a shared floating layer (`packages/react/src/floating.ts`), file pickers (`dialogs.ts`), `motion`/`AnimatePresence` and a few hooks. The repository's goal is Base UI parity, but the parts and props today are closer to Radix/shadcn. Use these rather than relying on full DOM support from a third-party headless library; some Base UI components work in tested cases (`events-and-dom.md`).
 
 Each component is importable two ways: as a namespace from its subpath (`import * as Select from "@gpuix/react/select"`, then `Select.Root`, `Select.Item`, `Select.ItemText`), or as prefixed names from `@gpuix/react` (`Select`, `SelectItem`, `SelectItemText`; likewise `Combobox*` and `Tooltip*`).
 
@@ -137,7 +137,6 @@ All from `@gpuix/react`.
 
 | Issue | Gap |
 |---|---|
-| #660 | Base UI composite lists drop items (refs lack `isConnected`). |
 | #579 | Base UI Autocomplete typing does not update the value. |
 | #578 | No focus trap. |
 | #536 | No `ariaModal`. |
