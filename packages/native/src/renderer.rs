@@ -12589,7 +12589,16 @@ fn build_element_with_parent_layout(
         "div" | "text" | "table" | "caption" | "thead" | "tbody" | "tfoot" | "tr"
         | "th" | "td" => {
             ctx.custom_registry.destroy(id);
-            build_host_container(element, style, box_insets, current_color, ctx, window, cx)
+            build_host_container(
+                element,
+                style,
+                box_insets,
+                current_color,
+                focus_within,
+                ctx,
+                window,
+                cx,
+            )
         }
         "virtual-list" => {
             ctx.custom_registry.destroy(id);
@@ -12641,6 +12650,7 @@ fn build_element_with_parent_layout(
                 tracks_mouse_hover: tracks_mouse_hover_events(element, ctx.tree),
                 event_callback: ctx.event_callback,
                 focus_handle: ctx.focus_handles.get(&id),
+                focus_within,
                 scroll_anchor: ctx
                     .focus_scroll_anchors
                     .get(&id)
@@ -15823,6 +15833,7 @@ pub(crate) fn build_host_container(
     style: Option<&StyleDesc>,
     box_insets: Option<crate::automation::BoxInsets>,
     resolved_text_color: Option<gpui::Rgba>,
+    focus_within: bool,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -15845,7 +15856,7 @@ pub(crate) fn build_host_container(
     let tracks_mouse_hover = tracks_mouse_hover_events(element, ctx.tree);
 
     if let Some(style) = style {
-        el = apply_interactive_styles(el, style);
+        el = apply_interactive_styles(el, style, focus_within);
     }
     if let Some(color) = resolved_text_color {
         // Text runs inherit GPUI's text style while the host is built. Group
@@ -16755,15 +16766,19 @@ fn resolve_dimension(
     }
 }
 
-pub(crate) fn apply_focus_styles<E: gpui::StatefulInteractiveElement>(
+pub(crate) fn apply_focus_styles<E: gpui::StatefulInteractiveElement + gpui::Styled>(
     mut el: E,
     style: &StyleDesc,
+    focus_within: bool,
 ) -> E {
-    // `in_focus` refines before `focus` and `focus_visible` in GPUI's own
-    // precedence, so it is wired first here too.
-    if let Some(ref focus_within_style) = style.focus_within {
-        let focus_within_style = effective_state_style(style, focus_within_style);
-        el = el.in_focus(|refinement| apply_styles(refinement, &focus_within_style));
+    // GPUI's `in_focus` also sees GPU-IX's root keyboard fallback handle as an
+    // ancestor of every host handle. GPU-IX excludes that internal handle from
+    // CSS `:focus-within`, so resolve this state from the retained focus path.
+    if focus_within {
+        if let Some(focus_within_style) = style.focus_within.as_deref() {
+            let focus_within_style = effective_state_style(style, focus_within_style);
+            el = apply_styles(el, &focus_within_style);
+        }
     }
     if let Some(ref focus_style) = style.focus {
         let focus_style = effective_state_style(style, focus_style);
@@ -16870,7 +16885,11 @@ mod effective_state_style_tests {
 /// Every stateful GPUI root must go through this, never `apply_styles` alone.
 /// GPUI reads the refinements from the element state behind the element's
 /// `ElementId`, so the caller must have called `.id(..)` first.
-pub(crate) fn apply_interactive_styles<E>(mut el: E, style: &StyleDesc) -> E
+pub(crate) fn apply_interactive_styles<E>(
+    mut el: E,
+    style: &StyleDesc,
+    focus_within: bool,
+) -> E
 where
     E: gpui::Styled + gpui::StatefulInteractiveElement,
 {
@@ -16894,7 +16913,7 @@ where
             apply_styles(refinement, &drag_over_style)
         });
     }
-    el = apply_focus_styles(el, style);
+    el = apply_focus_styles(el, style, focus_within);
     if let (Some(group), Some(hover_within_style)) = (
         style.resolved_hover_within_group.clone(),
         style.hover_within.as_deref(),

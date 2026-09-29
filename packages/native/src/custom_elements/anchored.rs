@@ -312,7 +312,7 @@ impl CustomElement for AnchoredElement {
         // author says so. Project it here, on the node that owns the host id.
         content = super::apply_accessibility(content, &ctx);
         if let Some(style) = ctx.style {
-            content = crate::renderer::apply_interactive_styles(content, style);
+            content = crate::renderer::apply_interactive_styles(content, style, ctx.focus_within);
         }
         if self.fill_window {
             let viewport = window.viewport_size();

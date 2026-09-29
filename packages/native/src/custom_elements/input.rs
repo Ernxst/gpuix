@@ -607,7 +607,7 @@ impl CustomElement for TextEditorElement {
         // Editors clip to their box, as DOM inputs and textareas do.
         editor = editor.overflow_hidden();
         if let Some(style) = ctx.style {
-            editor = crate::renderer::apply_interactive_styles(editor, style);
+            editor = crate::renderer::apply_interactive_styles(editor, style, ctx.focus_within);
         }
         if ctx
             .style

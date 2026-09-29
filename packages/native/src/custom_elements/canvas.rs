@@ -1776,7 +1776,7 @@ impl CustomElement for CanvasElement {
             .w(gpui::px(self.width as f32))
             .h(gpui::px(self.height as f32));
         if let Some(style) = ctx.style {
-            root = crate::renderer::apply_interactive_styles(root, style);
+            root = crate::renderer::apply_interactive_styles(root, style, ctx.focus_within);
             if style.pointer_events.as_deref() == Some("none") {
                 root = root.ignore_mouse();
             } else if crate::style::should_occlude(Some(style), !ctx.events.is_empty()) {

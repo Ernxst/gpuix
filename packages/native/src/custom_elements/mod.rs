@@ -47,6 +47,8 @@ pub struct CustomRenderContext<'a> {
     pub event_callback: &'a Option<EventCallback>,
     /// Pre-created FocusHandle for this element (if it has keyboard/focus listeners).
     pub focus_handle: Option<&'a gpui::FocusHandle>,
+    /// Whether this host or one of its descendants currently has focus.
+    pub focus_within: bool,
     /// Anchor that reveals this custom root inside its nearest overflow ancestor.
     pub scroll_anchor: Option<&'a gpui::ScrollAnchor>,
     /// Paint-time recorder for an exact focus target inside a virtual list.
@@ -146,7 +148,7 @@ pub(crate) fn custom_surface(
     use gpui::prelude::*;
 
     if let Some(style) = ctx.style {
-        el = crate::renderer::apply_interactive_styles(el, style);
+        el = crate::renderer::apply_interactive_styles(el, style, ctx.focus_within);
     }
     // Keep the surface positioned so absolutely placed descendants anchor to
     // it, like every `<div>`.
