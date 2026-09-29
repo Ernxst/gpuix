@@ -1463,6 +1463,7 @@ export interface VirtualListProps
   style?: Omit<StyleDesc, "hover" | "active" | "dragOver">
   children?: React.ReactNode
   ref?: React.Ref<PublicInstance>
+  tabIndex?: number
   alignment?: "top" | "bottom"
   followTail?: boolean
   overdraw?: number

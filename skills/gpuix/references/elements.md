@@ -126,8 +126,9 @@ Their text is selectable and searchable, but test text queries cannot see it; us
 
 A host element, not a component; each immediate child is one row. It needs a bounded height.
 
-- Props: `alignment` (`top`/`bottom`), `followTail`, `overdraw` (px, default 512), `estimatedItemHeight` (default 48; `null` opts out), `itemCount` (ignored without a positive estimate), `windowStart` (logical index of the first child; ignored without `itemCount`), `onVisibleRange` (`startIndex`, `endIndex` exclusive), ARIA props.
+- Props: `alignment` (`top`/`bottom`), `followTail`, `overdraw` (px, default 512), `estimatedItemHeight` (default 48; `null` opts out), `itemCount` (ignored without a positive estimate), `windowStart` (logical index of the first child; ignored without `itemCount`), `onVisibleRange` (`startIndex`, `endIndex` exclusive), `tabIndex`, ARIA props.
 - Not accepted: mouse/keyboard handlers, `className`, `data-testid`, `hover`/`active` styles, `transition`. Wrap the list in a `div` for those.
+- Set `tabIndex={0}` to add the list to the Tab order. Its `focus` and `focusVisible` styles work when the list has focus.
 - A single child without `itemCount={1}` throws `VirtualListRowContractError` in strict mode and warns otherwise.
 - Scroll to a row with `renderer.scrollToItem?.(ref.current.id, index, offsetPx?)` (from `useGpuixRequired()`), not a ref method. `ref.current.scrollTop` works.
 - Windowing (which rows to mount) is app state; unmounted rows paint as estimate-sized placeholders. A focused row stays mounted offscreen.

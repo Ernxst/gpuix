@@ -13887,29 +13887,51 @@ fn build_virtual_list(
             cx,
         )
     });
-    let mut list =
-        gpui::list(list_state, render_item).with_sizing_behavior(gpui::ListSizingBehavior::Auto);
+    let list = gpui::list(list_state, render_item)
+        .with_sizing_behavior(gpui::ListSizingBehavior::Auto)
+        .size_full();
+    // `List` doesn't run GPUI's interactivity layout and paint hooks. Let a
+    // div own the virtual list's bounds, focus identity, and tab stop while
+    // the List keeps its scrolling and row hit testing.
+    let mut surface = gpui::div()
+        .id(gpui::ElementId::Integer(element.id))
+        .child(list);
     if let Some(style) = style {
-        list = apply_styles(list, style);
+        surface = apply_styles(surface, style);
         if hover_within {
             if let Some(hover_within_style) = style.hover_within.as_deref() {
-                list = apply_styles(list, hover_within_style);
+                surface = apply_styles(surface, hover_within_style);
             }
         }
         if focus_within {
             if let Some(focus_within_style) = style.focus_within.as_deref() {
-                list = apply_styles(list, focus_within_style);
+                surface = apply_styles(surface, focus_within_style);
             }
         }
         if active_within {
             if let Some(active_within_style) = style.active_within.as_deref() {
-                list = apply_styles(list, active_within_style);
+                surface = apply_styles(surface, active_within_style);
             }
         }
     }
-    let list = list.id(gpui::ElementId::Integer(element.id));
-    let list = crate::accessibility::apply(
-        list,
+    let accessibility_hidden = ctx.inherited.accessibility_hidden;
+    if !accessibility_hidden {
+        if let Some(handle) = ctx.focus_handles.get(&element.id) {
+            surface = surface.track_focus(handle);
+        }
+    }
+    if !accessibility_hidden {
+        if let Some(tab_index) = element
+            .custom_props
+            .get("tabIndex")
+            .and_then(|value| value.as_i64())
+            .and_then(|index| isize::try_from(index).ok())
+        {
+            surface = surface.tab_index(tab_index).tab_stop(tab_index >= 0);
+        }
+    }
+    let surface = crate::accessibility::apply(
+        surface,
         ctx.tree,
         element,
         ctx.event_callback,
@@ -13917,13 +13939,16 @@ fn build_virtual_list(
         ctx.inherited.accessibility_hidden,
         crate::accessibility::AccessibleText::default(),
     );
-    let list =
-        crate::automation::track_own_bounds_with_insets(list, element.id, None, None, box_insets);
+    let surface = crate::automation::track_own_bounds_with_insets(
+        surface,
+        element.id,
+        None,
+        None,
+        box_insets,
+    );
     if let Some(group) = style.and_then(|style| style.resolved_hover_group.as_ref()) {
-        // `gpui::List` is Styled but has no interactive identity. A transparent
-        // stateful surface gives the retained virtual-list node the same group
-        // hitbox/state contract as every other hoverGroup source while the list
-        // continues to own its declared layout and scrolling styles.
+        // Keep hoverGroup on an outer surface, with the focused bounds-owning
+        // div and scrolling List nested inside it.
         let id = element.id;
         let group_id = virtual_list_group_id.expect("hoverGroup has a virtual-list group id");
         if let Some(path) = ctx.gpui_element_path.as_ref() {
@@ -13938,7 +13963,7 @@ fn build_virtual_list(
             .id(group_id)
             .relative()
             .group(group.clone())
-            .child(list)
+            .child(surface)
             .hover_listener_mode(gpui::HoverListenerMode::InputModalityIndependent)
             .on_hover(cx.listener(move |view, is_hovered: &bool, _window, cx| {
                 if view
@@ -13979,7 +14004,7 @@ fn build_virtual_list(
         }
         return surface.into_any_element();
     }
-    list.into_any_element()
+    surface.into_any_element()
 }
 
 fn unmounted_virtual_row(height: f32) -> gpui::AnyElement {
