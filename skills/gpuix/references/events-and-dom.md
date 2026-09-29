@@ -81,12 +81,12 @@ A plain object, not a DOM `Event`. `nativeEvent` is the raw GPU-IX payload.
 ## Focus and keyboard
 
 - **Tab stops**: `<button>` and `<a href>` get an implicit `tabIndex` 0 (none when `disabled`); inputs and textareas are focusable; `tabIndex={-1}` is focusable but skipped; positive values order Tab; a radio group is one stop; `display: none` subtrees are skipped.
-- **Tab** is delivered as a `keyDown` with `key: "Tab"` to the focused element (or root); traversal runs unless prevented.
+- **Tab** is delivered as a `keyDown` with `key: "Tab"` to the focused element (or root); traversal runs unless prevented. Set `tabNavigation: false` in render or test-root options to manage traversal yourself. Modal Dialog Popups contain Tab and Shift+Tab within their focusable descendants.
 - **Keys with focus** go to the focused element as `target` and bubble through listening ancestors, even when the focused element has no listener. A root `onKeyDown` also hears keys typed into inputs; compare `event.target` with the root to tell them apart.
 - **Keyboard activation**: Enter and Space on a focused element that has `onClick` or sits inside one; Enter only on `<a href>`; Space only on checkboxes and radios; text editors keep Space as text. Enter in a text input does not submit its `<form>`.
 - **Focus visible**: the `focusVisible` style and `ref.matches(":focus-visible")` are true only after keyboard input.
 - **Imperative focus**: `ref.focus({ preventScroll })` (ignored on disabled controls), `ref.blur()`, `document.activeElement` (the focused ref, or `body`). Renderer equivalents: `focusElement(id, preventScroll)`, `focusNext()`, `focusPrevious()`, `getActiveElement()`.
-- **Missing**: focus trapping (#578), `inert`, `aria-modal` (#536), a `tabIndex` property on refs (read `props.tabIndex`).
+- **Missing**: `inert` and a `tabIndex` property on refs (read `props.tabIndex`).
 
 ## Refs (`PublicInstance`)
 

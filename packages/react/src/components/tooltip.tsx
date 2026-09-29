@@ -9,12 +9,15 @@ import React, {
   useRef,
 } from "react"
 import type { ReactElement, ReactNode } from "react"
+import type { GpuixKeyboardEvent } from "../reconciler/synthetic-event.js"
 import type { Props, PublicInstance } from "../types/host.js"
 import {
+  DismissLayerScope,
   FloatingLayer,
   floatingRootStyle,
   renderSlot,
   useControllableState,
+  useDismissLayer,
 } from "./floating.js"
 import type { FloatingPopupProps } from "./floating.js"
 
@@ -63,6 +66,7 @@ interface TooltipContextValue {
   scheduleClose: () => void
   cancelClose: () => void
   close: () => void
+  isTopDismissLayer: (event?: GpuixKeyboardEvent) => boolean
 }
 
 const TooltipContext = createContext<TooltipContextValue | null>(null)
@@ -98,6 +102,7 @@ export function Tooltip({
     defaultValue: defaultOpen,
     onChange: onOpenChange,
   })
+  const isTopDismissLayer = useDismissLayer(open)
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hoverableDisabled = disableHoverablePopup ?? provider.disableHoverableContent
@@ -152,11 +157,12 @@ export function Tooltip({
     scheduleClose,
     cancelClose,
     close,
+    isTopDismissLayer,
   }
 
   return (
     <TooltipContext.Provider value={context}>
-      <div {...props} style={floatingRootStyle(style)}>{children}</div>
+      <DismissLayerScope><div {...props} style={floatingRootStyle(style)}>{children}</div></DismissLayerScope>
     </TooltipContext.Provider>
   )
 }
@@ -214,7 +220,7 @@ export const TooltipTrigger = forwardRef<PublicInstance, TooltipTriggerProps>(
         },
         onKeyDown: (event) => {
           onKeyDown?.(event)
-          if (event.key === "Escape") context.close()
+          if (event.key.toLowerCase() === "escape" && context.isTopDismissLayer(event)) context.close()
         },
       },
       ref
@@ -226,7 +232,7 @@ export interface TooltipPopupProps extends FloatingPopupProps {}
 
 export const TooltipPopup = forwardRef<PublicInstance, TooltipPopupProps>(
   function TooltipPopup(
-    { children, side = "top", align = "center", sideOffset = 0, onMouseEnter, onMouseLeave, ...props },
+    { children, side = "top", align = "center", sideOffset = 0, onMouseEnter, onMouseLeave, onKeyDown, ...props },
     ref
   ) {
     const context = useTooltipContext("TooltipPopup")
@@ -245,6 +251,10 @@ export const TooltipPopup = forwardRef<PublicInstance, TooltipPopupProps>(
         onMouseLeave={(event) => {
           onMouseLeave?.(event)
           context.scheduleClose()
+        }}
+        onKeyDown={(event: GpuixKeyboardEvent) => {
+          onKeyDown?.(event)
+          if (event.key.toLowerCase() === "escape" && context.isTopDismissLayer(event)) context.close()
         }}
       >
         {children}

@@ -2,12 +2,18 @@
 
 import React, {
   cloneElement,
+  createContext,
   forwardRef,
   isValidElement,
   useCallback,
+  useContext,
+  useInsertionEffect,
+  useMemo,
   useState,
 } from "react"
 import type { ReactElement, ReactNode, Ref } from "react"
+import type { NativeRenderer } from "../types/host.js"
+import { useGpuix } from "../hooks/use-gpuix.js"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 import type { NativeStateStyle, Props, PublicInstance, StyleDesc } from "../types/host.js"
 import { isCompiledStyle } from "../class-names.js"
@@ -15,6 +21,49 @@ import { isCompiledStyle } from "../class-names.js"
 export type FloatingSide = "top" | "right" | "bottom" | "left"
 export type FloatingAlign = "start" | "center" | "end"
 export type StateStyle<State> = StyleDesc | ((state: State) => StyleDesc)
+
+const dismissLayers = new WeakMap<NativeRenderer, Array<{ token: object; depth: number; order: number }>>()
+const DismissLayerDepth = createContext(0)
+let nextDismissLayerOrder = 0
+
+export function DismissLayerScope({ children }: { children: ReactNode }): ReactElement {
+  const depth = useContext(DismissLayerDepth)
+  return <DismissLayerDepth.Provider value={depth + 1}>{children}</DismissLayerDepth.Provider>
+}
+
+/** Register an open floating surface in this renderer's Escape dismissal order. */
+export function useDismissLayer(open: boolean): (event?: GpuixSyntheticEvent) => boolean {
+  const { renderer } = useGpuix()
+  const depth = useContext(DismissLayerDepth)
+  const token = useMemo(() => ({ id: {}, order: ++nextDismissLayerOrder }), [])
+  useInsertionEffect(() => {
+    if (!open || !renderer) return
+    let layers = dismissLayers.get(renderer)
+    if (!layers) {
+      layers = []
+      dismissLayers.set(renderer, layers)
+    }
+    layers.push({ token: token.id, depth, order: token.order })
+    return () => {
+      const current = dismissLayers.get(renderer)
+      if (!current) return
+      const index = current.findIndex((layer) => layer.token === token.id)
+      if (index !== -1) current.splice(index, 1)
+      if (current.length === 0) dismissLayers.delete(renderer)
+    }
+  }, [depth, open, renderer, token])
+
+  return useCallback((event?: GpuixSyntheticEvent) => {
+    const layers = renderer && dismissLayers.get(renderer)
+    const topLayer = layers?.reduce<(typeof layers)[number] | undefined>((top, layer) => {
+      if (!top || layer.depth > top.depth || (layer.depth === top.depth && layer.order > top.order)) return layer
+      return top
+    }, undefined)
+    if (!open || topLayer?.token !== token.id) return false
+    event?.stopPropagation()
+    return true
+  }, [open, renderer, token])
+}
 
 export interface FloatingPopupProps extends Omit<Props, "children"> {
   children?: ReactNode

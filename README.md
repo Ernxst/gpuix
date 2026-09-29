@@ -157,6 +157,11 @@ function App() {
 render(<App />, { title: 'My App', width: 800, height: 600 })
 ```
 
+Tab and Shift+Tab move focus through the window by default. Set
+`tabNavigation: false` in the render options when an application manages Tab
+movement itself; a key handler can also call `preventDefault()` for an
+individual press.
+
 > [!IMPORTANT]
 > **Give every `<text>` a `color`.** Uncoloured text paints the default light
 > grey (`#e2e2e2`), not black as it would in a browser, so it's near-invisible
@@ -3086,6 +3091,7 @@ equivalents:
 | `ariaCurrent` | Global current-item state: `page`, `step`, `location`, `date`, `time`, `true`, or `false` |
 | `ariaLive` | `off`, `polite`, or `assertive` live-region politeness; announces text changes without moving focus |
 | `ariaAtomic` | Present the whole live region rather than only the part that changed |
+| `ariaModal` | Boolean modal state for `dialog` and `alertdialog`, exposed through AccessKit |
 | `ariaValueText` | Human-readable value text |
 | `ariaValueMin`, `ariaValueMax`, `ariaValueNow` | Numeric value range and current value |
 | `ariaLevel` | One-based heading level |
@@ -3384,6 +3390,48 @@ The test renderer scripts one answer at a time with
 rejects with `AbortError`, and `renderer.pickerRequests` records each dialog's
 kind and options.
 
+### Headless Dialog
+
+`@gpuix/react/dialog` provides Base UI-shaped `Root`, `Trigger`, `Portal`,
+`Backdrop`, `Popup`, `Title`, `Description`, and `Close` parts. The same parts
+are exported with a `Dialog` prefix from `@gpuix/react`.
+
+```tsx
+import * as Dialog from "@gpuix/react/dialog"
+
+<Dialog.Root>
+  <Dialog.Trigger>Open settings</Dialog.Trigger>
+  <Dialog.Portal>
+    <Dialog.Backdrop style={{ backgroundColor: "#0008" }} />
+    <Dialog.Popup style={{ backgroundColor: "#202020", padding: 24 }}>
+      <Dialog.Title>Settings</Dialog.Title>
+      <Dialog.Description>Choose how the app behaves.</Dialog.Description>
+      <Dialog.Close>Done</Dialog.Close>
+    </Dialog.Popup>
+  </Dialog.Portal>
+</Dialog.Root>
+```
+
+`Root` supports `open`, `defaultOpen`, `onOpenChange`, and `modal` (true by
+default). A modal Popup reports `aria-modal`, traps Tab and Shift+Tab among its
+painted tab stops, and focuses the Popup on open. Set `initialFocus` and
+`finalFocus` on Popup to use a host ref or numeric host element ID; by default,
+focus returns to the Trigger, or to the element focused before the dialog.
+Escape dismisses the topmost open Dialog, Select, Combobox, or Tooltip layer.
+`AlertDialog` uses the same parts with the Popup role set to `alertdialog`.
+
+`Dialog.Trigger` and `Dialog.Close` are keyboard-operable buttons. The root
+`Button` export gives a styled `div` button activation with Enter and Space; it
+adds no default focus-ring or focus-dim styling.
+
+### Headless Button
+
+```tsx
+import { Button } from "@gpuix/react"
+
+<Button onClick={save}>Save</Button>
+```
+
 ## Headless controls
 
 The built-in controls are **unstyled primitives**, not a fixed component
@@ -3400,6 +3448,7 @@ Each primitive has a dedicated namespace entry point:
 
 | Import | Main parts |
 |---|---|
+| `@gpuix/react/dialog` | `Root`, `Trigger`, `Portal`, `Backdrop`, `Popup`, `Title`, `Description`, `Close` |
 | `@gpuix/react/select` | `Root`, `Trigger`, `Value`, `Icon`, `Popup`, `List`, `Item`, `ItemText`, `ItemIndicator` |
 | `@gpuix/react/combobox` | `Root`, `Input`, `Popup`, `List`, `Item`, `Empty` |
 | `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Popup` |

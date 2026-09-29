@@ -14,6 +14,13 @@
 import React, { memo, useEffect, useMemo, useRef, useState } from 'react'
 import {
   applyMacCpuThrottleFromEnv,
+  Button,
+  Dialog,
+  DialogBackdrop,
+  DialogClose,
+  DialogPopup,
+  DialogPortal,
+  DialogTitle,
   motion,
   render,
   requestAnimationFrame,
@@ -400,8 +407,9 @@ function IconButton({
   testId?: string
 }) {
   return (
-    <div
+    <Button
       data-testid={testId}
+      disabled={dimmed}
       style={{
         width: 26,
         height: 26,
@@ -415,10 +423,10 @@ function IconButton({
         hover: dimmed ? undefined : { backgroundColor: C.overlay },
         active: dimmed ? undefined : { backgroundColor: C.overlayStrong },
       }}
-      onClick={dimmed ? undefined : onClick}
+      onClick={onClick}
     >
       <Icon name={icon} size={size} color={C.tertiary} />
-    </div>
+    </Button>
   )
 }
 
@@ -427,14 +435,17 @@ function SidebarAction({
   label,
   onClick,
   testId,
+  buttonRef,
 }: {
   icon: IconName
   label: string
   onClick?: () => void
   testId?: string
+  buttonRef?: React.Ref<PublicInstance>
 }) {
   return (
-    <div
+    <Button
+      ref={buttonRef}
       data-testid={testId}
       onClick={onClick}
       style={{
@@ -464,7 +475,7 @@ function SidebarAction({
         <Icon name={icon} size={14} color={C.secondary} />
       </div>
       <text style={{ fontSize: 13, color: C.secondary }}>{label}</text>
-    </div>
+    </Button>
   )
 }
 
@@ -534,6 +545,7 @@ function Sidebar({
   onCollapse,
   onNewTask,
   onSearch,
+  searchButtonRef,
   canGoBack,
   canGoForward,
   onBack,
@@ -548,6 +560,7 @@ function Sidebar({
   onCollapse: () => void
   onNewTask: () => void
   onSearch: () => void
+  searchButtonRef: React.Ref<PublicInstance>
   canGoBack: boolean
   canGoForward: boolean
   onBack: () => void
@@ -629,7 +642,13 @@ function Sidebar({
         }}
       >
         <div style={{ paddingBottom: 6 }}>
-          <SidebarAction icon="search" label="Search" testId="search" onClick={onSearch} />
+          <SidebarAction
+            icon="search"
+            label="Search"
+            testId="search"
+            onClick={onSearch}
+            buttonRef={searchButtonRef}
+          />
         </div>
         {groups.map((group, groupIndex) => (
           <div
@@ -968,70 +987,67 @@ function Inspector({
 
 function OverlayCard({
   title,
+  open,
   onClose,
   children,
   height,
+  initialFocus,
+  finalFocus,
 }: {
   title: string
+  open: boolean
   onClose: () => void
   children: React.ReactNode
   height?: number
+  initialFocus?: React.RefObject<InputPublicInstance | null>
+  finalFocus?: React.RefObject<PublicInstance | null>
 }) {
   return (
-    <div
-      style={{
-        position: 'absolute',
-        top: 0,
-        right: 0,
-        bottom: 0,
-        left: 0,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#00000066',
-        pointerEvents: 'none',
-      }}
-    >
-      <div
-        onMouseDownOutside={onClose}
-        style={{
-          width: 420,
-          height,
-          maxWidth: '90%',
-          backgroundColor: C.raised,
-          borderRadius: 12,
-          borderWidth: 1,
-          borderColor: C.borderStrong,
-          padding: 16,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-          pointerEvents: 'auto',
-        }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center' }}>
-          <text style={{ fontSize: 14, fontWeight: 600, color: C.text, flexGrow: 1 }}>{title}</text>
-          <div
-            data-testid="overlay-close"
-            onClick={onClose}
-            style={{
-              height: 24,
-              paddingLeft: 8,
-              paddingRight: 8,
-              borderRadius: 6,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              hover: { backgroundColor: C.overlay },
-            }}
-          >
-            <text style={{ fontSize: 12, color: C.secondary }}>Close</text>
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogPortal>
+        <DialogBackdrop style={{ backgroundColor: '#00000066' }} />
+        <DialogPopup
+          initialFocus={initialFocus}
+          finalFocus={finalFocus}
+          style={{
+            width: 420,
+            height,
+            maxWidth: '90%',
+            backgroundColor: C.raised,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: C.borderStrong,
+            padding: 16,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center' }}>
+            <DialogTitle style={{ flexGrow: 1 }}>
+              <text style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{title}</text>
+            </DialogTitle>
+            <DialogClose
+              data-testid="overlay-close"
+              style={{
+                height: 24,
+                paddingLeft: 8,
+                paddingRight: 8,
+                borderRadius: 6,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                hover: { backgroundColor: C.overlay },
+              }}
+            >
+              <text style={{ fontSize: 12, color: C.secondary }}>Close</text>
+            </DialogClose>
           </div>
-        </div>
-        {children}
-      </div>
-    </div>
+          {children}
+        </DialogPopup>
+      </DialogPortal>
+    </Dialog>
   )
 }
 
@@ -1266,7 +1282,7 @@ function ChipSelect({
   children: React.ReactNode
 }) {
   return (
-    <Select items={items} value={value} onValueChange={onChange} style={{ flexShrink: 0 }}>
+    <Select items={items} value={value} onValueChange={onChange}>
       <div style={{ position: 'relative', display: 'flex' }}>
         <SelectTrigger
           data-testid={testId}
@@ -2161,6 +2177,8 @@ export function ChatApp({
   const [collapsed, setCollapsed] = useState(false)
   const [inspectorOpen, setInspectorOpen] = useState(false)
   const [overlay, setOverlay] = useState<'search' | 'settings' | null>(null)
+  const searchInputRef = useRef<InputPublicInstance | null>(null)
+  const searchButtonRef = useRef<PublicInstance | null>(null)
   const [query, setQuery] = useState('')
   const [projectOnly, setProjectOnly] = useState(false)
   const [draft, setDraft] = useState('')
@@ -2293,6 +2311,7 @@ export function ChatApp({
             setQuery('')
             setOverlay('search')
           }}
+          searchButtonRef={searchButtonRef}
           canGoBack={canGoBack}
           canGoForward={canGoForward}
           onBack={goBack}
@@ -2402,10 +2421,17 @@ export function ChatApp({
           project={project}
         />
       )}
-      {overlay === 'search' && (
-        <OverlayCard title="Search threads" height={420} onClose={() => setOverlay(null)}>
+      <OverlayCard
+        title="Search threads"
+        open={overlay === 'search'}
+        height={420}
+        initialFocus={searchInputRef}
+        finalFocus={searchButtonRef}
+        onClose={() => setOverlay(null)}
+      >
           <input
             data-testid="search-input"
+            ref={searchInputRef}
             value={query}
             placeholder="Filter by title"
             autoFocus
@@ -2425,7 +2451,7 @@ export function ChatApp({
           />
           <div style={{ flexGrow: 1, minHeight: 0, overflowY: 'scroll' }}>
             {searchHits.map((conversation) => (
-              <div
+              <Button
                 key={conversation.id}
                 data-testid={`search-${conversation.id}`}
                 onClick={() => goTo(conversation.id)}
@@ -2440,17 +2466,15 @@ export function ChatApp({
                 }}
               >
                 <text style={{ fontSize: 13, color: C.text }}>{conversation.title}</text>
-              </div>
+              </Button>
             ))}
           </div>
-        </OverlayCard>
-      )}
-      {overlay === 'settings' && (
-        <OverlayCard title="Settings" onClose={() => setOverlay(null)}>
+      </OverlayCard>
+      <OverlayCard title="Settings" open={overlay === 'settings'} onClose={() => setOverlay(null)}>
           <text style={{ fontSize: 13, lineHeight: 18, color: C.secondary }}>
             This is the GPUIX chat demo. Threads, drafts, and replies stay in this window.
           </text>
-          <div
+          <Button
             data-testid="cycle-overlay"
             onClick={() => renderer?.cycleDebugFrameOverlay?.()}
             style={{
@@ -2465,9 +2489,8 @@ export function ChatApp({
             }}
           >
             <text style={{ fontSize: 13, color: C.text }}>Cycle frame overlay</text>
-          </div>
-        </OverlayCard>
-      )}
+          </Button>
+      </OverlayCard>
     </div>
   )
 }

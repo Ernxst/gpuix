@@ -122,6 +122,7 @@ pub struct AnchoredElement {
     deferred: bool,
     priority: usize,
     occlude: bool,
+    fill_window: bool,
 }
 
 impl Default for AnchoredElement {
@@ -138,6 +139,7 @@ impl Default for AnchoredElement {
             deferred: true,
             priority: 1,
             occlude: true,
+            fill_window: false,
         }
     }
 }
@@ -284,7 +286,7 @@ impl CustomElement for AnchoredElement {
     fn render(
         &mut self,
         ctx: CustomRenderContext,
-        _window: &mut gpui::Window,
+        window: &mut gpui::Window,
         cx: &mut gpui::Context<crate::renderer::GpuixView>,
     ) -> gpui::AnyElement {
         use gpui::prelude::*;
@@ -312,6 +314,10 @@ impl CustomElement for AnchoredElement {
         if let Some(style) = ctx.style {
             content = crate::renderer::apply_interactive_styles(content, style);
         }
+        if self.fill_window {
+            let viewport = window.viewport_size();
+            content = content.w(viewport.width).h(viewport.height);
+        }
         // Deferred overlays paint over the window blur. A missing fill lets the
         // page show through the card. Force an opaque surface when JS omitted one.
         let has_fill = ctx.style.is_some_and(|style| {
@@ -336,14 +342,21 @@ impl CustomElement for AnchoredElement {
             content = content.child(child);
         }
 
-        let mut anchored = gpui::anchored()
-            .anchor(self.resolved_anchor().as_gpui())
-            .offset(self.resolved_offset());
-        if let Some((x, y)) = self.position {
-            anchored = anchored.position(gpui::point(gpui::px(x), gpui::px(y)));
-        }
-        if matches!(self.fit, FitMode::Snap) {
-            anchored = anchored.snap_to_window_with_margin(gpui::px(self.snap_margin));
+        let mut anchored = gpui::anchored();
+        if self.fill_window {
+            anchored = anchored
+                .anchor(gpui::Anchor::TopLeft)
+                .position(gpui::point(gpui::px(0.0), gpui::px(0.0)));
+        } else {
+            anchored = anchored
+                .anchor(self.resolved_anchor().as_gpui())
+                .offset(self.resolved_offset());
+            if let Some((x, y)) = self.position {
+                anchored = anchored.position(gpui::point(gpui::px(x), gpui::px(y)));
+            }
+            if matches!(self.fit, FitMode::Snap) {
+                anchored = anchored.snap_to_window_with_margin(gpui::px(self.snap_margin));
+            }
         }
 
         let anchored = anchored.child(content);
@@ -355,7 +368,7 @@ impl CustomElement for AnchoredElement {
             anchored.into_any_element()
         };
 
-        if self.position.is_some() {
+        if self.position.is_some() || self.fill_window {
             layer
         } else {
             self.wrap_at_trigger(layer)
@@ -403,6 +416,7 @@ impl CustomElement for AnchoredElement {
                     .unwrap_or(1);
             }
             "occlude" => self.occlude = value.as_bool().unwrap_or(true),
+            "fill" => self.fill_window = value.as_str() == Some("window"),
             _ => {}
         }
     }
@@ -420,6 +434,7 @@ impl CustomElement for AnchoredElement {
             "deferred",
             "priority",
             "occlude",
+            "fill",
         ]
     }
 

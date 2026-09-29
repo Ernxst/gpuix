@@ -271,6 +271,8 @@ function renderSlot(): RenderSlot {
 }
 
 export interface RenderOptions extends WindowOptions {
+  /** Whether unprevented Tab and Shift+Tab move focus through tab stops. Defaults to true. */
+  tabNavigation?: boolean
   onEvent?: (event: EventPayload) => void
   /** Window-level text selection. Fires when the selected ranges change. */
   onSelectionChange?: (event: EventPayload, renderer: NativeRenderer) => void
@@ -674,6 +676,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     debugFrameOverlay,
     menus,
     strictStyles,
+    tabNavigation,
     errorOverlay,
     ...windowOptions
   } = options
@@ -751,6 +754,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
   let root!: Root
   root = createRoot(host, {
     strictStyles,
+    tabNavigation,
     onSelectionChange,
     onUncaughtError: ({ error, componentStack }) => {
       // Injected renderers are embedder-owned lifecycles: the failed root and

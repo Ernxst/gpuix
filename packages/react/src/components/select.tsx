@@ -27,10 +27,12 @@ import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
 import { ResizeObserver } from "../resize-observer.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import {
+  DismissLayerScope,
   FloatingLayer,
   renderSlot,
   setRefs,
   useControllableState,
+  useDismissLayer,
 } from "./floating.js"
 import type { FloatingPopupProps, StateStyle } from "./floating.js"
 
@@ -379,7 +381,7 @@ export function Select<Multiple extends boolean | undefined = false>({
 
   return (
     <SelectContext.Provider value={context}>
-      {children}
+      <DismissLayerScope>{children}</DismissLayerScope>
     </SelectContext.Provider>
   )
 }
@@ -557,6 +559,7 @@ export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
     forwardedRef
   ) {
     const context = useSelectContext("SelectPopup")
+    const dismissLayer = useDismissLayer(context.open)
     const popupState: SelectPopupState = { side, align, open: context.open, transitionStatus: "idle" }
     const resolvedPopupProps = {
       ...props,
@@ -592,9 +595,11 @@ export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
           },
           onKeyDown: (event: GpuixKeyboardEvent) => {
             onKeyDown?.(event)
-            if (event.key === "Escape") {
-              onEscapeKeyDown?.(event)
-              context.setOpen(false)
+            if (event.key.toLowerCase() === "escape") {
+              if (dismissLayer(event)) {
+                onEscapeKeyDown?.(event)
+                if (!event.defaultPrevented) context.setOpen(false)
+              }
             } else if (event.key === "ArrowDown" || (event.key === "n" && event.modifiers?.ctrl)) {
               context.moveActive(1)
             } else if (event.key === "ArrowUp" || (event.key === "p" && event.modifiers?.ctrl)) {

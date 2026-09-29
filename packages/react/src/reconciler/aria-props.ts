@@ -28,6 +28,7 @@ export const ARIA_PROP_ALIASES = {
   "aria-current": "ariaCurrent",
   "aria-live": "ariaLive",
   "aria-atomic": "ariaAtomic",
+  "aria-modal": "ariaModal",
   "aria-selected": "ariaSelected",
   "aria-multiselectable": "ariaMultiSelectable",
   "aria-valuetext": "ariaValueText",

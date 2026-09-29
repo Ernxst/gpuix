@@ -1,6 +1,6 @@
 # Built-in components and hooks
 
-GPU-IX ships its own headless Select, Combobox and Tooltip (`packages/react/src/components/`), a shared floating layer (`packages/react/src/floating.ts`), file pickers (`dialogs.ts`), `motion`/`AnimatePresence` and a few hooks. The repository's goal is Base UI parity, but the parts and props today are closer to Radix/shadcn. Use these rather than relying on full DOM support from a third-party headless library; some Base UI components work in tested cases (`events-and-dom.md`).
+GPU-IX ships its own headless Dialog, Select, Combobox and Tooltip (`packages/react/src/components/`), a shared floating layer (`packages/react/src/floating.ts`), file pickers (`dialogs.ts`), `motion`/`AnimatePresence` and a few hooks. The controls follow Base UI part names and behaviour where supported. Use these rather than relying on full DOM support from a third-party headless library; some Base UI components work in tested cases (`events-and-dom.md`).
 
 Each component is importable two ways: as a namespace from its subpath (`import * as Select from "@gpuix/react/select"`, then `Select.Root`, `Select.Item`, `Select.ItemText`), or as prefixed names from `@gpuix/react` (`Select`, `SelectItem`, `SelectItemText`; likewise `Combobox*` and `Tooltip*`).
 
@@ -8,6 +8,7 @@ Each component is importable two ways: as a namespace from its subpath (`import 
 
 - Traps
 - Floating layer (`@gpuix/react/floating`)
+- Dialog (`@gpuix/react/dialog`)
 - Select (`@gpuix/react/select`)
 - Combobox (`@gpuix/react/combobox`)
 - Tooltip (`@gpuix/react/tooltip`)
@@ -39,9 +40,9 @@ Each component is importable two ways: as a namespace from its subpath (`import 
   </SelectItem>
   ```
 
-- **`asChild`, not `render`.** Only `SelectTrigger`, `ComboboxTrigger` and `TooltipTrigger` accept `asChild`. `SelectItem` and `ComboboxItem` always render their own `div`. The `asChild` child must be exactly one element that forwards its ref and host props.
+- **`asChild`, not `render`.** `Dialog.Trigger`, `Dialog.Close`, `SelectTrigger`, `ComboboxTrigger` and `TooltipTrigger` accept `asChild`. `SelectItem` and `ComboboxItem` always render their own `div`. The `asChild` child must be exactly one element that forwards its ref and host props.
 - **Select Root renders no wrapper element.** Its Popup is positioned against the Trigger.
-- **Popups have no Portal, cannot leave the window, and shift rather than flip.** Popup is a deferred `<anchored fit="snap">` rendered in place; there is no `Portal`, `Positioner`, `Arrow` or `Backdrop` part.
+- **Select, Combobox and Tooltip popups have no Portal, cannot leave the window, and shift rather than flip.** They use deferred `<anchored fit="snap">` layers. Dialog provides `Portal` and `Backdrop`; it fills the viewport with `<anchored fill="window">`.
 - **Give Popup an opaque background.** It defaults to `#1A1A1A` when neither `style` nor a compiled `className` sets a background. A background supplied by either wins; a translucent colour lets the page show through.
 - **Combobox filtering and keyboard navigation need `items: string[]` on Root and a function child on `ComboboxList`.** Static `ComboboxItem` children are never filtered, and one is keyboard-highlighted only when its value is in `items` and passes the filter, and `ComboboxEmpty` shows whenever the filtered list is empty (always, without `items`). This is the opposite of Select, where `items` is optional.
 - **A controlled Select cannot be cleared with `value={undefined}`**: `undefined` means uncontrolled, so it shows `defaultValue`, or the last value picked while it was uncontrolled. Values are `string` or `string[]`; there is no `null`. Remount with a new `key` to reset.
@@ -49,7 +50,28 @@ Each component is importable two ways: as a namespace from its subpath (`import 
 - **Combobox and Tooltip set no ARIA roles**; add `role`, `ariaExpanded` and `ariaSelected` yourself. Select sets them.
 - **Tooltip opens instantly by default** (`delayDuration` 0; Base UI waits 600 ms), and opens on any focus, not only keyboard focus. Its delays use `setTimeout` on wall time, so `advanceAsyncClock` in tests does not move them.
 - **Combobox `autoHighlight` defaults to `false`**, so typing and pressing Enter selects nothing until an item is arrowed to. Pass `autoHighlight` for type-and-Enter.
-- **There is no Popover, Dialog, Menu or message box.** `@gpuix/react/dialogs` is file pickers only (#572 for a message box). Build menus and dialogs from `<anchored deferred>` and your own state; there is no focus trap (#578) or `ariaModal` (#536).
+- **There is no Popover, Menu or message box.** `@gpuix/react/dialogs` is file pickers only (#572 for a message box). Dialog is available from `@gpuix/react/dialog`; it handles modal Tab focus, Escape dismissal, focus restoration and `aria-modal` in AccessKit.
+
+## Dialog (`@gpuix/react/dialog`)
+
+The parts follow Base UI names: `Root`, `Trigger`, `Portal`, `Backdrop`,
+`Popup`, `Title`, `Description`, and `Close`. The package root also exports
+`Dialog`, `DialogTrigger`, and the other prefixed parts. `Root` takes
+`open`/`defaultOpen`, `onOpenChange`, and `modal` (default `true`). `Popup` takes
+`initialFocus` and `finalFocus`, each a host ref, numeric host element ID, or
+`false` to skip that focus move.
+
+Modal Popups expose `aria-modal`, focus the Popup when opened, trap Tab and
+Shift+Tab among painted descendants, and return focus to the Trigger or prior
+focused element when closed. Escape dismisses the highest open Dialog, Select,
+Combobox, or Tooltip. `AlertDialog` shares the Dialog parts and renders its
+Popup with the `alertdialog` role. `Dialog.Trigger`, `Dialog.Close`, and the
+root `Button` export activate with Enter and Space; they add no default focus
+ring.
+
+`Portal` mounts a full-window deferred layer with `<anchored fill="window">`.
+All React children remain in the retained tree; this is a native overlay
+component, not a general DOM portal.
 
 ## Floating layer (`@gpuix/react/floating`)
 
@@ -97,7 +119,7 @@ import * as Combobox from "@gpuix/react/combobox"
 
 - **Root props**: `items?: string[]`, `value`/`defaultValue` (`string | string[] | null`), `onValueChange`, `inputValue`/`defaultInputValue`/`onInputValueChange`, `open`/`defaultOpen`/`onOpenChange`, `multiple`, `disabled`, `autoHighlight`, `filter` (`null` disables; `(item, query, itemToString) => boolean`), `itemToStringValue` (display, filtering and the text written into the input after selection).
 - **Default filter**: trimmed, case-insensitive substring; prefix matches first, then `items` order.
-- **Input** is a native `<input>`; click, focus and typing each open the popup. Escape closes; Up/Down and Ctrl+N/Ctrl+P move the highlight (wrapping, skipping disabled) but do not reopen after Escape; Enter selects the highlighted item, and does nothing with no highlight.
+- **Input** is a native `<input>`; click, focus and typing each open the popup. Escape or moving focus away closes it; Up/Down and Ctrl+N/Ctrl+P move the highlight (wrapping, skipping disabled) but do not reopen after Escape; Enter selects the highlighted item, and does nothing with no highlight.
 - **Selection**: single mode sets the value, writes it into the input and closes; multiple mode toggles, clears the input and stays open.
 - **Popup** unmounts while closed; a press outside closes it; focus stays in the input.
 - **Missing from Base UI**: `InputGroup`, `Icon`, `Clear`, `Chips`, `Chip`, `ItemIndicator`, `Status`, `Portal`, `Positioner`, `GroupLabel`, `Arrow`; `limit`, `virtualized`, `openOnInputClick`, `grid`, `inline`, `readOnly`, `required`, `name`; non-string items; ARIA.
@@ -144,8 +166,6 @@ All from `@gpuix/react`.
 | Issue | Gap |
 |---|---|
 | #579 | Base UI Autocomplete typing does not update the value. |
-| #578 | No focus trap. |
-| #536 | No `ariaModal`. |
 | #481 | No `zIndex`. |
 | #326 | Popups cannot leave the window. |
 | #572 | No native message box. |

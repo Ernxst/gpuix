@@ -728,7 +728,7 @@ function finishKeyboardDispatch(
   }
   if (payload.eventType === "keyDown" && activationKey(payload) === "tab") {
     const defaultPrevented = container.preventedKeyboardActivations.delete(payload.elementId)
-    container.native.resolveTabKeyDown?.(defaultPrevented)
+    container.native.resolveTabKeyDown?.(defaultPrevented || container.tabNavigation === false)
   }
   if (payload.eventType === "keyDown" && activationKey(payload) !== "tab") {
     container.native.resolveEditorKeyDown?.(payload.elementId, result.defaultPrevented)

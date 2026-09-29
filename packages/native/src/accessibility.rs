@@ -25,6 +25,7 @@ const ACCESSIBILITY_PROPS: &[&str] = &[
     "ariaCurrent",
     "ariaLive",
     "ariaAtomic",
+    "ariaModal",
     "ariaSelected",
     "ariaValueText",
     "ariaValueMin",
@@ -341,6 +342,7 @@ impl AccessibilityRole {
             ),
             "disabled" | "ariaDisabled" => !matches!(self.role, Role::Heading | Role::Image),
             "ariaLive" | "ariaAtomic" => self.role != Role::GenericContainer,
+            "ariaModal" => matches!(self.role, Role::Dialog | Role::AlertDialog),
             // The roles WAI-ARIA 1.2 allows `aria-haspopup` on.
             "ariaHasPopup" => matches!(
                 self.role,
@@ -945,6 +947,7 @@ struct AccessibilityProps<'a> {
     current: Option<gpui::accesskit::AriaCurrent>,
     live: Option<gpui::Live>,
     atomic: Option<bool>,
+    modal: Option<bool>,
     selected: Option<bool>,
     value: Option<&'a str>,
     value_min: Option<f64>,
@@ -1042,6 +1045,10 @@ impl<'a> AccessibilityProps<'a> {
             atomic: element
                 .custom_props
                 .get("ariaAtomic")
+                .and_then(parse_booleanish),
+            modal: element
+                .custom_props
+                .get("ariaModal")
                 .and_then(parse_booleanish),
             selected: element
                 .custom_props
@@ -1521,7 +1528,7 @@ pub(crate) fn element_problems(
                 Some("ascending" | "descending" | "other" | "none")
             ),
             "ariaLive" => parse_aria_live(value).is_none(),
-            "ariaExpanded" | "ariaSelected" | "ariaAtomic" | "ariaDisabled" | "ariaHidden"
+            "ariaExpanded" | "ariaSelected" | "ariaAtomic" | "ariaModal" | "ariaDisabled" | "ariaHidden"
             | "ariaReadOnly" | "ariaRequired" => parse_booleanish(value).is_none(),
             "visuallyHidden" => VisuallyHiddenMode::parse(value).is_none(),
             "disabled" => !(value.is_boolean() || value.is_string()),
@@ -1553,6 +1560,7 @@ pub(crate) fn element_problems(
                 }
                 "ariaSort" => "one of \"ascending\", \"descending\", \"other\", or \"none\"",
                 "ariaLive" => "one of \"off\", \"polite\", or \"assertive\"",
+                "ariaModal" => "a boolean or \"true\" or \"false\"",
                 "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => "a finite number",
                 "ariaLevel"
                 | "ariaRowIndex"
@@ -1627,6 +1635,7 @@ pub(crate) fn element_problems(
                 | "ariaCurrent"
                 | "ariaLive"
                 | "ariaAtomic"
+                | "ariaModal"
                 | "ariaSelected"
                 | "ariaValueText"
                 | "ariaValueMin"
@@ -1874,6 +1883,9 @@ where
         .filter(|_| props.supports("ariaAtomic"))
     {
         el = el.aria_atomic(atomic);
+    }
+    if let Some(modal) = props.modal.filter(|_| props.supports("ariaModal")) {
+        el = el.aria_modal(modal);
     }
     if let Some(selected) = props.selected.filter(|_| props.supports("ariaSelected")) {
         el = el.aria_selected(selected);
