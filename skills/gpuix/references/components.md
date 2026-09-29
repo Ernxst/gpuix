@@ -64,10 +64,19 @@ The parts follow Base UI names: `Root`, `Trigger`, `Portal`, `Backdrop`,
 Modal Popups expose `aria-modal`, focus the Popup when opened, trap Tab and
 Shift+Tab among painted descendants, and return focus to the Trigger or prior
 focused element when closed. Escape dismisses the highest open Dialog, Select,
-Combobox, or Tooltip. `AlertDialog` shares the Dialog parts and renders its
-Popup with the `alertdialog` role. `Dialog.Trigger`, `Dialog.Close`, and the
+Combobox, or Tooltip. GPU-IX does not currently export a Popover primitive.
+`AlertDialog` shares the Dialog parts and renders its Popup with the
+`alertdialog` role. `Dialog.Trigger`, `Dialog.Close`, and the
 root `Button` export activate with Enter and Space; they add no default focus
 ring.
+
+The API follows the `@base-ui/react` Dialog shape but is not a full Base UI API
+match. Compared with Base UI 1.8.0, GPU-IX does not provide
+`Dialog.Viewport`, `onOpenChangeComplete`, `triggerId`, `actionsRef`, or a
+`Dialog.Root` render-function child. `modal` accepts only a boolean, so
+`'trap-focus'` is not available. `initialFocus` and `finalFocus` accept refs,
+numeric host IDs, or `false`; they do not accept `true` or callbacks. GPU-IX's
+`Portal` fills the window, so it does not need a separate `Viewport` part.
 
 `Portal` mounts a full-window deferred layer with `<anchored fill="window">`.
 All React children remain in the retained tree; this is a native overlay

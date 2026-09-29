@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { Button } from "../components/button.js"
 import { Dialog, DialogPopup, DialogPortal, DialogTrigger, DialogTitle } from "../components/dialog.js"
 import { Select, SelectItem, SelectPopup, SelectTrigger } from "../components/select.js"
+import { Combobox, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup } from "../components/combobox.js"
 import { createTestRoot, isNativeTestRendererAvailable, type TestRoot } from "../testing.js"
 import type { PublicInstance } from "../types/host.js"
 
@@ -38,6 +39,120 @@ describeNative("Dialog", () => {
     expect(screen.renderer.getActiveElement()).toBe(first.current!.id)
     screen.renderer.simulateKeystrokes("shift-tab")
     expect(screen.renderer.getActiveElement()).toBe(last.current!.id)
+  })
+
+  it("keeps focus on an empty modal popup for Tab and Shift+Tab", () => {
+    const popup = React.createRef<PublicInstance>()
+    screen.render(
+      <Dialog defaultOpen>
+        <DialogPortal>
+          <DialogPopup ref={popup}>
+            <DialogTitle>Empty dialog</DialogTitle>
+          </DialogPopup>
+        </DialogPortal>
+      </Dialog>
+    )
+
+    screen.renderer.focusElement(popup.current!.id)
+    screen.renderer.simulateKeystrokes("tab")
+    expect(screen.renderer.getActiveElement()).toBe(popup.current!.id)
+    screen.renderer.simulateKeystrokes("shift-tab")
+    expect(screen.renderer.getActiveElement()).toBe(popup.current!.id)
+  })
+
+  it("contains Tab and Shift+Tab in the topmost nested Dialog", () => {
+    const outerFirst = React.createRef<PublicInstance>()
+    const innerFirst = React.createRef<PublicInstance>()
+    const innerLast = React.createRef<PublicInstance>()
+    screen.render(
+      <Dialog defaultOpen>
+        <DialogPortal>
+          <DialogPopup>
+            <DialogTitle>Outer dialog</DialogTitle>
+            <button ref={outerFirst} ariaLabel="Outer first" />
+            <Dialog defaultOpen>
+              <DialogTrigger ariaLabel="Nested trigger" />
+              <DialogPortal>
+                <DialogPopup>
+                  <DialogTitle>Inner dialog</DialogTitle>
+                  <button ref={innerFirst} ariaLabel="Inner first" />
+                  <button ref={innerLast} ariaLabel="Inner last" />
+                </DialogPopup>
+              </DialogPortal>
+            </Dialog>
+            <button ariaLabel="Outer last" />
+          </DialogPopup>
+        </DialogPortal>
+      </Dialog>
+    )
+
+    screen.renderer.focusElement(innerLast.current!.id)
+    screen.renderer.simulateKeystrokes("tab")
+    expect(screen.renderer.getActiveElement()).toBe(innerFirst.current!.id)
+    screen.renderer.simulateKeystrokes("shift-tab")
+    expect(screen.renderer.getActiveElement()).toBe(innerLast.current!.id)
+    expect(screen.renderer.getActiveElement()).not.toBe(outerFirst.current!.id)
+  })
+
+  it("moves to unrendered virtual rows at the Dialog focus boundary", () => {
+    screen.render(
+      <>
+        <button ariaLabel="Outside dialog" />
+        <Dialog defaultOpen>
+          <DialogPortal>
+            <DialogPopup>
+              <DialogTitle>Virtual rows</DialogTitle>
+              <virtual-list
+                overdraw={0}
+                estimatedItemHeight={40}
+                style={{ width: 240, height: 120 }}
+              >
+                {Array.from({ length: 12 }, (_, index) => (
+                  <a
+                    key={index}
+                    href={`/${index}`}
+                    ariaLabel={`dialog-row-${index}`}
+                    data-testid={`dialog-row-${index}`}
+                    style={{ width: 200, height: 40, flexShrink: 0 }}
+                  >
+                    {`Row ${index}`}
+                  </a>
+                ))}
+              </virtual-list>
+            </DialogPopup>
+          </DialogPortal>
+        </Dialog>
+      </>
+    )
+
+    const lastPainted = screen.renderer.findByTestId("dialog-row-2")!
+    screen.renderer.focusElement(lastPainted.id)
+    screen.renderer.simulateKeystrokes("tab")
+
+    expect(screen.renderer.getActiveElement()).toBe(screen.renderer.findByTestId("dialog-row-3")!.id)
+    expect(screen.renderer.getActiveElement()).not.toBe(screen.getByRole("button", { name: "Outside dialog" }).id)
+  })
+
+  it("keeps a radio group to one Tab stop inside the focus trap", () => {
+    const after = React.createRef<PublicInstance>()
+    screen.render(
+      <Dialog defaultOpen>
+        <DialogPortal>
+          <DialogPopup>
+            <DialogTitle>Radio group</DialogTitle>
+            <input type="radio" name="choice" ariaLabel="First choice" />
+            <input type="radio" name="choice" ariaLabel="Second choice" />
+            <button ref={after} ariaLabel="After group" />
+          </DialogPopup>
+        </DialogPortal>
+      </Dialog>
+    )
+
+    const radios = screen.getAllByRole("radio")
+    screen.renderer.focusElement(radios[0]!.id)
+    screen.renderer.simulateKeystrokes("tab")
+
+    expect(screen.renderer.getActiveElement()).toBe(after.current!.id)
   })
 
   it("opens a Dialog.Trigger with Enter and Space", () => {
@@ -120,6 +235,33 @@ describeNative("Dialog", () => {
     screen.renderer.simulateKeystrokes("escape")
     expect(screen.getByRole("dialog", { name: "Outer" })).toBeDefined()
     expect(screen.queryByRole("option", { name: "One" })).toBeNull()
+    screen.renderer.simulateKeystrokes("escape")
+    expect(screen.queryByRole("dialog", { name: "Outer" })).toBeNull()
+  })
+
+  it("closes a Combobox before its containing Dialog on Escape", () => {
+    const input = React.createRef<PublicInstance>()
+    screen.render(
+      <Dialog defaultOpen>
+        <DialogPortal>
+          <DialogPopup>
+            <DialogTitle>Outer</DialogTitle>
+            <Combobox defaultOpen items={["Alpha"]}>
+              <ComboboxInput ref={input} />
+              <ComboboxPopup>
+                <ComboboxList>{(item) => <ComboboxItem key={item} value={item}>{item}</ComboboxItem>}</ComboboxList>
+              </ComboboxPopup>
+            </Combobox>
+          </DialogPopup>
+        </DialogPortal>
+      </Dialog>
+    )
+
+    expect(screen.renderer.getAllText()).toContain("Alpha")
+    screen.renderer.focusElement(input.current!.id)
+    screen.renderer.simulateKeystrokes("escape")
+    expect(screen.getByRole("dialog", { name: "Outer" })).toBeDefined()
+    expect(screen.renderer.getAllText()).not.toContain("Alpha")
     screen.renderer.simulateKeystrokes("escape")
     expect(screen.queryByRole("dialog", { name: "Outer" })).toBeNull()
   })

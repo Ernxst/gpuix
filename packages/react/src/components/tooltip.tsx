@@ -220,7 +220,7 @@ export const TooltipTrigger = forwardRef<PublicInstance, TooltipTriggerProps>(
         },
         onKeyDown: (event) => {
           onKeyDown?.(event)
-          if (event.key.toLowerCase() === "escape" && context.isTopDismissLayer(event)) context.close()
+          if (!event.defaultPrevented && event.key.toLowerCase() === "escape" && context.isTopDismissLayer(event)) context.close()
         },
       },
       ref
@@ -254,7 +254,7 @@ export const TooltipPopup = forwardRef<PublicInstance, TooltipPopupProps>(
         }}
         onKeyDown={(event: GpuixKeyboardEvent) => {
           onKeyDown?.(event)
-          if (event.key.toLowerCase() === "escape" && context.isTopDismissLayer(event)) context.close()
+          if (!event.defaultPrevented && event.key.toLowerCase() === "escape" && context.isTopDismissLayer(event)) context.close()
         }}
       >
         {children}

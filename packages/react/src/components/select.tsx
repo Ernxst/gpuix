@@ -483,7 +483,7 @@ export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
         onKeyDown?.(event)
         if (disabled) return
         if (event.key === "Escape") {
-          context.setOpen(false)
+          if (!event.defaultPrevented) context.setOpen(false)
         } else if (event.key === "ArrowDown" || (event.key === "n" && event.modifiers?.ctrl)) {
           if (!context.open) context.setOpen(true)
           context.moveActive(1)

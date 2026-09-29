@@ -242,6 +242,32 @@ describeNative("floating controls", () => {
     expect(testRoot.renderer.getAllText()).toEqual(["One"])
   })
 
+  it("lets a SelectTrigger consumer cancel Escape dismissal", () => {
+    testRoot.render(
+      <div style={{ width: 400, height: 260, padding: 12 }}>
+        <SelectPrimitive.Root items={[{ value: "one", label: "One" }]} defaultOpen>
+          <SelectPrimitive.Trigger
+            onKeyDown={(event) => {
+              if (event.key.toLowerCase() === "escape") event.preventDefault()
+            }}
+            style={triggerStyle}
+          >
+            <SelectPrimitive.Value placeholder="Choose" />
+          </SelectPrimitive.Trigger>
+          <SelectPrimitive.Popup style={contentStyle}>
+            <SelectPrimitive.Item value="one">One</SelectPrimitive.Item>
+          </SelectPrimitive.Popup>
+        </SelectPrimitive.Root>
+      </div>
+    )
+
+    const trigger = testRoot.renderer.findByType("div").find((element) => element.events.has("keyDown"))!
+    expect(testRoot.renderer.getAllText()).toContain("One")
+    testRoot.renderer.nativeSimulateKeyDown(trigger.id, "escape")
+
+    expect(testRoot.renderer.getAllText()).toContain("One")
+  })
+
   it("blocks clicks behind an absolute overlay with a fill", () => {
     function Demo() {
       const [behind, setBehind] = useState(0)
@@ -540,6 +566,75 @@ describeNative("floating controls", () => {
     expect(testRoot.renderer.getAllText()).toContain("Selected: none")
   })
 
+  it("lets a Combobox consumer cancel Escape dismissal", () => {
+    testRoot.render(
+      <div style={{ width: 400, height: 240, padding: 12 }}>
+        <Combobox items={["Alpha"]}>
+          <ComboboxInput onKeyDown={(event) => {
+            if (event.key.toLowerCase() === "escape") event.preventDefault()
+          }} style={triggerStyle} />
+          <ComboboxPopup style={contentStyle}>
+            <ComboboxList>{(item) => <ComboboxItem key={item} value={item}>{item}</ComboboxItem>}</ComboboxList>
+          </ComboboxPopup>
+        </Combobox>
+      </div>
+    )
+
+    const input = testRoot.renderer.findByType("input")[0]
+    testRoot.renderer.nativeSimulateClick(30, 25)
+    expect(testRoot.renderer.getAllText()).toContain("Alpha")
+    testRoot.renderer.nativeSimulateKeyDown(input.id, "escape")
+
+    expect(testRoot.renderer.getAllText()).toContain("Alpha")
+  })
+
+  it("closes a Combobox when its input loses focus", () => {
+    testRoot.render(
+      <div style={{ width: 400, height: 240, padding: 12 }}>
+        <Combobox items={["Alpha"]}>
+          <ComboboxInput style={triggerStyle} />
+          <ComboboxPopup style={contentStyle}>
+            <ComboboxList>{(item) => <ComboboxItem key={item} value={item}>{item}</ComboboxItem>}</ComboboxList>
+          </ComboboxPopup>
+        </Combobox>
+        <input ariaLabel="Outside Combobox" style={triggerStyle} />
+      </div>
+    )
+
+    const [input, outside] = testRoot.renderer.findByType("input")
+    testRoot.renderer.nativeSimulateClick(30, 25)
+    expect(testRoot.renderer.getAllText()).toContain("Alpha")
+    testRoot.renderer.focusElement(outside.id)
+
+    expect(testRoot.renderer.getAllText()).not.toContain("Alpha")
+  })
+
+  it("lets a ComboboxTrigger consumer cancel Escape dismissal", () => {
+    testRoot.render(
+      <div style={{ width: 400, height: 240, padding: 12 }}>
+        <Combobox items={["Alpha"]} defaultOpen>
+          <ComboboxPrimitive.Trigger
+            onKeyDown={(event) => {
+              if (event.key.toLowerCase() === "escape") event.preventDefault()
+            }}
+            style={triggerStyle}
+          >
+            Choose
+          </ComboboxPrimitive.Trigger>
+          <ComboboxPopup style={contentStyle}>
+            <ComboboxList>{(item) => <ComboboxItem key={item} value={item}>{item}</ComboboxItem>}</ComboboxList>
+          </ComboboxPopup>
+        </Combobox>
+      </div>
+    )
+
+    const trigger = testRoot.renderer.findByType("div").find((element) => element.events.has("keyDown"))!
+    expect(testRoot.renderer.getAllText()).toContain("Alpha")
+    testRoot.renderer.nativeSimulateKeyDown(trigger.id, "escape")
+
+    expect(testRoot.renderer.getAllText()).toContain("Alpha")
+  })
+
   it("opens and closes a Tooltip from native hover events", () => {
     let triggerRef = null
 
@@ -582,6 +677,62 @@ describeNative("floating controls", () => {
     testRoot.renderer.nativeSimulateMouseMove(30, 25)
     testRoot.renderer.nativeSimulateMouseMove(300, 180)
     expect(testRoot.renderer.getAllText()).toEqual(["Hover me"])
+  })
+
+  it("lets a Tooltip consumer cancel Escape dismissal", () => {
+    function Demo() {
+      return (
+        <div style={{ width: 400, height: 240, padding: 12 }}>
+          <TooltipPrimitive.Provider delay={0} disableHoverableContent>
+            <TooltipPrimitive.Root defaultOpen>
+              <TooltipPrimitive.Trigger
+                onKeyDown={(event) => {
+                  if (event.key.toLowerCase() === "escape") event.preventDefault()
+                }}
+                style={triggerStyle}
+              >
+                Hover me
+              </TooltipPrimitive.Trigger>
+              <TooltipPrimitive.Popup style={contentStyle}>Tooltip body</TooltipPrimitive.Popup>
+            </TooltipPrimitive.Root>
+          </TooltipPrimitive.Provider>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    expect(testRoot.renderer.getAllText()).toContain("Tooltip body")
+    const trigger = testRoot.renderer.findByType("div").find((element) => element.events.has("keyDown"))!
+    testRoot.renderer.nativeSimulateKeyDown(trigger.id, "escape")
+
+    expect(testRoot.renderer.getAllText()).toContain("Tooltip body")
+  })
+
+  it("lets a TooltipPopup consumer cancel Escape dismissal", () => {
+    const popup = { current: null as PublicInstance | null }
+    testRoot.render(
+      <div style={{ width: 400, height: 240, padding: 12 }}>
+        <TooltipPrimitive.Provider delay={0} disableHoverableContent>
+          <TooltipPrimitive.Root defaultOpen>
+            <TooltipPrimitive.Trigger style={triggerStyle}>Hover me</TooltipPrimitive.Trigger>
+            <TooltipPrimitive.Popup
+              ref={(instance) => { popup.current = instance }}
+              onKeyDown={(event) => {
+                if (event.key.toLowerCase() === "escape") event.preventDefault()
+              }}
+              style={contentStyle}
+            >
+              Tooltip body
+            </TooltipPrimitive.Popup>
+          </TooltipPrimitive.Root>
+        </TooltipPrimitive.Provider>
+      </div>
+    )
+
+    expect(testRoot.renderer.getAllText()).toContain("Tooltip body")
+    testRoot.renderer.nativeSimulateKeyDown(popup.current!.id, "escape")
+
+    expect(testRoot.renderer.getAllText()).toContain("Tooltip body")
   })
 
   it("moves through tab-indexed controls by default and explicitly", () => {

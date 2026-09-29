@@ -271,7 +271,7 @@ export const ComboboxInput = forwardRef<PublicInstance, ComboboxInputProps>(
           onKeyDown?.(event)
           if (disabled) return
           if (event.key.toLowerCase() === "escape") {
-            if (context.isTopDismissLayer(event)) context.setOpen(false)
+            if (!event.defaultPrevented && context.isTopDismissLayer(event)) context.setOpen(false)
           } else if (event.key === "ArrowDown" || (event.key === "n" && event.modifiers?.ctrl)) {
             context.moveActive(1)
           } else if (event.key === "ArrowUp" || (event.key === "p" && event.modifiers?.ctrl)) {
@@ -320,7 +320,7 @@ export const ComboboxTrigger = forwardRef<PublicInstance, ComboboxTriggerProps>(
           onKeyDown?.(event)
           if (disabled) return
           if (event.key === "ArrowDown" || event.key === "ArrowUp") context.setOpen(true)
-          if (event.key.toLowerCase() === "escape" && context.isTopDismissLayer(event)) context.setOpen(false)
+          if (!event.defaultPrevented && event.key.toLowerCase() === "escape" && context.isTopDismissLayer(event)) context.setOpen(false)
         },
       },
       ref

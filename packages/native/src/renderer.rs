@@ -10684,15 +10684,15 @@ impl GpuixView {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        if self.focus_unrendered_virtual_target(direction, window, cx) {
+        if self.focus_unrendered_virtual_target(direction, None, window, cx) {
             return;
         }
-        self.leave_radio_group(direction, window, cx);
+        self.leave_radio_group(direction, None, window, cx);
         match direction {
             FocusDirection::Next => window.focus_next(cx),
             FocusDirection::Previous => window.focus_prev(cx),
         }
-        self.enter_radio_group_backwards(direction, window, cx);
+        self.enter_radio_group_backwards(direction, None, window, cx);
         self.scroll_current_focus_into_view(window, cx);
     }
 
@@ -10703,6 +10703,11 @@ impl GpuixView {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
+        if self.focus_unrendered_virtual_target(direction, Some(element_id), window, cx) {
+            return;
+        }
+
+        self.leave_radio_group(direction, Some(element_id), window, cx);
         let mut focus_ids = std::collections::HashSet::new();
         {
             let tree = self.tree.lock().unwrap();
@@ -10724,6 +10729,7 @@ impl GpuixView {
             FocusDirection::Next => window.focus_next_among(|id| focus_ids.contains(id), cx),
             FocusDirection::Previous => window.focus_prev_among(|id| focus_ids.contains(id), cx),
         }
+        self.enter_radio_group_backwards(direction, Some(element_id), window, cx);
         self.scroll_current_focus_into_view(window, cx);
     }
 
@@ -10732,11 +10738,13 @@ impl GpuixView {
     fn reachable_radio_groups(
         &self,
         window: &gpui::Window,
+        within: Option<u64>,
     ) -> crate::custom_elements::choice_input::RadioGroups {
         let tree_arc = self.tree.clone();
         let tree = tree_arc.lock().unwrap();
         crate::custom_elements::choice_input::RadioGroups::collect(&tree, |id| {
-            self.display_none_in_ancestry(&tree, id, window)
+            within.is_some_and(|root| !is_descendant_or_self(&tree, root, id))
+                || self.display_none_in_ancestry(&tree, id, window)
                 || accessibility_hidden_in_ancestry(&tree, id)
         })
     }
@@ -10753,13 +10761,14 @@ impl GpuixView {
     fn leave_radio_group(
         &mut self,
         direction: FocusDirection,
+        within: Option<u64>,
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
         let Some(focused) = self.focused_element_id(window) else {
             return;
         };
-        let groups = self.reachable_radio_groups(window);
+        let groups = self.reachable_radio_groups(window, within);
         let Some(members) = groups.members(focused) else {
             return;
         };
@@ -10778,6 +10787,7 @@ impl GpuixView {
     fn enter_radio_group_backwards(
         &mut self,
         direction: FocusDirection,
+        within: Option<u64>,
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
@@ -10787,7 +10797,7 @@ impl GpuixView {
         let Some(focused) = self.focused_element_id(window) else {
             return;
         };
-        let groups = self.reachable_radio_groups(window);
+        let groups = self.reachable_radio_groups(window, within);
         let Some(members) = groups.members(focused) else {
             return;
         };
@@ -10820,6 +10830,7 @@ impl GpuixView {
     fn focus_unrendered_virtual_target(
         &mut self,
         direction: FocusDirection,
+        within: Option<u64>,
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) -> bool {
@@ -10837,7 +10848,7 @@ impl GpuixView {
             return false;
         };
 
-        let Some(root_id) = tree.root_id else {
+        let Some(root_id) = within.or(tree.root_id) else {
             return false;
         };
         let mut stack = vec![root_id];
@@ -14717,6 +14728,19 @@ fn direct_child_index(tree: &RetainedTree, ancestor_id: u64, element_id: u64) ->
                 .iter()
                 .position(|child| *child == current);
         }
+        current = parent_id;
+    }
+}
+
+fn is_descendant_or_self(tree: &RetainedTree, ancestor_id: u64, element_id: u64) -> bool {
+    let mut current = element_id;
+    loop {
+        if current == ancestor_id {
+            return true;
+        }
+        let Some(parent_id) = tree.elements.get(&current).and_then(|element| element.parent) else {
+            return false;
+        };
         current = parent_id;
     }
 }

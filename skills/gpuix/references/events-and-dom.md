@@ -182,5 +182,3 @@ Use the built-ins instead (`components.md`): `@gpuix/react/select`, `/combobox`,
 | #650 | `ResizeObserver` types claim DOM targets and entries. |
 | #652 | No shared object-ref type across React DOM and GPU-IX; callback refs are the adapter. |
 | #619 | Implicit wrapper root for several top-level children. |
-| #578 | No focus trap. |
-| #536 | No `ariaModal`. |
