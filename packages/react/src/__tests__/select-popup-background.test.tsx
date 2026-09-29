@@ -1,7 +1,7 @@
 import React from "react"
 import { beforeEach, describe, expect, it } from "vitest"
-import * as Select from "../components/select"
 import * as Combobox from "../components/combobox"
+import * as Select from "../components/select"
 import * as Tooltip from "../components/tooltip"
 import { createTestRoot, isNativeTestRendererAvailable, type TestRoot } from "../testing.js"
 import { gpuixMatchers, type GpuixMatchers } from "../testing-expect.js"
@@ -67,6 +67,43 @@ describeNative("SelectPopup background", () => {
 
     expect(screen.renderer.getResolvedStyle(screen.getByTestId("popup").id)).toMatchObject({
       backgroundColor: "#1A1A1A",
+    })
+  })
+
+  it("lets a background shorthand from style replace the fallback", () => {
+    screen.render(<Fruit popup={{ style: { width: 180, background: "#123456" } }} />)
+    screen.renderer.nativeSimulateClick(30, 25)
+    screen.renderer.drawPendingFrame()
+
+    expect(screen.renderer.getResolvedStyle(screen.getByTestId("popup").id)).toMatchObject({
+      background: "#123456",
+    })
+  })
+
+  it("lets a compiled class background shorthand replace the fallback", () => {
+    screen.render(<Fruit popup={{ className: compiled({ background: "#123456" }) }} />)
+    screen.renderer.nativeSimulateClick(30, 25)
+    screen.renderer.drawPendingFrame()
+
+    expect(screen.renderer.getResolvedStyle(screen.getByTestId("popup").id)).toMatchObject({
+      background: "#123456",
+    })
+  })
+
+  it("lets a compiled class state background show on hover", () => {
+    screen.render(
+      <Fruit popup={{ className: compiled({ hover: { backgroundColor: "#123456" } }) }} />
+    )
+    screen.renderer.nativeSimulateClick(30, 25)
+    screen.renderer.drawPendingFrame()
+
+    const popup = screen.getByTestId("popup")
+    const bounds = screen.renderer.getElementBounds(popup.id)!
+    screen.renderer.nativeSimulateMouseMove(bounds.x + 2, bounds.y + 2)
+    screen.renderer.drawPendingFrame()
+
+    expect(screen.renderer.getResolvedStyle(popup.id)).toMatchObject({
+      backgroundColor: "#123456",
     })
   })
 

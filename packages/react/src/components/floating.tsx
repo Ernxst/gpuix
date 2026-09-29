@@ -9,7 +9,7 @@ import React, {
 } from "react"
 import type { ReactElement, ReactNode, Ref } from "react"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
-import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
+import type { NativeStateStyle, Props, PublicInstance, StyleDesc } from "../types/host.js"
 import { isCompiledStyle } from "../class-names.js"
 
 export type FloatingSide = "top" | "right" | "bottom" | "left"
@@ -23,6 +23,31 @@ export interface FloatingPopupProps extends Omit<Props, "children"> {
   align?: FloatingAlign
   alignOffset?: number
   collisionPadding?: number
+}
+
+const BACKGROUND_STATES = [
+  "hover",
+  "hoverWithin",
+  "active",
+  "activeWithin",
+  "focus",
+  "focusVisible",
+  "focusWithin",
+  "groupFocus",
+  "groupFocusVisible",
+  "groupFocusWithin",
+  "dragOver",
+] as const satisfies readonly (keyof StyleDesc)[]
+
+function hasBackground(style?: StyleDesc | NativeStateStyle): boolean {
+  return style?.background !== undefined || style?.backgroundColor !== undefined
+}
+
+function hasAnyBackground(style?: StyleDesc): boolean {
+  return (
+    hasBackground(style) ||
+    BACKGROUND_STATES.some((state) => hasBackground(style?.[state]))
+  )
 }
 
 export function resolveStyle<State>(
@@ -232,7 +257,7 @@ export const FloatingLayer = forwardRef<PublicInstance, FloatingPopupProps>(
         : { x: 0, y: alignOffset }
     const classStyle = isCompiledStyle(props.className) ? props.className : undefined
     const backgroundFallback =
-      props.style?.backgroundColor === undefined && classStyle?.backgroundColor === undefined
+      !hasAnyBackground(props.style) && !hasAnyBackground(classStyle)
         ? { backgroundColor: "#1A1A1A" }
         : undefined
 
