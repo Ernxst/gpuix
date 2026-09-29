@@ -37,6 +37,7 @@ export const ARIA_PROP_ALIASES = {
   "aria-level": "ariaLevel",
   "aria-rowindex": "ariaRowIndex",
   "aria-colindex": "ariaColIndex",
+  "aria-sort": "ariaSort",
   "aria-rowcount": "ariaRowCount",
   "aria-colcount": "ariaColCount",
   "aria-rowspan": "ariaRowSpan",

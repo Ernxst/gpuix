@@ -30,6 +30,8 @@ const aliases = [
     aria-level={2}
     aria-rowindex={1}
     aria-colindex={2}
+    ariaSort="ascending"
+    aria-sort="descending"
     aria-rowcount={3}
     aria-colcount={4}
     aria-rowspan={1}
@@ -75,6 +77,8 @@ const aliasProps: Props = {
   "aria-level": 2,
   "aria-rowindex": 1,
   "aria-colindex": 2,
+  ariaSort: "ascending",
+  "aria-sort": "descending",
   "aria-rowcount": 3,
   "aria-colcount": 4,
   "aria-rowspan": 1,
@@ -103,6 +107,16 @@ const pressedStates: Props[] = [
   { "aria-pressed": true },
   { "aria-pressed": false },
   { "aria-pressed": "mixed" },
+]
+const sortDirections: Props[] = [
+  { ariaSort: "ascending" },
+  { ariaSort: "descending" },
+  { ariaSort: "other" },
+  { ariaSort: "none" },
+  { "aria-sort": "ascending" },
+  { "aria-sort": "descending" },
+  { "aria-sort": "other" },
+  { "aria-sort": "none" }
 ]
 const remainingBaseUiStates: Props[] = [
   { ariaOrientation: "horizontal", ariaReadOnly: true, ariaRequired: "true", ariaInvalid: true },
@@ -211,6 +225,7 @@ void aliases
 void aliasProps
 void currentTokens
 void pressedStates
+void sortDirections
 void remainingBaseUiStates
 void liveTokens
 void roleVocabulary

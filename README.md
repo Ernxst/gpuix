@@ -3003,6 +3003,8 @@ const columns = [
 headers in `<thead>` and headers in the table's first row become column
 headers; first cells in later rows outside `<thead>` become row headers.
 Positive `colSpan` and `rowSpan` values are exposed to native accessibility.
+`ariaSort` (or `aria-sort`) accepts `ascending`, `descending`, `other` or `none`
+on column and row headers; `none` clears the exposed sort direction.
 `headers` is retained on native elements but does not create an accessibility
 relation.
 
