@@ -2089,6 +2089,10 @@ element. There is no `VirtualList` wrapper: windowing is application state.
 | `followTail` | `false` | Follow appended rows until the user scrolls away |
 | `overdraw` | `512` | Extra pixels mounted and built outside the viewport |
 | `estimatedItemHeight` | `48` | Height hint for unmeasured rows. Pass `null` to opt out; native ignores `itemCount` when no estimate reaches it |
+| `tabIndex` | unset | Set `0` to add the list to the Tab order and enable keyboard scrolling |
+
+The list accepts `focus` and `focusVisible` styles. Use `focusVisible` for a
+keyboard focus indicator.
 
 ### How virtualization works
 
@@ -4727,9 +4731,9 @@ value instead of animating — a card that lifts while focus is inside it, via
 `focusWithin: { top: -4 }` under a `top` transition, jumps rather than eases.
 
 These state styles work on **every** element, including `<text>`, `<code>`,
-`<markdown>`, `<diff>`, `<img>`, `<svg>` and the editors. The one exception is
-`<virtual-list>`, whose `style` type rejects them: gpui's list has no
-interactive identity to hold a hovered or pressed state, so put them on a
+`<markdown>`, `<diff>`, `<img>`, `<svg>` and the editors. `<virtual-list>` also
+supports focus state styles, but its `style` type rejects `hover`, `active`, and
+`dragOver` because the list has no hover or pressed state; put those on a
 wrapping `<div>`.
 
 ### Shared web and native style helpers
