@@ -6223,8 +6223,11 @@ impl GpuixRenderer {
             crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
 
         #[cfg(target_os = "macos")]
-        update_window(|view, _window, _cx| {
+        update_window(|view, _window, cx| {
             view.last_pointer_position = Some((x, y));
+            if view.reconcile_hover_state_at_pointer(x, y) {
+                cx.notify();
+            }
         })?;
 
         #[cfg(target_os = "macos")]
@@ -8372,11 +8375,7 @@ impl GpuixView {
         });
     }
 
-    fn pointer_is_over_visible_hover_group(
-        &self,
-        id: u64,
-        window: &gpui::Window,
-    ) -> bool {
+    fn pointer_is_over_visible_hover_group(&self, id: u64, window: &gpui::Window) -> bool {
         let Some(bounds) = crate::automation::get_bounds(id) else {
             return false;
         };
@@ -8389,6 +8388,54 @@ impl GpuixView {
             && x <= bounds.x + bounds.width
             && y >= bounds.y
             && y <= bounds.y + bounds.height
+    }
+
+    /// GPUI can leave a retained hitbox hovered when a rerender changes its
+    /// hitbox tree before the next hover callback. A pointer move outside the
+    /// last painted bounds is enough evidence to clear that stale state.
+    fn reconcile_hover_state_at_pointer(&mut self, x: f64, y: f64) -> bool {
+        // A captured pointer intentionally keeps ancestor hover styles alive
+        // until release, even when it moves beyond the ancestor's bounds.
+        if self.pointer_router.borrow().is_pressed() {
+            return false;
+        }
+        let outside = |id: u64| {
+            crate::automation::get_bounds(id).is_some_and(|bounds| {
+                bounds.width <= 0.0
+                    || bounds.height <= 0.0
+                    || x < bounds.x
+                    || x > bounds.x + bounds.width
+                    || y < bounds.y
+                    || y > bounds.y + bounds.height
+            })
+        };
+        let stale_style_ids = self
+            .interactive_style_states
+            .iter()
+            .filter_map(|(id, state)| (state.hovered && outside(*id)).then_some(*id))
+            .collect::<Vec<_>>();
+        let stale_targets = self
+            .hovered_targets
+            .iter()
+            .copied()
+            .filter(|id| outside(*id))
+            .collect::<Vec<_>>();
+
+        let mut changed = false;
+        for id in stale_style_ids {
+            changed |= self
+                .interactive_style_states
+                .get_mut(&id)
+                .is_some_and(|state| state.set_hovered(false));
+        }
+        for id in stale_targets {
+            self.hovered_targets.remove(&id);
+        }
+        if changed {
+            self.interaction_revision = self.interaction_revision.saturating_add(1);
+        }
+        self.dispatch_hover_target_change(true);
+        changed
     }
 
     /// Publish the target implied by a GPUI mouse-move callback before the
@@ -11621,7 +11668,11 @@ impl gpui::Render for GpuixView {
                 .text_color(gpui::rgba(0xe2e2e2ff))
                 .track_focus(&self.root_focus_handle)
                 .on_mouse_move(cx.listener(|view, event: &gpui::MouseMoveEvent, _window, _cx| {
-                    view.last_pointer_position = Some(point_to_xy(event.position));
+                    let (x, y) = point_to_xy(event.position);
+                    view.last_pointer_position = Some((x, y));
+                    if view.reconcile_hover_state_at_pointer(x, y) {
+                        _cx.notify();
+                    }
                 }))
                 .on_action(cx.listener(Self::focus_next_action))
                 .on_action(cx.listener(Self::focus_previous_action))
