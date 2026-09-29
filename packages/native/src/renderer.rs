@@ -11036,16 +11036,6 @@ impl GpuixView {
             focused_id == Some(element.id)
                 && !sequential_tab_index(element).is_some_and(|index| index >= 0)
         };
-        let focus_group_names: HashSet<String> = tree
-            .elements
-            .values()
-            .filter_map(|element| {
-                element
-                    .style
-                    .as_deref()
-                    .and_then(|style| style.focus_within_group.clone())
-            })
-            .collect();
         let needs_focus = |element: &crate::retained_tree::RetainedElement| {
             crate::custom_elements::choice_input::is_default_focusable_control(element)
                 || tab_index(element).is_some()
@@ -11069,7 +11059,7 @@ impl GpuixView {
                     .style
                     .as_deref()
                     .and_then(|style| style.hover_group.as_ref())
-                    .is_some_and(|name| focus_group_names.contains(name))
+                    .is_some_and(|name| tree.has_focus_group(name))
         };
         let mut pending_auto_focus = Vec::new();
         // Create handles for elements that need focus but don't have one yet.
