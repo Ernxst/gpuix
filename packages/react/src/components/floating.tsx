@@ -10,6 +10,7 @@ import React, {
 import type { ReactElement, ReactNode, Ref } from "react"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
+import { isCompiledStyle } from "../class-names.js"
 
 export type FloatingSide = "top" | "right" | "bottom" | "left"
 export type FloatingAlign = "start" | "center" | "end"
@@ -229,6 +230,11 @@ export const FloatingLayer = forwardRef<PublicInstance, FloatingPopupProps>(
       side === "top" || side === "bottom"
         ? { x: alignOffset, y: 0 }
         : { x: 0, y: alignOffset }
+    const classStyle = isCompiledStyle(props.className) ? props.className : undefined
+    const backgroundFallback =
+      props.style?.backgroundColor === undefined && classStyle?.backgroundColor === undefined
+        ? { backgroundColor: "#1A1A1A" }
+        : undefined
 
     return (
       <anchored
@@ -246,10 +252,7 @@ export const FloatingLayer = forwardRef<PublicInstance, FloatingPopupProps>(
         <div
           {...props}
           ref={ref}
-          style={mergeStyles(
-            { backgroundColor: "#1A1A1A" },
-            floatingContentStyle(props.style)
-          )}
+          style={mergeStyles(backgroundFallback, floatingContentStyle(props.style))}
         >
           {children}
         </div>
