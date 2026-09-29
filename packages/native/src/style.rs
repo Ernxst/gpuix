@@ -1005,6 +1005,11 @@ pub struct StyleDesc {
     pub hover_within_group: Option<String>,
     /// Name shared by the marked ancestor that `groupFocus*` styles follow.
     pub focus_within_group: Option<String>,
+    /// CSS module group states in stylesheet source order. Internal metadata
+    /// used to resolve simultaneously active ancestor states before building
+    /// inherited text styles.
+    #[serde(default, skip_serializing)]
+    pub(crate) group_state_order: Vec<String>,
 
     /// Per-element GPUI paint identity for this element's `hoverGroup`.
     #[serde(skip)]
@@ -2639,6 +2644,32 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
                     value,
                     "focusWithinGroup marks the base element and cannot be nested in a state style",
                 );
+            }
+            continue;
+        }
+        if key == "groupStateOrder" {
+            if prefix.is_empty() {
+                match serde_json::from_value::<Vec<String>>(value.clone()) {
+                    Ok(order)
+                        if order.iter().all(|state| {
+                            matches!(
+                                state.as_str(),
+                                "hoverWithin"
+                                    | "activeWithin"
+                                    | "groupFocus"
+                                    | "groupFocusVisible"
+                                    | "groupFocusWithin"
+                            )
+                        }) => {
+                        parsed.style.group_state_order = order
+                    }
+                    _ => reject(
+                        &mut parsed.problems,
+                        property!("groupStateOrder"),
+                        value,
+                        "groupStateOrder is internal CSS module metadata",
+                    ),
+                }
             }
             continue;
         }
@@ -4398,6 +4429,25 @@ mod tests {
             nested.problems[0].reason,
             "hoverWithinGroup marks the base element and cannot be nested in a state style"
         );
+    }
+
+    #[test]
+    fn group_state_order_is_internal_css_module_metadata() {
+        let parsed = parse_style_value(&json!({
+            "hoverWithinGroup": "card",
+            "focusWithinGroup": "panel",
+            "groupStateOrder": ["groupFocusVisible", "hoverWithin"]
+        }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(
+            parsed.style.group_state_order,
+            vec!["groupFocusVisible", "hoverWithin"]
+        );
+        assert!(!serde_json::to_value(parsed.style)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("groupStateOrder"));
     }
 
     #[test]

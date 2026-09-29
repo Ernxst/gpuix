@@ -315,9 +315,16 @@ async function parseCssModule(
   const classNames = new Set<string>()
   const contributions: StyleContribution[] = []
   const accumulatedStyles: CssModuleStyles = {}
+  const groupStateOrders = new Map<string, string[]>()
   const groupRelations = new Map<
     string,
-    { ancestor: string; selector: string; states: Set<string> }
+    {
+      descendant: string
+      kind: "hover" | "focus"
+      ancestor: string
+      selector: string
+      states: Set<string>
+    }
   >()
 
   root.walkRules((rule) => {
@@ -327,7 +334,9 @@ async function parseCssModule(
       if (!parsed) continue // validateSelectors has already rejected this selector.
 
       if (parsed.kind === "groupDescendant") {
-        const previousRelation = groupRelations.get(parsed.descendant)
+        const kind = parsed.state.startsWith("groupFocus") ? "focus" : "hover"
+        const relationKey = `${parsed.descendant}\0${kind}`
+        const previousRelation = groupRelations.get(relationKey)
         if (previousRelation && previousRelation.ancestor !== parsed.ancestor) {
           throw unsupportedCss(
             sourceId,
@@ -336,7 +345,9 @@ async function parseCssModule(
         }
         const states = previousRelation?.states ?? new Set<string>()
         states.add(parsed.state)
-        groupRelations.set(parsed.descendant, {
+        groupRelations.set(relationKey, {
+          descendant: parsed.descendant,
+          kind,
           ancestor: parsed.ancestor,
           selector: previousRelation?.selector ?? trimmedSelector,
           states,
@@ -442,6 +453,14 @@ async function parseCssModule(
       contributions.push({ className: name, style: contribution })
       mergeStyle(accumulatedStyles[name] ??= {}, contribution)
 
+      if (parsed.kind === "groupDescendant" && hasDeclarations) {
+        const order = groupStateOrders.get(name) ?? []
+        const previousIndex = order.indexOf(parsed.state)
+        if (previousIndex !== -1) order.splice(previousIndex, 1)
+        order.push(parsed.state)
+        groupStateOrders.set(name, order)
+      }
+
       if (parsed.kind === "groupDescendant") {
         classNames.add(parsed.ancestor)
         const ancestorStyle = accumulatedStyles[parsed.ancestor] ??= {}
@@ -459,26 +478,33 @@ async function parseCssModule(
   // Bind the descendant state to the marker on its matching ancestor. The
   // marker may be declared after the relation, so derive it after all rules
   // have contributed in stylesheet order.
-  for (const [descendant, { ancestor, states }] of groupRelations) {
+  for (const { descendant, kind, ancestor, states } of groupRelations.values()) {
     const hoverGroup = accumulatedStyles[ancestor]?.hoverGroup
     if (typeof hoverGroup !== "string") continue
 
     const descendantStyle = accumulatedStyles[descendant] ??= {}
     const binding: Record<string, unknown> = {}
-    if (states.has("hoverWithin") || states.has("activeWithin")) {
+    if (kind === "hover" && (states.has("hoverWithin") || states.has("activeWithin"))) {
       if (!("hoverWithinGroup" in descendantStyle)) binding.hoverWithinGroup = hoverGroup
     }
-    if (
+    if (kind === "focus" && (
       states.has("groupFocus") ||
       states.has("groupFocusVisible") ||
       states.has("groupFocusWithin")
-    ) {
+    )) {
       if (!("focusWithinGroup" in descendantStyle)) binding.focusWithinGroup = hoverGroup
     }
     if (Object.keys(binding).length > 0) {
       contributions.push({ className: descendant, style: binding })
       mergeStyle(descendantStyle, binding)
     }
+  }
+
+  for (const [descendant, order] of groupStateOrders) {
+    if (order.length < 2) continue
+    const metadata = { groupStateOrder: order }
+    contributions.push({ className: descendant, style: metadata })
+    mergeStyle(accumulatedStyles[descendant] ??= {}, metadata)
   }
 
   for (const className of compositions.keys()) classNames.add(className)
@@ -675,6 +701,16 @@ function formatCompositionKey(key: string): string {
 function mergeStyle(target: Record<string, unknown>, source: Record<string, unknown>): void {
   for (const [property, value] of Object.entries(source)) {
     const previous = target[property]
+    if (property === "groupStateOrder" && Array.isArray(previous) && Array.isArray(value)) {
+      const order = [...previous]
+      for (const state of value) {
+        const previousIndex = order.indexOf(state)
+        if (previousIndex !== -1) order.splice(previousIndex, 1)
+        order.push(state)
+      }
+      target[property] = order
+      continue
+    }
     if (STATE_STYLE_KEYS.has(property) && isPlainObject(previous) && isPlainObject(value)) {
       target[property] = { ...previous, ...value }
     } else {

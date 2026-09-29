@@ -81,10 +81,10 @@ The transform puts compiled styles in `className` and accepts local class
 selectors, grouped selectors, and declarations supported by GPUIX's native
 style model. It supports the `:hover`, `:active`, `:focus`, `:focus-visible`,
 and `:focus-within` states, plus hovered and pressed descendant selectors such as
-`.container:hover .child` and `.container:active .child`. Each child can refer to
-one ancestor group across both states. The transform binds its `hoverWithin` and
-`activeWithin` styles to that ancestor's `hoverGroup`, including when the two
-classes are composed separately. Other
+`.container:hover .child` and `.container:active .child`. A child can refer to
+one ancestor group for hover/active styles and another for focus styles. The
+transform binds its `hoverWithin` and `activeWithin` styles to that ancestor's
+`hoverGroup`, including when the two classes are composed separately. Other
 selectors, at-rules and animations are rejected until they have a native style
 representation.
 
