@@ -188,7 +188,7 @@ describeNative("PublicInstance.matches", () => {
 
     const message = (selector: string) =>
       `Failed to execute 'matches' on 'Element': '${selector}' is not a supported selector. ` +
-      "Supported: :focus, :focus-visible, :hover, :active."
+      "Supported: :focus, :focus-visible, :hover, :active, :disabled, :enabled."
 
     for (const selector of ["div", ":focus-within"]) {
       let thrown: unknown
@@ -213,5 +213,7 @@ describeNative("PublicInstance.matches", () => {
     expect(detached.matches(":focus-visible")).toBe(false)
     expect(detached.matches(":hover")).toBe(false)
     expect(detached.matches(":active")).toBe(false)
+    expect(detached.matches(":disabled")).toBe(false)
+    expect(detached.matches(":enabled")).toBe(false)
   })
 })
