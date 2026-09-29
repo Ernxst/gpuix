@@ -9,7 +9,8 @@ import React, {
 } from "react"
 import type { ReactElement, ReactNode, Ref } from "react"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
-import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
+import type { NativeStateStyle, Props, PublicInstance, StyleDesc } from "../types/host.js"
+import { isCompiledStyle } from "../class-names.js"
 
 export type FloatingSide = "top" | "right" | "bottom" | "left"
 export type FloatingAlign = "start" | "center" | "end"
@@ -22,6 +23,31 @@ export interface FloatingPopupProps extends Omit<Props, "children"> {
   align?: FloatingAlign
   alignOffset?: number
   collisionPadding?: number
+}
+
+const BACKGROUND_STATES = [
+  "hover",
+  "hoverWithin",
+  "active",
+  "activeWithin",
+  "focus",
+  "focusVisible",
+  "focusWithin",
+  "groupFocus",
+  "groupFocusVisible",
+  "groupFocusWithin",
+  "dragOver",
+] as const satisfies readonly (keyof StyleDesc)[]
+
+function hasBackground(style?: StyleDesc | NativeStateStyle): boolean {
+  return style?.background !== undefined || style?.backgroundColor !== undefined
+}
+
+function hasAnyBackground(style?: StyleDesc): boolean {
+  return (
+    hasBackground(style) ||
+    BACKGROUND_STATES.some((state) => hasBackground(style?.[state]))
+  )
 }
 
 export function resolveStyle<State>(
@@ -229,6 +255,11 @@ export const FloatingLayer = forwardRef<PublicInstance, FloatingPopupProps>(
       side === "top" || side === "bottom"
         ? { x: alignOffset, y: 0 }
         : { x: 0, y: alignOffset }
+    const classStyle = isCompiledStyle(props.className) ? props.className : undefined
+    const backgroundFallback =
+      !hasAnyBackground(props.style) && !hasAnyBackground(classStyle)
+        ? { backgroundColor: "#1A1A1A" }
+        : undefined
 
     return (
       <anchored
@@ -246,10 +277,7 @@ export const FloatingLayer = forwardRef<PublicInstance, FloatingPopupProps>(
         <div
           {...props}
           ref={ref}
-          style={mergeStyles(
-            { backgroundColor: "#1A1A1A" },
-            floatingContentStyle(props.style)
-          )}
+          style={mergeStyles(backgroundFallback, floatingContentStyle(props.style))}
         >
           {children}
         </div>

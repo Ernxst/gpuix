@@ -3641,9 +3641,10 @@ markdown through the menu, and clicks hit the text behind it.
 ```
 
 Give every overlay an **opaque** fill (`#232323`, not `#23232399`).
-`FloatingLayer` defaults to `#1A1A1A`. Item rows should use the same solid
-color, or a solid hover color. A `#00000000` child on a blurred window punches
-through Metal to the desktop.
+`FloatingLayer` defaults to `#1A1A1A` only when neither `style` nor a compiled
+`className` sets a background. A background set by either takes precedence.
+Item rows should use the same solid color, or a solid hover color. A
+`#00000000` child on a blurred window punches through Metal to the desktop.
 
 `FloatingLayer` copies uniform and per-corner border radii to its anchored
 surface, so rounded Select, Combobox, and Tooltip content does not show square
