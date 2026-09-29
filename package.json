@@ -23,6 +23,7 @@
     "web:wasm": "bun scripts/web.ts --build-only"
   },
   "devDependencies": {
+    "@guidepup/guidepup": "^0.34.0",
     "@types/bun": "^1.4.0",
     "playwright": "^1.62.1",
     "react-refresh": "^0.18.0",

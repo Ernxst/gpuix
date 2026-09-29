@@ -2,8 +2,8 @@
  * Native accessibility spike for a large, variable-height reference table.
  *
  * Run with `bun --hot accessible-windowed-table.tsx` from `examples/`.
- * Press Tab to advance through the mounted row actions. The window marker makes
- * the active React slice visible while inspecting the live macOS AX tree.
+ * The short viewport keeps the virtual-list build boundary close for VoiceOver
+ * navigation; `guidepup-accessible-windowed-table.ts` records the spoken output.
  */
 
 import React, { useState } from "react"
@@ -63,7 +63,7 @@ function App() {
         display: "flex",
         flexDirection: "column",
         width: 620,
-        height: 700,
+        height: 300,
         padding: 20,
         gap: 8,
         backgroundColor: "#161b22",
@@ -115,4 +115,4 @@ function App() {
   )
 }
 
-render(<App />, { title: "GPUIX Accessible Windowed Table", width: 660, height: 740 })
+render(<App />, { title: "GPUIX Accessible Windowed Table", width: 660, height: 340 })

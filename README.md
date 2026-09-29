@@ -382,6 +382,13 @@ npx skills add Ernxst/gpuix --skill gpuix
 | **diff** | `bun --hot diff.tsx` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
 | **web** | `bun run web` from the repository root | The ChatGPT example rendered in a browser canvas with WebGPU |
 
+The `examples/accessible-windowed-table.tsx` spike includes a Guidepup check for
+VoiceOver navigation across a virtualised table. Its AX preflight found a trusted
+client and a window with five children responding within milliseconds. Guidepup
+did not complete: an earlier run used the unsupported `MOVE_TO_FRONT_WINDOW`
+command, one run announced “bun is not responding”, and later runs rejected
+VoiceOver activation. The row-boundary result remains unverified.
+
 The todo app lives in [`example-app/`](https://github.com/Ernxst/gpuix/tree/main/example-app) and is meant to be copied.
 The rest live in [`examples/`](https://github.com/Ernxst/gpuix/tree/main/examples). All of them use hardcoded data.
 

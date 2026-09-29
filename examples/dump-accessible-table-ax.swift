@@ -13,6 +13,9 @@ let summaryOnly = arguments.contains("--summary")
 let tabDelay = arguments.first(where: { $0.hasPrefix("--tab-delay=") })
     .flatMap { Double($0.dropFirst("--tab-delay=".count)) } ?? 0.06
 let shiftTab = arguments.contains("--shift")
+let probeOnly = arguments.contains("--probe-only")
+let messagingTimeout = arguments.first(where: { $0.hasPrefix("--timeout-ms=") })
+    .flatMap { Double($0.dropFirst("--timeout-ms=".count)) }.map { Float($0 / 1_000) } ?? 1.0
 let pid: pid_t
 if let suppliedPID = arguments.first(where: { !$0.hasPrefix("--") }).flatMap(pid_t.init) {
     pid = suppliedPID
@@ -29,6 +32,8 @@ if let suppliedPID = arguments.first(where: { !$0.hasPrefix("--") }).flatMap(pid
 }
 
 let app = AXUIElementCreateApplication(pid)
+print("AXIsProcessTrusted=\(AXIsProcessTrusted()) messagingTimeout=\(messagingTimeout)s")
+_ = AXUIElementSetMessagingTimeout(app, messagingTimeout)
 _ = AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
 NSRunningApplication(processIdentifier: pid)?.activate(options: [])
 Thread.sleep(forTimeInterval: 0.35)
@@ -53,8 +58,14 @@ var tableRelevantAttributes: [String] = []
 var rowRelevantAttributes: [String] = []
 
 func value(_ element: AXUIElement, _ attribute: String) -> Any? {
+    _ = AXUIElementSetMessagingTimeout(element, messagingTimeout)
     var result: CFTypeRef?
+    let start = Date()
     let status = AXUIElementCopyAttributeValue(element, attribute as CFString, &result)
+    let elapsed = Date().timeIntervalSince(start)
+    if status != .success {
+        print("AXQuery attribute=\(attribute) status=\(status.rawValue) elapsed=\(String(format: "%.3f", elapsed))s")
+    }
     return status == .success ? result : nil
 }
 
@@ -103,6 +114,21 @@ func walk(_ element: AXUIElement, depth: Int) {
 guard let windows = value(app, kAXWindowsAttribute as String) as? [AXUIElement] else {
     fputs("AXUIElementCopyAttributeValue(AXWindows) failed for pid \(pid)\n", stderr)
     exit(1)
+}
+if probeOnly {
+    print("AXProbe pid=\(pid) windows=\(windows.count)")
+    for (windowIndex, window) in windows.enumerated() {
+        print("window[\(windowIndex)] role=\(describe(value(window, kAXRoleAttribute as String))) title=\(describe(value(window, kAXTitleAttribute as String)))")
+        guard let children = value(window, kAXChildrenAttribute as String) as? [AXUIElement] else { continue }
+        print("window[\(windowIndex)] children=\(children.count)")
+        for (childIndex, child) in children.prefix(40).enumerated() {
+            let role = describe(value(child, kAXRoleAttribute as String))
+            let title = describe(value(child, kAXTitleAttribute as String))
+            let description = describe(value(child, kAXDescriptionAttribute as String))
+            print("child[\(childIndex)] role=\(role) title=\(title) description=\(description)")
+        }
+    }
+    exit(0)
 }
 print("pid=\(pid) axWindows=\(windows.count)")
 for window in windows { walk(window, depth: 0) }
