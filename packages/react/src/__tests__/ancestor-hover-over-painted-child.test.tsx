@@ -167,4 +167,48 @@ describe.skipIf(!isNativeTestRendererAvailable())("ancestor :hover over painted 
       testRoot.unmount()
     }
   })
+
+  it("clears hover for a retained element with no painted bounds", () => {
+    const testRoot = createTestRoot()
+    const renderRow = (hidden: boolean) =>
+      testRoot.render(
+        <div style={{ width: 300, height: 100 }}>
+          <div
+            data-testid="row"
+            style={{
+              display: hidden ? "none" : "flex",
+              width: 100,
+              height: 50,
+              backgroundColor: "#253047",
+              hover: { backgroundColor: "#d97706" },
+            }}
+          />
+        </div>,
+      )
+    try {
+      renderRow(false)
+      const row = testRoot.renderer.findByTestId("row")!
+      const bounds = testRoot.renderer.getElementBounds(row.id)!
+      testRoot.renderer.nativeSimulateMouseMove(bounds.x + 20, bounds.y + 20)
+      expect(testRoot.renderer.getResolvedStyle(row.id)).toMatchObject({
+        backgroundColor: "#d97706",
+      })
+
+      renderRow(true)
+      expect(testRoot.renderer.getElementBounds(row.id)).toMatchObject({
+        width: 0,
+        height: 0,
+      })
+      expect(testRoot.renderer.getElementInteractionState(row.id).hovered).toBe(true)
+      testRoot.renderer.nativeSimulateMouseMove(0, 0)
+      renderRow(false)
+
+      expect(testRoot.renderer.getResolvedStyle(row.id)).toMatchObject({
+        backgroundColor: "#253047",
+      })
+      expect(testRoot.renderer.getElementInteractionState(row.id).hovered).toBe(false)
+    } finally {
+      testRoot.unmount()
+    }
+  })
 })
