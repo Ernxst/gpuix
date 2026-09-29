@@ -1,0 +1,11 @@
+# Accessibility prop and role checklist
+
+Use this checklist when React accepts or types an accessibility prop but GPU-IX drops it, misparses it, or exposes it on the wrong role.
+
+- [ ] Confirm the semantic property and allowed values against the relevant ARIA/HTML contract. Confirm the AccessKit field in the version pinned by `zed/Cargo.lock`; cite versioned docs and the pinned GPUI source.
+- [ ] In `packages/react/src/reconciler/aria-props.ts`, map the hyphenated DOM spelling to the camelCase GPU-IX prop. In `host-config.ts`, update both the accepted universal prop set and custom-prop serialization allow-list when applicable.
+- [ ] In `packages/react/src/types/host.ts`, add typed camelCase and hyphenated forms and their value type. Search other public snapshot or bridge types, such as `packages/react/src/testing.ts`, and update them when the exposed result includes the new field.
+- [ ] In `packages/native/src/accessibility.rs`, update `ACCESSIBILITY_PROPS`, the role-specific `supports` mapping, typed parsing, malformed-value reporting and expected-value message, then apply the parsed value to the GPUI builder. Keep unsupported roles diagnostic-free only if the established role contract intentionally ignores that property; otherwise report it.
+- [ ] If GPUI lacks the needed builder or AccessKit setter, make that change in a separate worktree based on `origin/gpuix` in Ernxst/zed. Add the builder and backing field, apply the AccessKit node setter, and include the accessibility debug output in `crates/gpui/src/elements/div.rs` and `crates/gpui/src/window/a11y/debug.rs`. Push the feature branch to Ernxst/zed, open and merge its fork PR, then bump the GPU-IX `zed` pointer to that reachable merge commit.
+- [ ] Add type coverage in `accessibility-props.types.tsx`; add renderer/accessibility-tree coverage in `automation.test.tsx` or the nearest existing suite; add valid and malformed strict-mode diagnostics in `style-diagnostics.test.tsx`. Include aliases, supported roles, clearing/empty semantics and invalid values where applicable. Observe the public accessibility result fail before implementation.
+- [ ] Update the relevant `README.md` accessibility section and `skills/gpuix/references/elements.md` support/gap description. Add a changeset for each affected package.
