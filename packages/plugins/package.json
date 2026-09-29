@@ -1,6 +1,6 @@
 {
   "name": "@gpuix/plugins",
-  "version": "0.25.0-fork.17",
+  "version": "0.25.0-fork.18",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
