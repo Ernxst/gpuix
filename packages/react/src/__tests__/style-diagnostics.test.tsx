@@ -27,11 +27,119 @@ declare module "vitest" {
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 const COMPILED_STYLE = Symbol.for("gpuix.compiledStyle")
 
+function VirtualRows({ count = 30 }: { count?: number }) {
+  return Array.from({ length: count }, (_, index) => (
+    <div key={index} style={{ height: 40 }}>
+      <text>{`row ${index}`}</text>
+    </div>
+  ))
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
 describeNative("style diagnostics", { timeout: 12_000 }, () => {
+  it("diagnoses a populated virtual-list with no bounded height", () => {
+    const testRoot = createTestRoot({ strictStyles: false })
+
+    testRoot.render(
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <virtual-list
+          estimatedItemHeight={40}
+          style={{ flexGrow: 1, minHeight: 0 }}
+        >
+          <VirtualRows />
+        </virtual-list>
+      </div>,
+    )
+
+    const list = testRoot.renderer.findByType("virtual-list")[0]!
+    expect(list.getBoundingClientRect().height).toBe(0)
+    expect(testRoot.renderer.drainStyleDiagnostics()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          elementType: "virtual-list",
+          message: expect.stringContaining("bounded height"),
+        }),
+      ]),
+    )
+  })
+
+  it("keeps bounded, empty, and hidden virtual-lists quiet", () => {
+    const bounded = createTestRoot({ strictStyles: false })
+    bounded.render(
+      <div style={{ height: 200, display: "flex", flexDirection: "column" }}>
+        <virtual-list estimatedItemHeight={40} style={{ flexGrow: 1, minHeight: 0 }}>
+          <VirtualRows />
+        </virtual-list>
+      </div>,
+    )
+    expect(bounded.renderer.findByType("virtual-list")[0]!.getBoundingClientRect().height).toBe(200)
+    expect(bounded.renderer.drainStyleDiagnostics()).toEqual([])
+
+    const empty = createTestRoot({ strictStyles: false })
+    empty.render(
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <virtual-list estimatedItemHeight={40} style={{ flexGrow: 1, minHeight: 0 }} />
+      </div>,
+    )
+    expect(empty.renderer.drainStyleDiagnostics()).toEqual([])
+
+    const displayNone = createTestRoot({ strictStyles: false })
+    displayNone.render(
+      <virtual-list estimatedItemHeight={40} style={{ display: "none" }}>
+        <VirtualRows />
+      </virtual-list>,
+    )
+    expect(displayNone.renderer.drainStyleDiagnostics()).toEqual([])
+
+    const hiddenAncestor = createTestRoot({ strictStyles: false })
+    hiddenAncestor.render(
+      <div hidden>
+        <virtual-list estimatedItemHeight={40} style={{ flexGrow: 1, minHeight: 0 }}>
+          <VirtualRows />
+        </virtual-list>
+      </div>,
+    )
+    expect(hiddenAncestor.renderer.drainStyleDiagnostics()).toEqual([])
+  })
+
+  it("throws for a zero-height virtual-list in strict mode", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    testRoot.render(
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <virtual-list estimatedItemHeight={40} style={{ flexGrow: 1, minHeight: 0 }}>
+          <VirtualRows />
+        </virtual-list>
+      </div>,
+    )
+
+    expect(error.mock.calls.flat().join(" ")).toContain("<virtual-list>")
+    expect(error.mock.calls.flat().join(" ")).toContain("bounded height")
+  })
+
+  it("warns once per virtual-list element about zero height", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: false })
+    const tree = (
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <virtual-list estimatedItemHeight={40} style={{ flexGrow: 1, minHeight: 0 }}>
+          <VirtualRows />
+        </virtual-list>
+      </div>
+    )
+
+    testRoot.render(tree)
+    testRoot.render(tree)
+    testRoot.renderer.flush()
+
+    expect(warn.mock.calls.flat().join(" ")).toContain("bounded height")
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
   it("accepts touchAction as a silent native no-op", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const testRoot = createTestRoot({ strictStyles: true })

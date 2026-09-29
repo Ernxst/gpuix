@@ -84,7 +84,7 @@ import {
   getOrCreateWebGpuContext,
   webGpuContext,
 } from "../canvas/webgpu.js"
-import { reportStyleDiagnostics } from "./renderer-diagnostics.js"
+import { enqueueRendererDiagnostic, reportStyleDiagnostics } from "./renderer-diagnostics.js"
 import type { GpuixDispatchableEvent } from "../pointer-event.js"
 import {
   DOCUMENT_POSITION_CONTAINED_BY,
@@ -118,6 +118,8 @@ type HostNodeRegistry = {
   publicInstanceContainers: WeakMap<PublicInstance, Container>
   disconnectedRootOrder: WeakMap<HostNode, number>
   nextDisconnectedRootOrder: number
+  virtualListsByContainer: WeakMap<Container, Set<Instance>>
+  warnedVirtualListZeroHeights: WeakSet<Instance>
 }
 
 function hostNodeRegistry(): HostNodeRegistry {
@@ -126,13 +128,21 @@ function hostNodeRegistry(): HostNodeRegistry {
   // globals installed by an earlier evaluation can receive refs created by a
   // later one, so their ownership and tree-position state share that lifetime.
   const existing = Reflect.get(globalThis, HOST_NODE_REGISTRY_KEY) as HostNodeRegistry | undefined
-  if (existing) return existing
+  if (existing) {
+    // Keep the registry compatible with renderers mounted before a Bun --hot
+    // re-evaluation introduced these virtual-list diagnostics.
+    existing.virtualListsByContainer ??= new WeakMap()
+    existing.warnedVirtualListZeroHeights ??= new WeakSet()
+    return existing
+  }
 
   const created: HostNodeRegistry = {
     hostNodeStates: new WeakMap(),
     publicInstanceContainers: new WeakMap(),
     disconnectedRootOrder: new WeakMap(),
     nextDisconnectedRootOrder: 0,
+    virtualListsByContainer: new WeakMap(),
+    warnedVirtualListZeroHeights: new WeakSet(),
   }
   Reflect.set(globalThis, HOST_NODE_REGISTRY_KEY, created)
   return created
@@ -140,11 +150,16 @@ function hostNodeRegistry(): HostNodeRegistry {
 
 const sharedHostNodes = hostNodeRegistry()
 const { hostNodeStates, publicInstanceContainers } = sharedHostNodes
+const { virtualListsByContainer, warnedVirtualListZeroHeights } = sharedHostNodes
 const virtualListsPendingValidation = new WeakMap<Container, Set<Instance>>()
 const warnedVirtualListRowContracts = new WeakSet<Instance>()
 
 class InlineTextChildError extends Error {
   override name = "InlineTextChildError"
+}
+
+class VirtualListBoundedHeightError extends Error {
+  override name = "VirtualListBoundedHeightError"
 }
 
 function stateFor(node: HostNode): HostNodeState {
@@ -236,6 +251,49 @@ function validatePendingVirtualLists(container: Container): void {
   }
 }
 
+function diagnoseZeroHeightVirtualLists(container: Container): void {
+  const lists = virtualListsByContainer.get(container)
+  const getElementBounds = container.native.getElementBounds
+  if (!lists || !getElementBounds) return
+
+  for (const instance of lists) {
+    const state = stateFor(instance)
+    if (!state.mounted || state.children.length === 0) continue
+
+    // GPUI reports a zero-sized box for both collapsed and hidden elements, so
+    // check the retained React styles before treating zero height as a problem.
+    let ancestor: Instance | null = instance
+    let hidden = false
+    while (ancestor) {
+      if (styleForRenderer(ancestor, container, ancestor.props)?.display === "none") {
+        hidden = true
+        break
+      }
+      ancestor = stateFor(ancestor).parent
+    }
+    if (hidden) continue
+
+    const bounds = getElementBounds.call(container.native, instance.id)
+    if (!bounds || bounds.height !== 0) continue
+
+    const message =
+      `[gpuix] <virtual-list> (element ${instance.id}) needs a bounded height from its parent; ` +
+      "it currently lays out at 0 height."
+    if (container.strictStyles) throw new VirtualListBoundedHeightError(message)
+    if (warnedVirtualListZeroHeights.has(instance)) continue
+
+    warnedVirtualListZeroHeights.add(instance)
+    enqueueRendererDiagnostic(container.native, {
+      elementId: instance.id,
+      elementType: "virtual-list",
+      property: "height",
+      value: "0",
+      message,
+    })
+    console.warn(message)
+  }
+}
+
 function removeTrackedChild(state: HostNodeState, child: HostNode): void {
   const index = state.children.indexOf(child)
   if (index !== -1) state.children.splice(index, 1)
@@ -264,6 +322,9 @@ function ancestorChain(node: HostNode): HostNode[] {
 function markUnmounted(node: HostNode): void {
   const state = stateFor(node)
   state.mounted = false
+  if ("type" in node && node.type === "virtual-list") {
+    virtualListsByContainer.get(state.container)?.delete(node)
+  }
   for (const child of state.children) markUnmounted(child)
 }
 
@@ -2165,6 +2226,15 @@ function materialize(node: HostNode): HostNodeState {
   }
   state.mounted = true
 
+  if ("type" in node && node.type === "virtual-list") {
+    let lists = virtualListsByContainer.get(state.container)
+    if (!lists) {
+      lists = new Set()
+      virtualListsByContainer.set(state.container, lists)
+    }
+    lists.add(node)
+  }
+
   for (const child of state.children) {
     materialize(child)
     renderer.appendChild(node.id, child.id)
@@ -2440,6 +2510,13 @@ export const hostConfig = {
       return
     }
     containerInfo.renderer.flushMutations()
+    try {
+      diagnoseZeroHeightVirtualLists(containerInfo)
+    } catch (error) {
+      // The commit is already applied. Match the existing strict virtual-list
+      // contract by surfacing the error through React's commit error channel.
+      console.error(error)
+    }
   },
 
   getRootHostContext(_rootContainerInstance: Container): HostContext {

@@ -2162,6 +2162,10 @@ once otherwise. A wrapper around an entire collection is one row and defeats
 virtualization. For windowed data, pass `itemCount` and `windowStart`, then
 render the corresponding slice directly.
 
+A populated list that lays out at zero height also diagnoses the missing parent
+height: it throws under `strictStyles` and warns once otherwise. Empty lists,
+`display: "none"`, and lists under a `hidden` ancestor stay quiet.
+
 Direct host usage also defaults `estimatedItemHeight` to `48`. Pass
 `estimatedItemHeight={null}` only when content-discovery sizing is intentional;
 unvisited rows then contribute no estimate to the initial scroll extent.
