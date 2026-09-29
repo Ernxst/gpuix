@@ -45,6 +45,9 @@ import {
   type GPUValidationError as GpuixGPUValidationError,
 } from "./canvas/webgpu.js"
 import type { PublicInstance } from "./types/host.js"
+import { getResolvedStyle, type GpuixComputedStyle } from "./resolved-style.js"
+
+export type { GpuixComputedStyle } from "./resolved-style.js"
 
 declare global {
   interface Navigator {
@@ -109,6 +112,11 @@ declare global {
   interface ResizeObserver {
     observe(target: Element | PublicInstance, options?: GpuixResizeObserverOptions): void
   }
+
+  interface Window {
+    /** Returns only resolved `display` and `visibility`; see `GpuixComputedStyle`. */
+    getComputedStyle(element: Element | PublicInstance): GpuixComputedStyle
+  }
 }
 
 function defineGlobalIfAbsent(name: string, value: unknown): void {
@@ -123,6 +131,7 @@ function defineGlobalIfAbsent(name: string, value: unknown): void {
 defineGlobalIfAbsent("requestAnimationFrame", requestNativeAnimationFrame)
 defineGlobalIfAbsent("cancelAnimationFrame", cancelNativeAnimationFrame)
 defineGlobalIfAbsent("window", globalThis)
+defineGlobalIfAbsent("getComputedStyle", (element: PublicInstance) => getResolvedStyle(element))
 defineGlobalIfAbsent("self", globalThis)
 defineGlobalIfAbsent("scrollTo", () => undefined)
 defineGlobalIfAbsent("ResizeObserver", GpuixResizeObserver)

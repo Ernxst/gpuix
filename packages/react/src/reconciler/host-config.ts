@@ -7,6 +7,7 @@
 import { createContext } from "react"
 import { DefaultEventPriority } from "react-reconciler/constants.js"
 import { isCompiledStyle, unresolvedClassNames } from "../class-names.js"
+import { setResolvedStyle } from "../resolved-style.js"
 
 const NoEventPriority = 0
 import type {
@@ -670,8 +671,18 @@ function diffEventListeners(
 
 function sendStyle(container: Container, instance: Instance): void {
   const style = styleForRenderer(instance, container, instance.props)
+  setResolvedStyle(instance, style)
   if (style == null || Object.keys(style).length === 0) return
   container.renderer.setStyle(instance.id, style)
+}
+
+function isFormControl(instance: Pick<Instance, "type">): boolean {
+  return instance.type === "input" || instance.type === "textarea" || instance.type === "button"
+}
+
+function isDisabledFormControl(instance: Pick<Instance, "type" | "props">): boolean {
+  const { disabled } = instance.props
+  return isFormControl(instance) && (disabled === true || typeof disabled === "string")
 }
 
 // ── Custom prop forwarding ───────────────────────────────────────────
@@ -1719,9 +1730,7 @@ class HostElement implements Instance {
 
   focus(options?: FocusOptions): void {
     // A disabled form control cannot take focus, as in the DOM.
-    const formControl = this.type === "input" || this.type === "textarea" || this.type === "button"
-    const { disabled } = this.props
-    if (formControl && (disabled === true || typeof disabled === "string")) return
+    if (isDisabledFormControl(this)) return
     this.#container.native.focusElement?.(this.id, options?.preventScroll === true)
   }
 
@@ -1826,13 +1835,18 @@ class HostElement implements Instance {
       normalized !== ":focus" &&
       normalized !== ":focus-visible" &&
       normalized !== ":hover" &&
-      normalized !== ":active"
+      normalized !== ":active" &&
+      normalized !== ":disabled" &&
+      normalized !== ":enabled"
     ) {
       throw new SyntaxError(
         `Failed to execute 'matches' on 'Element': '${selector}' is not a supported selector. ` +
-          "Supported: :focus, :focus-visible, :hover, :active."
+          "Supported: :focus, :focus-visible, :hover, :active, :disabled, :enabled."
       )
     }
+
+    if (normalized === ":disabled") return isDisabledFormControl(this)
+    if (normalized === ":enabled") return isFormControl(this) && !isDisabledFormControl(this)
 
     const state = this.#container.native.getElementInteractionState?.(this.id)
     if (!state) return false
@@ -2597,7 +2611,9 @@ export const hostConfig = {
     diagnoseVisuallyHiddenProp(instance, container, newProps)
     // Always resend style — per-element JSON is small, and this avoids
     // bugs from same-reference mutations or style removal.
-    container.renderer.setStyle(instance.id, styleForRenderer(instance, container, newProps) ?? {})
+    const resolvedStyle = styleForRenderer(instance, container, newProps)
+    container.renderer.setStyle(instance.id, resolvedStyle ?? {})
+    setResolvedStyle(instance, resolvedStyle)
     if (
       hasAnyEventListener(oldProps) ||
       hasAnyEventListener(newProps) ||
@@ -2657,14 +2673,15 @@ export const hostConfig = {
     // asked to hide.
     const { hover: _hover, active: _active, ...base } =
       styleForRenderer(instance, containerFor(instance), instance.props) ?? {}
-    rendererFor(instance).setStyle(instance.id, { ...base, visibility: "hidden" })
+    const hiddenStyle = { ...base, visibility: "hidden" as const }
+    rendererFor(instance).setStyle(instance.id, hiddenStyle)
+    setResolvedStyle(instance, hiddenStyle)
   },
 
   unhideInstance(instance: Instance, props: Props): void {
-    rendererFor(instance).setStyle(
-      instance.id,
-      styleForRenderer(instance, containerFor(instance), props) ?? {},
-    )
+    const visibleStyle = styleForRenderer(instance, containerFor(instance), props)
+    rendererFor(instance).setStyle(instance.id, visibleStyle ?? {})
+    setResolvedStyle(instance, visibleStyle)
   },
 
   hideTextInstance(_textInstance: TextInstance): void {},

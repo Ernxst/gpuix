@@ -124,6 +124,7 @@
     }
   },
   "devDependencies": {
+    "@base-ui/react": "1.8.0",
     "@tanstack/react-router": "1.170.32",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^25.3.3",
