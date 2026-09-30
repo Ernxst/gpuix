@@ -1,7 +1,7 @@
 # App benchmarks
 
 Fixtures and a harness (`scripts/app-bench.ts`) for measuring what a GPUIX
-app costs to ship, start, and iterate on — the same numbers Jamon Holmgren
+app costs to ship, start, and build — the same numbers Jamon Holmgren
 published for 21 Mac app frameworks, measured the same way every time.
 
 Run: `bun scripts/app-bench.ts [--runs N]` (default 10) from the repository
@@ -13,7 +13,6 @@ first run:
 bun install --frozen-lockfile
 bun run build:native
 bun run build:react
-bun run build:vite
 cd packages/native && cargo build --release --example hello_bench
 ```
 
@@ -27,20 +26,13 @@ cd packages/native && cargo build --release --example hello_bench
   directly against this repo's GPUI checkout with `cargo build --release
   --example hello_bench`, no JS, no napi bridge. The baseline both other
   fixtures are measured against.
-- **`hot-reload-fixture.tsx`** — the same shape again, used only for the hot
-  reload measurement (both `bun --hot` and `@gpuix/vite`, via
-  `vite.config.ts` in this directory), kept as a separate file from
-  `hello-gpuix.tsx` so a hot-reload run never needs to recompile the binary
-  the startup measurement depends on.
 - **`../chat.tsx`** — the real chat example, included for startup and
   memory only. It gets a `GPUIX_BENCH=1`-gated marker (see below); the gate
   keeps `bun --hot chat.tsx` and `bun run compile` behaving exactly as
-  before when a human runs them without that variable set. Bundle, build,
-  and hot-reload numbers aren't reported for it: `compile-chat.ts` already
-  covers icons and macOS app-bundling that would make its build/rebuild
-  timing incomparable to the two hello-world fixtures, and the harness
-  would otherwise need to reset 1,000 seeded chat turns after every
-  hot-reload edit.
+  before when a human runs them without that variable set. Bundle and build
+  numbers aren't reported for it: `compile-chat.ts` already covers icons and
+  macOS app-bundling, so its build/rebuild timing is not comparable to the
+  hello-world fixtures.
 
 ## Metrics
 
@@ -65,7 +57,8 @@ cd packages/native && cargo build --release --example hello_bench
   (`footprint <pid>`, falling back to `vmmap --summary <pid>`'s "Physical
   footprint" line if `footprint` doesn't parse), and **RSS**
   (`ps -o rss= -p <pid>`). They diverge because footprint discounts shared,
-  reclaimable, and compressed pages that RSS counts in full.
+  reclaimable, and compressed pages that RSS counts in full. The harness sums
+  the launched process and its descendants, and records each process's share.
 - **Build** — cold `bun build --compile` / `cargo build --release --example
   hello_bench`, and a rebuild after touching one source file (a trailing
   comment appended then removed, so the fixture's behaviour never changes).
@@ -76,18 +69,6 @@ cd packages/native && cargo build --release --example hello_bench
   dependency compilation `mbx` normally caches away) isn't something a
   benchmark can afford to run every time without being dominated by
   unrelated dependency-graph noise.
-- **Hot reload** — time from writing an edited `hot-reload-fixture.tsx` to a
-  fresh "mounted" marker carrying the new content reaching stdout, for both
-  `bun --hot` (remount) and `@gpuix/vite` (native dev, `vite.config.ts` in
-  this directory). The harness edits the `VERSION` string in place, records
-  the write time, waits for the matching marker, then restores the file —
-  even if the run fails partway through.
-
-  `@gpuix/vite`'s import isn't declared as an `examples` dependency: that
-  workspace package doesn't otherwise need it, and adding it would touch the
-  frozen lockfile for a benchmark-only config. `vite.config.ts` imports it
-  from `packages/vite/dist` directly, so run `bun run build:vite` first.
-
 ## Focus
 
 Every fixture the harness launches takes focus. An unfocused GPUIX window
@@ -99,7 +80,8 @@ may never arrive.
 
 Each app runs under `script -q /dev/null` so its stdin is an open terminal, as
 in a manual launch. With a non-TTY stdin GPUIX turns on automation, which
-costs memory and startup time, and Vite's dev server exits when stdin ends. Running this harness will take over your keyboard focus repeatedly;
+costs memory and startup time. Running this harness will take over your
+keyboard focus repeatedly;
 don't try to use the machine for anything else while it runs.
 
 ## Runs
@@ -117,15 +99,11 @@ Startup and memory report the median and min/max of `--runs` samples
 B's run 1, then A's run 2, and so on — rather than run back to back, because
 single-run timings on the reference machine vary by up to 45%; interleaving
 keeps a mid-run slowdown from landing entirely on whichever fixture happened
-to run last. Build and hot reload are cheaper to distort by the same
-mid-run noise but expensive to interleave (each hot-reload measurement holds
-one process open across every edit), so both run once per fixture per
-harness invocation, hot reload doing `--runs` edit/measure cycles inside
-that one process.
+to run last. Build runs once per fixture per harness invocation.
 
-Every launched process is killed and every edited file restored even if a
-run throws — including the GPUIX and GPUI source files rebuilt with a
-touched line, and `hot-reload-fixture.tsx`'s `VERSION`.
+Every launched process is killed and every edited source file restored even
+if a run throws, including the GPUIX and GPUI source files rebuilt with a
+touched line.
 
 ## Output
 
@@ -134,3 +112,26 @@ reference" column carrying the figures Jamon Holmgren published for the same
 app shape across 21 Mac app frameworks — not remeasured here, just kept
 alongside for comparison. The full run, including every raw sample, is
 written to `tmp/app-bench/<timestamp>.json`.
+
+## Quiet-host frame comparison
+
+After the builds above, run `python3 scripts/perf/run-app-bench.py <output-directory>`
+from the repository root. It waits for a five-minute interval with one-minute
+host load below four, then retains five complete invocations of `app-bench`.
+It records load throughout each invocation and discards one if load reaches
+four. Each invocation includes five warm launches per app and one first launch
+after building the app.
+
+The wrapper also runs `frame-time.tsx` in the GPU-backed test window. Its scroll phase
+sends wheel events over a non-virtual list of 1,128 rows, and its animation phase changes a
+box's width. It reports the median and p95 of GPUI's `Window::draw` duration
+for each phase. That duration includes GPUI build, layout and paint work in
+the offscreen window, but not a Metal present. The fixture also reports the
+whole update cycle, including React work in the animation phase, native calls
+and Metal command submission. Neither metric includes GPU execution, so
+interpret it alongside an Instruments trace when investigating that cost.
+
+When a live display is unavailable, `python3 scripts/perf/run-app-bench.py
+<output-directory> --frame-only` keeps the same quiet-host gate and five valid
+invocations for the offscreen frame fixture. Startup and memory need a live,
+unlocked desktop and are not measured by this mode.

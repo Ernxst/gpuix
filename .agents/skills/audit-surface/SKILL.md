@@ -1,6 +1,8 @@
 ---
 name: audit-surface
 description: Probe and repair related ordinary-usage defects while fixing a GPU-IX consumer-reported bug. Automatically required by the repository instructions for consumer bug fixes.
+metadata:
+  internal: true
 ---
 
 # Audit the affected surface

@@ -1,0 +1,35 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "gpuix-webgpu-per-draw-benchmark",
+      "dependencies": {
+        "@wgpu-bun/darwin-arm64-dawn": "29.1.0",
+        "webgpu": "0.6.1",
+        "wgpu-bun": "29.1.0",
+      },
+    },
+  },
+  "packages": {
+    "@webgpu/types": ["@webgpu/types@0.1.72", "", {}, "sha512-0cF7RFM2edNoiIS1ODJp0/Gzv4/xSXhwoR0YCza+OWpJWtn4wmo9DvK91aLlH9+uUnwIriP7ZiC3WitmyhuzBw=="],
+
+    "@wgpu-bun/darwin-arm64": ["@wgpu-bun/darwin-arm64@29.1.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-m4oyOz04EOEUJqUwYJuSe/ovlBrV2pI9uAIJrm9UAg1vHsDy0sdK7D+n5JUOu2nK6OeLJO8osIJ4f6CFsZNz5g=="],
+
+    "@wgpu-bun/darwin-arm64-dawn": ["@wgpu-bun/darwin-arm64-dawn@29.1.0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-NADVP/MZrHXY/WD/KMFjVVeKmN1njCM9p1l5mn7wzgHqmFVwKd7jvuSXJ0E0+FT6iHDEkREFVUwul5vgK2sbRw=="],
+
+    "@wgpu-bun/linux-arm64": ["@wgpu-bun/linux-arm64@29.1.0", "", { "os": "linux", "cpu": "arm64" }, "sha512-7R6UHZVLQaL+O6OLE4LP3FAzchlFp1jzIoCkGD8NTVB9EzoM2uAWgB0k6XFrPQ0smHy5mUl9rHEq6/VgyFINog=="],
+
+    "@wgpu-bun/linux-x64": ["@wgpu-bun/linux-x64@29.1.0", "", { "os": "linux", "cpu": "x64" }, "sha512-VbqK8q+SjiMD+yHrRnDRjjxLX4wZUi9GRVXxnWwBLoLFNKWmHnv+G+UbxJQx3IkCn9jJ8Jhe/1TiHYOzld+TiA=="],
+
+    "@wgpu-bun/win32-x64": ["@wgpu-bun/win32-x64@29.1.0", "", { "os": "win32", "cpu": "x64" }, "sha512-7IVWtLLdmARyEp3lAjw2m6FqJNKI+iv1CPcPYMHwxxZPdTRijgACfchjqnZ55l3xjuq4Yb5aRhXn3FJ26VZ24A=="],
+
+    "debug": ["debug@4.4.3", "", { "dependencies": { "ms": "^2.1.3" }, "peerDependencies": { "supports-color": "*" }, "optionalPeers": ["supports-color"] }, "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA=="],
+
+    "ms": ["ms@2.1.3", "", {}, "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="],
+
+    "webgpu": ["webgpu@0.6.1", "", { "dependencies": { "@webgpu/types": "^0.1.72", "debug": "^4.4.0" } }, "sha512-T+B65/j2jhyFjbWHsVZ4TJw0nk0RVT27lG+nL3V5IIYMsvuVYKYOUli/yJhMpwvXAwqVPZehakWvTjxk+mK8LQ=="],
+
+    "wgpu-bun": ["wgpu-bun@29.1.0", "", { "dependencies": { "@webgpu/types": "^0.1.69" }, "optionalDependencies": { "@wgpu-bun/darwin-arm64": "29.1.0", "@wgpu-bun/linux-arm64": "29.1.0", "@wgpu-bun/linux-x64": "29.1.0", "@wgpu-bun/win32-x64": "29.1.0" }, "os": [ "linux", "win32", "darwin", ], "cpu": [ "x64", "arm64", ] }, "sha512-VEFP77nedbcfiGTr8m7dIitC1obCYWsxcnFUlHS4Zuu8baly1PhAcaWt2d632IhXMASi1wQpV3pDfhAokT90eA=="],
+  }
+}

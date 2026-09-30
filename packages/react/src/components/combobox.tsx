@@ -17,14 +17,16 @@ import type {
 import type { InputProps, Props, PublicInstance } from "../types/host.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import {
+  DismissLayerScope,
   FloatingLayer,
   floatingRootStyle,
   renderSlot,
   resolveStyle,
   setRefs,
   useControllableState,
+  useDismissLayer,
 } from "./floating.js"
-import type { FloatingContentProps, StateStyle } from "./floating.js"
+import type { FloatingPopupProps, StateStyle } from "./floating.js"
 
 export type ComboboxValue = string | string[] | null
 
@@ -44,6 +46,7 @@ interface ComboboxContextValue {
   moveActive: (delta: number) => void
   selectItem: (item: string) => void
   registerItem: (item: { value: string; disabled: boolean; mounted: boolean }) => void
+  isTopDismissLayer: (event?: GpuixKeyboardEvent) => boolean
 }
 
 const ComboboxContext = createContext<ComboboxContextValue | null>(null)
@@ -131,6 +134,7 @@ export function Combobox({
     defaultValue: defaultOpen,
     onChange: onOpenChange,
   })
+  const isTopDismissLayer = useDismissLayer(open)
   const [activeIndex, setActiveIndex] = useState<number | null>(null)
   const inputRef = useRef<PublicInstance | null>(null)
   const disabledItems = useRef<string[]>([])
@@ -214,11 +218,12 @@ export function Combobox({
     moveActive,
     selectItem,
     registerItem,
+    isTopDismissLayer,
   }
 
   return (
     <ComboboxContext.Provider value={context}>
-      <div {...props} style={floatingRootStyle(style)}>{children}</div>
+      <DismissLayerScope><div {...props} style={floatingRootStyle(style)}>{children}</div></DismissLayerScope>
     </ComboboxContext.Provider>
   )
 }
@@ -229,7 +234,7 @@ export interface ComboboxInputProps extends InputProps {
 
 export const ComboboxInput = forwardRef<PublicInstance, ComboboxInputProps>(
   function ComboboxInput(
-    { onChange, onClick, onFocus, onKeyDown, onKeyUp, disabled: disabledProp, ...props },
+    { onChange, onClick, onFocus, onBlur, onKeyDown, onKeyUp, disabled: disabledProp, ...props },
     forwardedRef
   ) {
     const context = useComboboxContext("ComboboxInput")
@@ -253,6 +258,10 @@ export const ComboboxInput = forwardRef<PublicInstance, ComboboxInputProps>(
           onFocus?.(event)
           if (!disabled) context.setOpen(true)
         }}
+        onBlur={(event: GpuixFocusEvent) => {
+          onBlur?.(event)
+          if (!event.defaultPrevented) context.setOpen(false)
+        }}
         onChange={(event: GpuixChangeEvent) => {
           onChange?.(event)
           context.setInputValue(event.value ?? "")
@@ -261,8 +270,8 @@ export const ComboboxInput = forwardRef<PublicInstance, ComboboxInputProps>(
         onKeyDown={(event: GpuixKeyboardEvent) => {
           onKeyDown?.(event)
           if (disabled) return
-          if (event.key === "Escape") {
-            context.setOpen(false)
+          if (event.key.toLowerCase() === "escape") {
+            if (!event.defaultPrevented && context.isTopDismissLayer(event)) context.setOpen(false)
           } else if (event.key === "ArrowDown" || (event.key === "n" && event.modifiers?.ctrl)) {
             context.moveActive(1)
           } else if (event.key === "ArrowUp" || (event.key === "p" && event.modifiers?.ctrl)) {
@@ -311,7 +320,7 @@ export const ComboboxTrigger = forwardRef<PublicInstance, ComboboxTriggerProps>(
           onKeyDown?.(event)
           if (disabled) return
           if (event.key === "ArrowDown" || event.key === "ArrowUp") context.setOpen(true)
-          if (event.key === "Escape") context.setOpen(false)
+          if (!event.defaultPrevented && event.key.toLowerCase() === "escape" && context.isTopDismissLayer(event)) context.setOpen(false)
         },
       },
       ref
@@ -337,9 +346,9 @@ export const ComboboxValue = forwardRef<PublicInstance, ComboboxValueProps>(
   }
 )
 
-export const ComboboxContent = forwardRef<PublicInstance, FloatingContentProps>(
-  function ComboboxContent({ children, onMouseDownOutside, ...props }, ref) {
-    const context = useComboboxContext("ComboboxContent")
+export const ComboboxPopup = forwardRef<PublicInstance, FloatingPopupProps>(
+  function ComboboxPopup({ children, onMouseDownOutside, ...props }, ref) {
+    const context = useComboboxContext("ComboboxPopup")
     if (!context.open) return null
     return (
       <FloatingLayer
@@ -448,7 +457,7 @@ export const ComboboxSeparator = forwardRef<PublicInstance, Props>(
 
 export {
   Combobox as Root,
-  ComboboxContent as Content,
+  ComboboxPopup as Popup,
   ComboboxEmpty as Empty,
   ComboboxGroup as Group,
   ComboboxInput as Input,

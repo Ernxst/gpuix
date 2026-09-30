@@ -178,29 +178,41 @@ export type {
 } from "./hooks/use-text-search.js"
 export {
   Select,
-  SelectContent,
+  SelectPopup,
   SelectGroup,
+  SelectIcon,
   SelectItem,
+  SelectItemIndicator,
+  SelectItemText,
+  SelectList,
   SelectLabel,
-  SelectScrollDownButton,
-  SelectScrollUpButton,
+  SelectScrollDownArrow,
+  SelectScrollUpArrow,
   SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "./components/select.js"
 export type {
-  SelectContentProps,
+  SelectPopupProps,
+  SelectIconProps,
+  SelectIconState,
   SelectItemData,
+  SelectItemIndicatorProps,
+  SelectItemIndicatorState,
+  SelectItemTextProps,
   SelectItemProps,
   SelectItemState,
+  SelectListProps,
   SelectProps,
+  SelectSelection,
+  SelectValueFor,
   SelectTriggerProps,
   SelectTriggerState,
   SelectValueProps,
 } from "./components/select.js"
 export {
   Combobox,
-  ComboboxContent,
+  ComboboxPopup,
   ComboboxEmpty,
   ComboboxGroup,
   ComboboxInput,
@@ -220,14 +232,38 @@ export type {
   ComboboxTriggerProps,
   ComboboxValueProps,
 } from "./components/combobox.js"
-export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./components/tooltip.js"
+export { Button, buttonProps } from "./components/button.js"
+export type { ButtonBehavior, ButtonState, HeadlessButtonProps } from "./components/button.js"
+export { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./components/tooltip.js"
 export type {
-  TooltipContentProps,
+  TooltipPopupProps,
   TooltipProps,
   TooltipProviderProps,
   TooltipTriggerProps,
 } from "./components/tooltip.js"
-export { motion } from "./components/index.js"
+export {
+  Dialog,
+  DialogRoot,
+  DialogTrigger,
+  DialogPortal,
+  DialogBackdrop,
+  DialogPopup,
+  DialogTitle,
+  DialogDescription,
+  DialogClose,
+  AlertDialog,
+  AlertDialogRoot,
+  AlertDialogTrigger,
+  AlertDialogPortal,
+  AlertDialogBackdrop,
+  AlertDialogPopup,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogClose,
+} from "./components/dialog.js"
+export type { DialogProps, DialogTriggerProps, DialogPortalProps, DialogBackdropProps, DialogPopupProps, DialogCloseProps, FocusTarget } from "./components/dialog.js"
+export { AnimatePresence, motion, useIsPresent, usePresence } from "./components/index.js"
+export type { AnimatePresenceProps } from "./components/index.js"
 export type {
   Root,
   FrameLoop,

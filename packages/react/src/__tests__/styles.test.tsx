@@ -1735,7 +1735,11 @@ describeNative("motion", () => {
     )
 
     expect(renderer.findByType("div")).toHaveLength(1)
-    expect(renderer.findByType("div")[0]?.customProps?.motion).toMatchInlineSnapshot(`
+    const { generation, isExit, ...description } = renderer.findByType("div")[0]
+      ?.customProps?.motion as Record<string, unknown>
+    expect(generation).toEqual(expect.any(Number))
+    expect(isExit).toBe(false)
+    expect(description).toMatchInlineSnapshot(`
       {
         "animate": {
           "opacity": 1,

@@ -9,25 +9,28 @@ import React, {
   useRef,
 } from "react"
 import type { ReactElement, ReactNode } from "react"
+import type { GpuixKeyboardEvent } from "../reconciler/synthetic-event.js"
 import type { Props, PublicInstance } from "../types/host.js"
 import {
+  DismissLayerScope,
   FloatingLayer,
   floatingRootStyle,
   renderSlot,
   useControllableState,
+  useDismissLayer,
 } from "./floating.js"
-import type { FloatingContentProps } from "./floating.js"
+import type { FloatingPopupProps } from "./floating.js"
 
 interface TooltipProviderContextValue {
-  delayDuration: number
-  skipDelayDuration: number
+  delay: number
+  timeout: number
   disableHoverableContent: boolean
   lastClosedAt: React.MutableRefObject<number>
 }
 
 const defaultProvider: TooltipProviderContextValue = {
-  delayDuration: 0,
-  skipDelayDuration: 300,
+  delay: 0,
+  timeout: 300,
   disableHoverableContent: false,
   lastClosedAt: { current: Number.NEGATIVE_INFINITY },
 }
@@ -36,21 +39,21 @@ const TooltipProviderContext = createContext(defaultProvider)
 
 export interface TooltipProviderProps {
   children: ReactNode
-  delayDuration?: number
-  skipDelayDuration?: number
+  delay?: number
+  timeout?: number
   disableHoverableContent?: boolean
 }
 
 export function TooltipProvider({
   children,
-  delayDuration = 0,
-  skipDelayDuration = 300,
+  delay = 0,
+  timeout = 300,
   disableHoverableContent = false,
 }: TooltipProviderProps): ReactElement {
   const lastClosedAt = useRef(Number.NEGATIVE_INFINITY)
   const value = useMemo(
-    () => ({ delayDuration, skipDelayDuration, disableHoverableContent, lastClosedAt }),
-    [delayDuration, skipDelayDuration, disableHoverableContent]
+    () => ({ delay, timeout, disableHoverableContent, lastClosedAt }),
+    [delay, timeout, disableHoverableContent]
   )
   return <TooltipProviderContext.Provider value={value}>{children}</TooltipProviderContext.Provider>
 }
@@ -63,6 +66,7 @@ interface TooltipContextValue {
   scheduleClose: () => void
   cancelClose: () => void
   close: () => void
+  isTopDismissLayer: (event?: GpuixKeyboardEvent) => boolean
 }
 
 const TooltipContext = createContext<TooltipContextValue | null>(null)
@@ -79,7 +83,7 @@ export interface TooltipProps extends Omit<Props, "children"> {
   defaultOpen?: boolean
   onOpenChange?: (open: boolean) => void
   delayDuration?: number
-  disableHoverableContent?: boolean
+  disableHoverablePopup?: boolean
 }
 
 export function Tooltip({
@@ -88,7 +92,7 @@ export function Tooltip({
   defaultOpen = false,
   onOpenChange,
   delayDuration,
-  disableHoverableContent,
+  disableHoverablePopup,
   style,
   ...props
 }: TooltipProps): ReactElement {
@@ -98,9 +102,10 @@ export function Tooltip({
     defaultValue: defaultOpen,
     onChange: onOpenChange,
   })
+  const isTopDismissLayer = useDismissLayer(open)
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const hoverableDisabled = disableHoverableContent ?? provider.disableHoverableContent
+  const hoverableDisabled = disableHoverablePopup ?? provider.disableHoverableContent
 
   const cancelOpen = () => {
     if (openTimer.current !== null) clearTimeout(openTimer.current)
@@ -119,14 +124,14 @@ export function Tooltip({
   const openImmediately = () => setOpen(true)
   const scheduleOpen = () => {
     cancelClose()
-    const recentlyClosed = Date.now() - provider.lastClosedAt.current <= provider.skipDelayDuration
-    const delay = recentlyClosed ? 0 : (delayDuration ?? provider.delayDuration)
-    if (delay <= 0) {
+    const recentlyClosed = Date.now() - provider.lastClosedAt.current <= provider.timeout
+    const openDelay = recentlyClosed ? 0 : (delayDuration ?? provider.delay)
+    if (openDelay <= 0) {
       setOpen(true)
       return
     }
     cancelOpen()
-    openTimer.current = setTimeout(() => setOpen(true), delay)
+    openTimer.current = setTimeout(() => setOpen(true), openDelay)
   }
   const close = () => setOpen(false)
   const scheduleClose = () => {
@@ -152,11 +157,12 @@ export function Tooltip({
     scheduleClose,
     cancelClose,
     close,
+    isTopDismissLayer,
   }
 
   return (
     <TooltipContext.Provider value={context}>
-      <div {...props} style={floatingRootStyle(style)}>{children}</div>
+      <DismissLayerScope><div {...props} style={floatingRootStyle(style)}>{children}</div></DismissLayerScope>
     </TooltipContext.Provider>
   )
 }
@@ -214,7 +220,7 @@ export const TooltipTrigger = forwardRef<PublicInstance, TooltipTriggerProps>(
         },
         onKeyDown: (event) => {
           onKeyDown?.(event)
-          if (event.key === "Escape") context.close()
+          if (!event.defaultPrevented && event.key.toLowerCase() === "escape" && context.isTopDismissLayer(event)) context.close()
         },
       },
       ref
@@ -222,14 +228,14 @@ export const TooltipTrigger = forwardRef<PublicInstance, TooltipTriggerProps>(
   }
 )
 
-export interface TooltipContentProps extends FloatingContentProps {}
+export interface TooltipPopupProps extends FloatingPopupProps {}
 
-export const TooltipContent = forwardRef<PublicInstance, TooltipContentProps>(
-  function TooltipContent(
-    { children, side = "top", align = "center", sideOffset = 0, onMouseEnter, onMouseLeave, ...props },
+export const TooltipPopup = forwardRef<PublicInstance, TooltipPopupProps>(
+  function TooltipPopup(
+    { children, side = "top", align = "center", sideOffset = 0, onMouseEnter, onMouseLeave, onKeyDown, ...props },
     ref
   ) {
-    const context = useTooltipContext("TooltipContent")
+    const context = useTooltipContext("TooltipPopup")
     if (!context.open) return null
     return (
       <FloatingLayer
@@ -246,6 +252,10 @@ export const TooltipContent = forwardRef<PublicInstance, TooltipContentProps>(
           onMouseLeave?.(event)
           context.scheduleClose()
         }}
+        onKeyDown={(event: GpuixKeyboardEvent) => {
+          onKeyDown?.(event)
+          if (!event.defaultPrevented && event.key.toLowerCase() === "escape" && context.isTopDismissLayer(event)) context.close()
+        }}
       >
         {children}
       </FloatingLayer>
@@ -255,7 +265,7 @@ export const TooltipContent = forwardRef<PublicInstance, TooltipContentProps>(
 
 export {
   Tooltip as Root,
-  TooltipContent as Content,
+  TooltipPopup as Popup,
   TooltipProvider as Provider,
   TooltipTrigger as Trigger,
 }

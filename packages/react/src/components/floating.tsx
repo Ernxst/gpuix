@@ -2,26 +2,102 @@
 
 import React, {
   cloneElement,
+  createContext,
   forwardRef,
   isValidElement,
   useCallback,
+  useContext,
+  useInsertionEffect,
+  useMemo,
   useState,
 } from "react"
 import type { ReactElement, ReactNode, Ref } from "react"
+import type { NativeRenderer } from "../types/host.js"
+import { useGpuix } from "../hooks/use-gpuix.js"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
-import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
+import type { NativeStateStyle, Props, PublicInstance, StyleDesc } from "../types/host.js"
+import { isCompiledStyle } from "../class-names.js"
 
 export type FloatingSide = "top" | "right" | "bottom" | "left"
 export type FloatingAlign = "start" | "center" | "end"
 export type StateStyle<State> = StyleDesc | ((state: State) => StyleDesc)
 
-export interface FloatingContentProps extends Omit<Props, "children"> {
+const dismissLayers = new WeakMap<NativeRenderer, Array<{ token: object; depth: number; order: number }>>()
+const DismissLayerDepth = createContext(0)
+let nextDismissLayerOrder = 0
+
+export function DismissLayerScope({ children }: { children: ReactNode }): ReactElement {
+  const depth = useContext(DismissLayerDepth)
+  return <DismissLayerDepth.Provider value={depth + 1}>{children}</DismissLayerDepth.Provider>
+}
+
+/** Register an open floating surface in this renderer's Escape dismissal order. */
+export function useDismissLayer(open: boolean): (event?: GpuixSyntheticEvent) => boolean {
+  const { renderer } = useGpuix()
+  const depth = useContext(DismissLayerDepth)
+  const token = useMemo(() => ({ id: {}, order: ++nextDismissLayerOrder }), [])
+  useInsertionEffect(() => {
+    if (!open || !renderer) return
+    let layers = dismissLayers.get(renderer)
+    if (!layers) {
+      layers = []
+      dismissLayers.set(renderer, layers)
+    }
+    layers.push({ token: token.id, depth, order: token.order })
+    return () => {
+      const current = dismissLayers.get(renderer)
+      if (!current) return
+      const index = current.findIndex((layer) => layer.token === token.id)
+      if (index !== -1) current.splice(index, 1)
+      if (current.length === 0) dismissLayers.delete(renderer)
+    }
+  }, [depth, open, renderer, token])
+
+  return useCallback((event?: GpuixSyntheticEvent) => {
+    const layers = renderer && dismissLayers.get(renderer)
+    const topLayer = layers?.reduce<(typeof layers)[number] | undefined>((top, layer) => {
+      if (!top || layer.depth > top.depth || (layer.depth === top.depth && layer.order > top.order)) return layer
+      return top
+    }, undefined)
+    if (!open || topLayer?.token !== token.id) return false
+    event?.stopPropagation()
+    return true
+  }, [open, renderer, token])
+}
+
+export interface FloatingPopupProps extends Omit<Props, "children"> {
   children?: ReactNode
+  position?: { x: number; y: number }
   side?: FloatingSide
   sideOffset?: number
   align?: FloatingAlign
   alignOffset?: number
   collisionPadding?: number
+}
+
+const BACKGROUND_STATES = [
+  "hover",
+  "hoverWithin",
+  "active",
+  "activeWithin",
+  "focus",
+  "focusVisible",
+  "focusWithin",
+  "groupFocus",
+  "groupFocusVisible",
+  "groupFocusWithin",
+  "dragOver",
+] as const satisfies readonly (keyof StyleDesc)[]
+
+function hasBackground(style?: StyleDesc | NativeStateStyle): boolean {
+  return style?.background !== undefined || style?.backgroundColor !== undefined
+}
+
+function hasAnyBackground(style?: StyleDesc): boolean {
+  return (
+    hasBackground(style) ||
+    BACKGROUND_STATES.some((state) => hasBackground(style?.[state]))
+  )
 }
 
 export function resolveStyle<State>(
@@ -212,7 +288,7 @@ export function renderSlot({
   return cloneElement(child, merged)
 }
 
-export const FloatingLayer = forwardRef<PublicInstance, FloatingContentProps>(
+export const FloatingLayer = forwardRef<PublicInstance, FloatingPopupProps>(
   function FloatingLayer(
     {
       side = "bottom",
@@ -220,6 +296,7 @@ export const FloatingLayer = forwardRef<PublicInstance, FloatingContentProps>(
       align = "start",
       alignOffset = 0,
       collisionPadding = 8,
+      position,
       children,
       ...props
     },
@@ -229,9 +306,15 @@ export const FloatingLayer = forwardRef<PublicInstance, FloatingContentProps>(
       side === "top" || side === "bottom"
         ? { x: alignOffset, y: 0 }
         : { x: 0, y: alignOffset }
+    const classStyle = isCompiledStyle(props.className) ? props.className : undefined
+    const backgroundFallback =
+      !hasAnyBackground(props.style) && !hasAnyBackground(classStyle)
+        ? { backgroundColor: "#1A1A1A" }
+        : undefined
 
     return (
       <anchored
+        position={position}
         style={floatingSurfaceStyle(props.style)}
         side={side}
         align={align}
@@ -246,10 +329,7 @@ export const FloatingLayer = forwardRef<PublicInstance, FloatingContentProps>(
         <div
           {...props}
           ref={ref}
-          style={mergeStyles(
-            { backgroundColor: "#1A1A1A" },
-            floatingContentStyle(props.style)
-          )}
+          style={mergeStyles(backgroundFallback, floatingContentStyle(props.style))}
         >
           {children}
         </div>

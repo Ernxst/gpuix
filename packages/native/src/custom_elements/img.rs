@@ -37,17 +37,16 @@ const URL_FAILURE_RETRY_MAX: Duration = Duration::from_secs(30);
 pub(crate) struct ImageNetworkPolicy {
     allow_private: Arc<AtomicBool>,
     #[cfg(not(target_family = "wasm"))]
-    client: Arc<dyn gpui::http_client::HttpClient>,
+    client: Arc<OnceLock<Arc<dyn gpui::http_client::HttpClient>>>,
     request_timeout: Duration,
 }
 
 impl Default for ImageNetworkPolicy {
     fn default() -> Self {
-        let allow_private = Arc::new(AtomicBool::new(false));
         Self {
+            allow_private: Arc::new(AtomicBool::new(false)),
             #[cfg(not(target_family = "wasm"))]
-            client: restricted_image_http_client(allow_private.clone()),
-            allow_private,
+            client: Arc::new(OnceLock::new()),
             request_timeout: IMAGE_REQUEST_TIMEOUT,
         }
     }
@@ -69,7 +68,9 @@ impl ImageNetworkPolicy {
         #[cfg(not(target_family = "wasm"))]
         {
             let _ = fallback;
-            self.client.clone()
+            self.client
+                .get_or_init(|| restricted_image_http_client(self.allow_private.clone()))
+                .clone()
         }
         #[cfg(target_family = "wasm")]
         {
@@ -2401,7 +2402,7 @@ impl CustomElement for ImgElement {
         .id(element_id.clone());
 
         if let Some(style) = ctx.style {
-            el = crate::renderer::apply_interactive_styles(el, style);
+            el = crate::renderer::apply_interactive_styles(el, style, ctx.focus_within);
             // GPUI fills `aspect_ratio` from the bitmap once it loads. That
             // overrides a definite height and jumps the box. A CSS `<img>` with
             // both width and height keeps that box; `objectFit` paints inside it.
@@ -2597,7 +2598,7 @@ impl CustomElement for SvgElement {
             .text_color(ctx.current_color)
             .id(element_id.clone());
         if let Some(style) = ctx.style {
-            icon = crate::renderer::apply_interactive_styles(icon, style);
+            icon = crate::renderer::apply_interactive_styles(icon, style, ctx.focus_within);
         }
         let icon = super::wire_standard_events(icon, &ctx, cx);
         let icon = super::apply_accessibility(icon, &ctx);

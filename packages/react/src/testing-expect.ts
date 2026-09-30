@@ -13,7 +13,10 @@
 /// expect.extend(gpuixMatchers)
 ///
 /// declare module "vitest" {
-///   interface Matchers<T = any> extends GpuixMatchers<T> {}
+///   interface Matchers<
+///     R extends void | Promise<void> = void | Promise<void>,
+///     T = unknown,
+///   > extends GpuixMatchers<R> {}
 /// }
 /// ```
 ///
@@ -90,7 +93,7 @@ interface MatcherContext {
 /**
  * The matcher surface, for the `declare module` augmentation a runner needs.
  *
- * `R` is the runner's return type — `void` under Vitest's `Matchers<T>`, a
+ * `R` is the runner's return type — `void` under Vitest's `Matchers<R, T>`, a
  * promise under `expect(...).resolves`.
  */
 export interface GpuixMatchers<R = unknown> {

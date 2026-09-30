@@ -61,6 +61,29 @@ export declare class GpuixRenderer {
   applyCanvasCommandDelta(id: number, ops: Uint32Array, operands: Float64Array, strings: Array<string>): void
   resetCanvas(id: number): void
   /**
+   * Present one GPU-produced clear through the real macOS window renderer.
+   * The producer signals GPUI with a Metal event and never reads pixels back.
+   */
+  presentWebGpuClear(id: number, width: number, height: number, rgba: number): void
+  /** Create one renderer-owned logical WebGPU device over the shared wgpu device. */
+  createWebGpuDevice(): number
+  /** Destroy a logical WebGPU device and every native resource it owns. */
+  destroyWebGpuDevice(deviceId: number): void
+  /** Compile one WGSL shader module for a logical WebGPU device. */
+  createWebGpuShaderModule(deviceId: number, label: string | undefined | null, code: string): number
+  /** Create one logical-device-owned WebGPU buffer. */
+  createWebGpuBuffer(deviceId: number, label: string | undefined | null, size: number, usage: number, initialData: Uint8Array): number
+  /** Destroy one logical-device-owned WebGPU buffer. */
+  destroyWebGpuBuffer(deviceId: number, bufferId: number): void
+  destroyWebGpuShaderModule(deviceId: number, shaderModuleId: number): void
+  destroyWebGpuRenderPipeline(deviceId: number, renderPipelineId: number): void
+  /** Queue one copy into a logical-device-owned WebGPU buffer. */
+  writeWebGpuBuffer(deviceId: number, bufferId: number, offset: number, data: Uint8Array): void
+  /** Create a triangle-list WebGPU render pipeline with optional vertex layouts. */
+  createWebGpuRenderPipeline(deviceId: number, label: string | undefined | null, vertexModuleId: number, vertexEntryPoint: string | undefined | null, fragmentModuleId: number, fragmentEntryPoint: string | undefined | null, vertexBuffersJson: string, sampleMask: number): number
+  /** Submit ordered WebGPU command buffers, then install every completed canvas frame. */
+  submitWebGpuCommands(deviceId: number, submissionJson: string, ops: Uint32Array, operands: Float64Array): void
+  /**
    * Start or join one renderer-local canvas image load. The observer keeps
    * the decoded entry alive until JavaScript changes or releases the source.
    */
@@ -124,6 +147,8 @@ export declare class GpuixRenderer {
    * setting, so it is safe to run alongside other test processes.
    */
   testSetPlatformReducedMotion(enabled: boolean): void
+  /** Whether the macOS application menu bar has been installed. */
+  testHasApplicationMenus(): boolean
   /** Whether the embedded macOS runtime is still retained by thread-local handles. */
   testHasEmbeddedRuntime(): boolean
   isInitialized(): boolean
@@ -180,6 +205,10 @@ export declare class GpuixRenderer {
   focusNext(): void
   /** Move focus to the previous GPUIX tab stop without dispatching a key event. */
   focusPrevious(): void
+  /** Move focus among the painted tab stops below an element, wrapping at its edges. */
+  focusNextWithin(elementId: number): void
+  /** Move focus among the painted tab stops below an element in reverse order. */
+  focusPreviousWithin(elementId: number): void
   /**
    * Complete the DOM default for a Tab keydown after React capture and
    * bubble handlers have had a chance to call preventDefault().
@@ -366,6 +395,18 @@ export declare class TestGpuixRenderer {
    */
   dispose(): void
   /**
+   * Return the window-level state a test can leave behind, and that outlives
+   * the React tree, to what a newly opened window has: the keymap and
+   * application menus, the debug frame overlay's mode and statistics, a
+   * held or captured pointer, an OS file drag still over the window,
+   * requested frames, native WebGPU devices and their resources, and the
+   * frames, diagnostics and manual-mode pixels this renderer buffers.
+   *
+   * Events the reset produces, such as the `pointerCancel` for a held
+   * pointer, are queued like any other; the caller drains them.
+   */
+  resetWindowState(): void
+  /**
    * Preserve eager test-root behavior by default, while allowing callers to
    * make `advanceAsyncClock` the only operation that drains queued tasks.
    */
@@ -386,13 +427,11 @@ export declare class TestGpuixRenderer {
    * Microseconds spent rebuilding the element tree since the last call,
    * cleared on read. Whatever a draw costs beyond this is layout, prepaint
    * and paint, which is the split #480 turns on.
-   * Whether the window still needs drawing.
+   * Whether the current visible frame is stale.
    *
-   * A tree at rest reports `false` after a draw, so `drawPendingFrame` is a
-   * no-op. Anything that re-dirties the window every frame makes a page pay
-   * a second full draw per update, which is invisible to a timing harness
-   * that only calls `flush`. Reading this needs no debug overlay, which
-   * would itself dirty the window.
+   * Eager mode reports GPUI's window dirtiness. Manual mode also reports
+   * state changes that have not reached its last explicitly captured frame.
+   * Reading this needs no debug overlay, which would itself dirty the window.
    */
   isWindowDirty(): boolean
   /**
@@ -421,8 +460,7 @@ export declare class TestGpuixRenderer {
   resetCanvas(id: number): void
   /**
    * Install a GPU-only test texture into one live `<canvas>` presentation.
-   * This exists solely to exercise the retained Metal surface path before a
-   * browser WebGPU API is exposed.
+   * This exercises the same retained Metal surface path as production.
    */
   installTestGpuCanvas(id: number, width: number, height: number, rgba: number): void
   /**
@@ -432,6 +470,24 @@ export declare class TestGpuixRenderer {
   advanceTestGpuCanvas(id: number, rgba: number): void
   /** Test-only lifetime counters for the retained GPU presentation seam. */
   getTestGpuCanvasState(): TestGpuCanvasState
+  /** Create one renderer-owned logical WebGPU device over the shared test producer. */
+  createWebGpuDevice(): number
+  /** Destroy a logical WebGPU device and every native resource it owns. */
+  destroyWebGpuDevice(deviceId: number): void
+  /** Compile one WGSL shader module for a logical WebGPU device. */
+  createWebGpuShaderModule(deviceId: number, label: string | undefined | null, code: string): number
+  /** Create one logical-device-owned WebGPU buffer. */
+  createWebGpuBuffer(deviceId: number, label: string | undefined | null, size: number, usage: number, initialData: Uint8Array): number
+  /** Destroy one logical-device-owned WebGPU buffer. */
+  destroyWebGpuBuffer(deviceId: number, bufferId: number): void
+  destroyWebGpuShaderModule(deviceId: number, shaderModuleId: number): void
+  destroyWebGpuRenderPipeline(deviceId: number, renderPipelineId: number): void
+  /** Queue one copy into a logical-device-owned WebGPU buffer. */
+  writeWebGpuBuffer(deviceId: number, bufferId: number, offset: number, data: Uint8Array): void
+  /** Create a triangle-list WebGPU render pipeline with optional vertex layouts. */
+  createWebGpuRenderPipeline(deviceId: number, label: string | undefined | null, vertexModuleId: number, vertexEntryPoint: string | undefined | null, fragmentModuleId: number, fragmentEntryPoint: string | undefined | null, vertexBuffersJson: string, sampleMask: number): number
+  /** Submit ordered WebGPU command buffers, then install every completed canvas frame. */
+  submitWebGpuCommands(deviceId: number, submissionJson: string, ops: Uint32Array, operands: Float64Array): void
   loadCanvasImage(observerId: number, sourceJson: string): void
   getCanvasImageLoadState(observerId: number): CanvasImageLoadState | null
   releaseCanvasImage(observerId: number): void
@@ -461,15 +517,13 @@ export declare class TestGpuixRenderer {
   simulateAccessibilityAction(accesskitId: string, action: "activate" | "increment" | "decrement" | "focus"): void
   /**
    * Draw one platform-style pending frame without notifying the view first.
-   * Unlike `flush`, this does not request invalidation; it only draws when
-   * the window is already dirty.
-   * A clean window remains clean, so this only repaints work already
-   * scheduled by production code such as an async image load completion.
+   * Unlike `flush`, this does not notify the view. It draws GPUI dirtiness
+   * or materializes state waiting behind the manual-mode frame boundary.
    */
   drawPendingFrame(): void
   /**
-   * Queue one callback for the next manually advanced GPUI frame without
-   * dirtying or synchronously drawing the offscreen window.
+   * Queue one callback for the next `advanceAsyncClock()` without dirtying or
+   * synchronously drawing the offscreen window.
    */
   requestFrame(performanceTimestampMs: number): void
   /**
@@ -560,6 +614,8 @@ export declare class TestGpuixRenderer {
   blur(): void
   focusNext(): void
   focusPrevious(): void
+  focusNextWithin(elementId: number): void
+  focusPreviousWithin(elementId: number): void
   resolveTabKeyDown(defaultPrevented: boolean): void
   resolveScrollKeyDown(defaultPrevented: boolean): void
   /**
@@ -724,6 +780,12 @@ export declare class TestGpuixRenderer {
    * Supported on macOS through Metal and Windows through DirectX.
    */
   captureScreenshot(path: string): void
+  /** Capture the current rendered state as RGBA pixels without encoding a PNG. */
+  captureScreenshotRaw(): ScreenshotImageData
+  /** Capture and crop a rectangle in device pixels, returning RGBA pixels. */
+  captureScreenshotClipRaw(x: number, y: number, width: number, height: number): ScreenshotImageData
+  /** Capture and crop to a rectangle in device pixels before PNG encoding. */
+  captureScreenshotClip(path: string, x: number, y: number, width: number, height: number): ScreenshotCaptureTimings
   /**
    * Compare a reference PNG with an actual screenshot using an absolute tolerance for each
    * RGBA channel. The contour and geometry metrics are intentionally asymmetric: they derive
@@ -734,6 +796,8 @@ export declare class TestGpuixRenderer {
    * straight-alpha comparison policy; the current committed scenes intentionally remain opaque.
    */
   compareImages(pathA: string, pathB: string, tolerance: number): ImageComparisonResult
+  /** Compare a reference PNG with raw screenshot pixels without encoding or decoding the actual. */
+  compareImagePixels(referencePath: string, actualPixels: Buffer, width: number, height: number, tolerance: number): ScreenshotComparisonResult
   /**
    * Return and clear all collected events since the last drain.
    * Events are collected synchronously — no event loop queuing.
@@ -892,6 +956,11 @@ export interface EventPayload {
    * `error`, so JS can discard a completion queued before `src` changed.
    */
   imageRequestGeneration?: number
+  /**
+   * Logical native motion target that reached completion. Populated for
+   * `motionComplete`, so a stale completion cannot finish a new target.
+   */
+  motionGeneration?: number
   /** Logical GPUI window width. Populated for `windowResize`. */
   width?: number
   /** Logical GPUI window height. Populated for `windowResize`. */
@@ -1212,6 +1281,26 @@ export interface ResizeObservationEntry {
 export interface ResizeObservationSize {
   width: number
   height: number
+}
+
+export interface ScreenshotCaptureTimings {
+  captureMs: number
+  cropMs: number
+  encodeMs: number
+  writeMs: number
+}
+
+export interface ScreenshotComparisonResult {
+  differingPixelRatio: number
+  maxChannelDelta: number
+}
+
+export interface ScreenshotImageData {
+  pixels: Buffer
+  width: number
+  height: number
+  captureMs: number
+  cropMs: number
 }
 
 export interface ScrollWheelModifiers {

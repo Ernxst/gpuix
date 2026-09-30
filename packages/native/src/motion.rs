@@ -118,6 +118,12 @@ impl TransitionValue {
         use TransitionProperty::*;
 
         let number = |value: Option<f64>| value.map(Self::Number);
+        let offset = |value: Option<crate::style::LengthValue>| {
+            value.and_then(|value| match value {
+                crate::style::LengthValue::Pixels(value) => Some(Self::Number(value)),
+                crate::style::LengthValue::Percentage(_) => None,
+            })
+        };
         let dimension = |value: &Option<DimensionValue>| value.clone().map(Self::Dimension);
         let color = |value: &Option<String>| {
             value
@@ -138,10 +144,10 @@ impl TransitionValue {
             MinHeight => dimension(&style.min_height),
             MaxWidth => dimension(&style.max_width),
             MaxHeight => dimension(&style.max_height),
-            Top => number(style.top),
-            Right => number(style.right),
-            Bottom => number(style.bottom),
-            Left => number(style.left),
+            Top => offset(style.top),
+            Right => offset(style.right),
+            Bottom => offset(style.bottom),
+            Left => offset(style.left),
             BorderRadius => number(style.border_radius),
             BorderTopLeftRadius => number(style.border_top_left_radius),
             BorderTopRightRadius => number(style.border_top_right_radius),
@@ -263,10 +269,18 @@ impl TransitionValue {
             (MinHeight, Self::Dimension(value)) => style.min_height = Some(value.clone()),
             (MaxWidth, Self::Dimension(value)) => style.max_width = Some(value.clone()),
             (MaxHeight, Self::Dimension(value)) => style.max_height = Some(value.clone()),
-            (Top, Self::Number(value)) => style.top = Some(*value),
-            (Right, Self::Number(value)) => style.right = Some(*value),
-            (Bottom, Self::Number(value)) => style.bottom = Some(*value),
-            (Left, Self::Number(value)) => style.left = Some(*value),
+            (Top, Self::Number(value)) => {
+                style.top = Some(crate::style::LengthValue::Pixels(*value))
+            }
+            (Right, Self::Number(value)) => {
+                style.right = Some(crate::style::LengthValue::Pixels(*value))
+            }
+            (Bottom, Self::Number(value)) => {
+                style.bottom = Some(crate::style::LengthValue::Pixels(*value))
+            }
+            (Left, Self::Number(value)) => {
+                style.left = Some(crate::style::LengthValue::Pixels(*value))
+            }
             (BorderRadius, Self::Number(value)) => style.border_radius = Some(*value),
             (BorderTopLeftRadius, Self::Number(value)) => {
                 style.border_top_left_radius = Some(*value)
@@ -509,7 +523,6 @@ impl TransitionValues {
                 .collect(),
         )
     }
-
 }
 
 impl TransitionValues {
@@ -594,7 +607,11 @@ impl StyleTransitionTrack {
 
         let duration = milliseconds(self.duration_ms);
         let raw = if duration.is_zero() {
-            if elapsed < delay { 0.0 } else { 1.0 }
+            if elapsed < delay {
+                0.0
+            } else {
+                1.0
+            }
         } else {
             elapsed.saturating_sub(delay).as_secs_f64() / duration.as_secs_f64()
         };
@@ -1080,8 +1097,9 @@ pub(crate) fn intrinsic_probe(
     {
         return None;
     }
-    let (settled_width, settled_height) = retained
-        .map_or((false, false), |state| state.settles_intrinsic(&state.target_style));
+    let (settled_width, settled_height) = retained.map_or((false, false), |state| {
+        state.settles_intrinsic(&state.target_style)
+    });
     let latched = retained.map_or(IntrinsicSize::default(), |state| state.intrinsic);
     let previous_width = retained.and_then(|state| intrinsic_keyword(&state.target_style.width));
     let previous_height = retained.and_then(|state| intrinsic_keyword(&state.target_style.height));
@@ -1408,16 +1426,16 @@ impl MotionStyle {
             style.opacity = Some(value);
         }
         if let Some(value) = self.top {
-            style.top = Some(value);
+            style.top = Some(crate::style::LengthValue::Pixels(value));
         }
         if let Some(value) = self.right {
-            style.right = Some(value);
+            style.right = Some(crate::style::LengthValue::Pixels(value));
         }
         if let Some(value) = self.bottom {
-            style.bottom = Some(value);
+            style.bottom = Some(crate::style::LengthValue::Pixels(value));
         }
         if let Some(value) = self.left {
-            style.left = Some(value);
+            style.left = Some(crate::style::LengthValue::Pixels(value));
         }
         if let Some(value) = self.border_radius {
             style.border_radius = Some(value);
@@ -1602,7 +1620,10 @@ where
             if value.is_finite()
                 && value >= 0.0
                 && value.fract() == 0.0
-                && value <= u32::MAX as f64 => Ok(MotionRepeat::Finite(value as u32)),
+                && value <= u32::MAX as f64 =>
+        {
+            Ok(MotionRepeat::Finite(value as u32))
+        }
         MotionRepeatInput::String(value) if value == "Infinity" => Ok(MotionRepeat::Infinite),
         MotionRepeatInput::Number(_) | MotionRepeatInput::String(_) => Err(
             serde::de::Error::custom("motion repeat must be a non-negative integer or Infinity"),
@@ -1630,7 +1651,12 @@ fn default_ease() -> TransitionEasing {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 struct MotionDescription {
+    #[serde(default)]
+    generation: u64,
+    #[serde(default)]
+    is_exit: bool,
     #[serde(default)]
     initial: Option<MotionInitial>,
     animate: MotionStyle,
@@ -1642,6 +1668,8 @@ struct MotionDescription {
 pub(crate) struct MotionFrame {
     pub style: MotionStyle,
     pub active: bool,
+    pub just_settled: bool,
+    pub generation: u64,
 }
 
 pub(crate) struct MotionState {
@@ -1652,6 +1680,8 @@ pub(crate) struct MotionState {
     transition: MotionTransition,
     started: Instant,
     valid: bool,
+    needs_settle: bool,
+    generation: u64,
 }
 
 impl MotionState {
@@ -1681,6 +1711,8 @@ impl MotionState {
             transition: description.transition,
             started: now,
             valid: true,
+            needs_settle: description.is_exit || from != description.animate,
+            generation: description.generation,
         })
     }
 
@@ -1693,6 +1725,8 @@ impl MotionState {
             transition: MotionTransition::default(),
             started: now,
             valid: false,
+            needs_settle: source_is_exit(source),
+            generation: source_generation(source),
         }
     }
 
@@ -1724,11 +1758,15 @@ impl MotionState {
             return Ok(());
         }
 
+        let previous_generation = self.generation;
         let description = match parse_description(source) {
             Ok(description) => description,
             Err(error) => {
                 self.source = source.clone();
                 self.valid = false;
+                self.generation = source_generation(source);
+                self.needs_settle =
+                    source_is_exit(source) || self.generation != previous_generation;
                 return Err(error);
             }
         };
@@ -1744,6 +1782,8 @@ impl MotionState {
                         Some(MotionInitial::Disabled(true)) => unreachable!("validated above"),
                     },
                     active: false,
+                    just_settled: false,
+                    generation: previous_generation,
                 },
                 MotionVelocity::default(),
             )
@@ -1764,6 +1804,10 @@ impl MotionState {
         self.started = now;
         self.source = source.clone();
         self.valid = true;
+        self.generation = description.generation;
+        self.needs_settle = description.is_exit
+            || self.generation != previous_generation
+            || self.from != self.target;
         if reduce_motion {
             self.from = self.target;
             self.velocity = MotionVelocity::default();
@@ -1771,7 +1815,20 @@ impl MotionState {
         Ok(())
     }
 
-    pub(crate) fn frame(&self, now: Instant, reduce_motion: bool) -> MotionFrame {
+    pub(crate) fn frame(&mut self, now: Instant, reduce_motion: bool) -> MotionFrame {
+        let (mut frame, _) = self.frame_with_velocity(now, reduce_motion);
+        if frame.active {
+            self.needs_settle = true;
+        }
+        frame.just_settled = self.needs_settle && !frame.active;
+        if frame.just_settled {
+            self.needs_settle = false;
+        }
+        frame.generation = self.generation;
+        frame
+    }
+
+    pub(crate) fn sampled_frame(&self, now: Instant, reduce_motion: bool) -> MotionFrame {
         self.frame_with_velocity(now, reduce_motion).0
     }
 
@@ -1785,6 +1842,8 @@ impl MotionState {
                 MotionFrame {
                     style: self.target,
                     active: false,
+                    just_settled: false,
+                    generation: self.generation,
                 },
                 MotionVelocity::default(),
             );
@@ -1798,6 +1857,8 @@ impl MotionState {
                     MotionFrame {
                         style: self.target,
                         active: false,
+                        just_settled: false,
+                        generation: self.generation,
                     },
                     MotionVelocity::default(),
                 );
@@ -1809,7 +1870,15 @@ impl MotionState {
             let (style, velocity, active) =
                 self.from
                     .spring_sample(self.target, self.velocity, spring_elapsed, spring);
-            return (MotionFrame { style, active }, velocity);
+            return (
+                MotionFrame {
+                    style,
+                    active,
+                    just_settled: false,
+                    generation: self.generation,
+                },
+                velocity,
+            );
         }
 
         let duration = seconds(self.transition.duration);
@@ -1841,10 +1910,26 @@ impl MotionState {
             MotionFrame {
                 style: self.from.interpolate(self.target, progress),
                 active,
+                just_settled: false,
+                generation: self.generation,
             },
             MotionVelocity::default(),
         )
     }
+}
+
+fn source_generation(source: &serde_json::Value) -> u64 {
+    source
+        .get("generation")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or_default()
+}
+
+fn source_is_exit(source: &serde_json::Value) -> bool {
+    source
+        .get("isExit")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn parse_description(source: &serde_json::Value) -> Result<MotionDescription, String> {
@@ -2074,7 +2159,10 @@ mod tests {
         let middle = state.frame(middle_at, false);
         assert_eq!(middle.style.opacity, Some(0.5));
         assert_eq!(middle.style.width, Some(DimensionValue::Pixels(150.0)));
-        assert_eq!(middle.style.top, Some(10.0));
+        assert_eq!(
+            middle.style.top,
+            Some(crate::style::LengthValue::Pixels(10.0))
+        );
         assert_eq!(middle.style.border_radius, None);
         assert_eq!(middle.style.border_top_left_radius, Some(8.0));
         assert_eq!(middle.style.border_top_right_radius, Some(8.0));
@@ -2731,7 +2819,7 @@ mod tests {
             "animate": { "width": 100.0 },
             "transition": { "duration": 0.2, "ease": "linear" }
         });
-        let state = MotionState::new(&description, started).unwrap();
+        let mut state = MotionState::new(&description, started).unwrap();
         let frame = state.frame(started + Duration::from_millis(200), false);
 
         assert_eq!(frame.style.width, Some(100.0));
@@ -2782,7 +2870,7 @@ mod tests {
                 "ease": { "type": "spring" }
             }
         });
-        let state = MotionState::new(&description, started).unwrap();
+        let mut state = MotionState::new(&description, started).unwrap();
         let mut saw_width_overshoot = false;
         let mut last_active = None;
         let mut settled = None;
@@ -2829,7 +2917,7 @@ mod tests {
                 "ease": { "type": "spring", "stiffness": 100, "damping": 10, "mass": 1 }
             }
         });
-        let state = MotionState::new(&description, started).unwrap();
+        let mut state = MotionState::new(&description, started).unwrap();
 
         assert_eq!(
             state
@@ -2867,7 +2955,7 @@ mod tests {
             "animate": { "width": 0.0 },
             "transition": { "ease": { "type": "spring", "velocity": 0.0 } }
         });
-        let zero_restart = MotionState::new(&zero_restart_description, retargeted_at).unwrap();
+        let mut zero_restart = MotionState::new(&zero_restart_description, retargeted_at).unwrap();
         let sampled_at = retargeted_at + Duration::from_millis(16);
         let carried_width = carried.frame(sampled_at, false).style.width.unwrap();
         let restarted_width = zero_restart.frame(sampled_at, false).style.width.unwrap();

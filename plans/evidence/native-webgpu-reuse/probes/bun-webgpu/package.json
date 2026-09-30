@@ -1,0 +1,8 @@
+{
+  "name": "gpuix-bun-webgpu-probe",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "bun-webgpu": "0.1.7"
+  }
+}

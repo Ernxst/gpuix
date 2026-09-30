@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import "../globals.js"
 import { hasBrowserDocument } from "../document.js"
+import { DOCUMENT_POSITION_FOLLOWING, DOCUMENT_POSITION_PRECEDING } from "../dom-position.js"
 import type { PointerEvent } from "../pointer-event.js"
 import { handleGpuixEvent } from "../reconciler/event-registry.js"
 import { createRoot, flushSync } from "../reconciler/reconciler.js"
@@ -96,6 +97,59 @@ describe("@gpuix/react/globals document", () => {
     expect(doc.body).toBeNull()
   })
 
+  it("answers Base UI's composite visibility and disabled checks on mounted refs", () => {
+    const enabled = createRef<PublicInstance>()
+    const disabled = createRef<PublicInstance>()
+    const disabledInput = createRef<PublicInstance>()
+    const disabledTextarea = createRef<PublicInstance>()
+    const hidden = createRef<PublicInstance>()
+    const app = mount(
+      <div>
+        <button ref={enabled} />
+        <button ref={disabled} disabled />
+        <input ref={disabledInput} disabled />
+        <textarea ref={disabledTextarea} disabled />
+        <div ref={hidden} style={{ display: "none", visibility: "hidden" }} />
+      </div>
+    )
+    const view = ownerDocument(enabled.current).defaultView!
+
+    expect(view.getComputedStyle(enabled.current as unknown as Element).display).toBe("block")
+    expect(view.getComputedStyle(enabled.current as unknown as Element).visibility).toBe("visible")
+    expect(view.getComputedStyle(hidden.current as unknown as Element).display).toBe("none")
+    expect(view.getComputedStyle(hidden.current as unknown as Element).visibility).toBe("hidden")
+    expect(enabled.current!.matches(":disabled")).toBe(false)
+    expect(enabled.current!.matches(":enabled")).toBe(true)
+    expect(disabled.current!.matches(":disabled")).toBe(true)
+    expect(disabled.current!.matches(":enabled")).toBe(false)
+    expect(disabledInput.current!.matches(":disabled")).toBe(true)
+    expect(disabledTextarea.current!.matches(":disabled")).toBe(true)
+
+    app.unmount()
+  })
+
+  it("answers display from a compiled CSS module className", async () => {
+    const source = new URL("../../../plugins/src/css-modules.ts", import.meta.url).href
+    const { transformGpuixCssModule } = await import(source)
+    const styles = await transformGpuixCssModule(
+      ".hidden { display: none; visibility: hidden; }",
+      "/fixture/hidden.module.css"
+    )
+    const hiddenClass = styles.hidden
+    Object.defineProperty(hiddenClass, Symbol.for("gpuix.compiledStyle"), { value: true })
+    const hidden = createRef<PublicInstance>()
+    const app = mount(<div ref={hidden} className={hiddenClass as unknown as string} />)
+
+    expect(
+      ownerDocument(hidden.current).defaultView!.getComputedStyle(hidden.current as unknown as Element).display
+    ).toBe("none")
+    expect(
+      ownerDocument(hidden.current).defaultView!.getComputedStyle(hidden.current as unknown as Element).visibility
+    ).toBe("hidden")
+
+    app.unmount()
+  })
+
   it("reads the most recently mounted root while two windows are open", () => {
     const olderRoot = createRef<PublicInstance>()
     const newerRoot = createRef<PublicInstance>()
@@ -117,6 +171,57 @@ describe("@gpuix/react/globals document", () => {
     newer.unmount()
     expect(doc.body).toBe(olderRoot.current)
     expect(doc.getElementById("older")).not.toBeNull()
+  })
+})
+
+describeNative("@gpuix/react/globals document with container children", () => {
+  it("keeps a synthetic body around all top-level application children", () => {
+    const first = createRef<PublicInstance>()
+    const second = createRef<PublicInstance>()
+    const doc = globalThis.document as unknown as GpuixDocument
+    screen = createTestRoot()
+
+    const tree = (order: readonly string[]) => (
+      <>
+        {order.map((label) => (
+          <div
+            key={label}
+            ref={label === "first" ? first : second}
+            data-testid={label}
+          >
+            <text>{label}</text>
+          </div>
+        ))}
+      </>
+    )
+
+    screen.render(tree(["first"]))
+    const directBody = doc.body!
+    expect(directBody).toBe(first.current)
+
+    screen.render(tree(["first", "second"]))
+    const body = doc.body!
+    const firstElement = first.current!
+    const secondElement = second.current!
+    expect(body).not.toBe(firstElement)
+    expect(body.contains(firstElement)).toBe(true)
+    expect(body.contains(secondElement)).toBe(true)
+    expect(firstElement.parentElement).toBe(body)
+    expect(secondElement.parentElement).toBe(body)
+    expect(firstElement.compareDocumentPosition(secondElement)).toBe(DOCUMENT_POSITION_FOLLOWING)
+
+    screen.render(tree(["second", "first"]))
+    expect(doc.body).toBe(body)
+    expect(body.contains(firstElement)).toBe(true)
+    expect(body.contains(secondElement)).toBe(true)
+    expect(secondElement.compareDocumentPosition(firstElement)).toBe(DOCUMENT_POSITION_FOLLOWING)
+    expect(firstElement.compareDocumentPosition(secondElement)).toBe(DOCUMENT_POSITION_PRECEDING)
+
+    screen.render(tree(["second"]))
+    expect(doc.body).toBe(body)
+    expect(body.contains(firstElement)).toBe(false)
+    expect(body.contains(secondElement)).toBe(true)
+    expect(secondElement.parentElement).toBe(body)
   })
 })
 

@@ -1504,7 +1504,9 @@ describeNative("automation", () => {
 
     renderer.nativeSimulateAccessibilityAction(node.accesskit_id, "activate")
     expect(clicks).toEqual(["click"])
-    expect(readFrameNumber()).toBe(frameNumber)
+    // AccessKit activation follows GPUI's click path, which focuses the button;
+    // that focus state belongs in the next accessibility frame.
+    expect(readFrameNumber()).toBe(frameNumber + 1)
   })
 
   it("publishes explicit roles, states, descriptions, and values", () => {
@@ -1643,6 +1645,41 @@ describeNative("automation", () => {
     expect(
       entries.find(([, node]) => node.aria.label === "42 MW")?.[1].aria
     ).toMatchObject({ column_index: 2, row_span: 2, column_span: 2 })
+  })
+
+  it("publishes sortable column header directions", () => {
+    const { render, renderer } = createTestRoot({ strictStyles: true })
+
+    render(
+      <div role="table">
+        <div role="row">
+          <text role="columnheader" ariaLabel="Ascending" ariaSort="ascending" />
+          <text role="columnheader" ariaLabel="Descending" aria-sort="descending" />
+          <text role="columnheader" ariaLabel="Unsorted" ariaSort="none" />
+        </div>
+        <div role="row">
+          <text role="rowheader" ariaLabel="Row sort" ariaSort="other" />
+        </div>
+      </div>
+    )
+
+    const headers = Object.values(renderer.getAccessibilityTree().nodes).filter(
+      (node) => node.aria.role === "ColumnHeader"
+    )
+
+    expect(renderer.drainStyleDiagnostics()).toEqual([])
+    expect(headers).toHaveLength(3)
+    expect(headers.map((node) => node.aria)).toEqual([
+      expect.objectContaining({ label: "Ascending", sort_direction: "Ascending" }),
+      expect.objectContaining({ label: "Descending", sort_direction: "Descending" }),
+      expect.objectContaining({ label: "Unsorted" })
+    ])
+    expect(headers[2]?.aria).not.toHaveProperty("sort_direction")
+    expect(
+      Object.values(renderer.getAccessibilityTree().nodes).find(
+        (node) => node.aria.label === "Row sort"
+      )?.aria
+    ).toMatchObject({ sort_direction: "Other" })
   })
 
   it("derives names for row and cell wrappers but not their table", () => {

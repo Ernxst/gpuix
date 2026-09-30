@@ -50,7 +50,32 @@ function createRegionPair(
     renderer.appendChild(rootElementId, regionId)
   }
 
-  return { regionIds, textIds, next: 0, attachedToRootId: rootElementId }
+  return { regionIds, textIds, values: ["", ""], next: 0, attachedToRootId: rootElementId }
+}
+
+/**
+ * Replace live regions when a container's direct root promotes to an internal
+ * wrapper. The old native regions must be destroyed so they cannot stay under
+ * the former application root, while their alternating values and next write
+ * index need to survive on the new reachable pair.
+ */
+export function moveAnnouncerRegionsToRoot(container: Container, rootElementId: number): void {
+  const politenesses: readonly AnnouncePoliteness[] = ["polite", "assertive"]
+  for (const politeness of politenesses) {
+    const previous = container.announcer[politeness]
+    if (!previous) continue
+
+    for (const regionId of previous.regionIds) container.renderer.destroyElement(regionId)
+
+    const replacement = createRegionPair(container, politeness, rootElementId)
+    for (let index = 0; index < replacement.textIds.length; index += 1) {
+      const value = previous.values[index]!
+      replacement.values[index] = value
+      container.renderer.setText(replacement.textIds[index]!, value)
+    }
+    replacement.next = previous.next
+    container.announcer[politeness] = replacement
+  }
 }
 
 /**
@@ -107,6 +132,8 @@ export function announce(message: string, options: AnnounceOptions = {}): void {
   const clearIndex = writeIndex === 0 ? 1 : 0
   renderer.setText(pair.textIds[clearIndex], "")
   renderer.setText(pair.textIds[writeIndex], message)
+  pair.values[clearIndex] = ""
+  pair.values[writeIndex] = message
   pair.next = clearIndex
 
   // Safe to call outside a React commit: this queues no work of React's, only

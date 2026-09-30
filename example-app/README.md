@@ -7,14 +7,15 @@ bun install
 bun run dev
 ```
 
-`dev` runs Vite under Bun. Component-only edits preserve React state. Route and
-other mixed-export modules remount the app on the same native window.
+`dev` runs the app with `bun --hot` and registers the CSS module loader through
+`@gpuix/plugins/preload`. JavaScript and TypeScript edits remount React on the
+same native window. Restart the process after changing a CSS module.
 
 ## Scripts
 
 | Script | What it does |
 |---|---|
-| `bun run dev` | Start the desktop app through Vite with Fast Refresh |
+| `bun run dev` | Start the desktop app with Bun hot reload |
 | `bun run build` | Compile a standalone binary into `dist/todo` |
 | `bun run test` | Drive the app through the GPU test renderer with Vitest |
 | `bun run typecheck` | Run `tsc --noEmit` |

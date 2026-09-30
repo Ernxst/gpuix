@@ -25,6 +25,7 @@ describe("@gpuix/react/globals", () => {
     expect(typeof globalThis.requestAnimationFrame).toBe("function")
     expect(typeof globalThis.cancelAnimationFrame).toBe("function")
     expect(globalThis.window).toBe(globalThis)
+    expect(globalThis.self).toBe(globalThis)
     expect(globalThis.scrollTo()).toBeUndefined()
     expect(typeof globalThis.ResizeObserver).toBe("function")
     expect(typeof globalThis.Image).toBe("function")
@@ -50,6 +51,16 @@ describe("@gpuix/react/globals", () => {
     await import("../globals.js")
 
     expect(globalThis.window).toBe(existing)
+  })
+
+  it("leaves an already-installed self in place on a later import", async () => {
+    const existing = { origin: "https://example.test" }
+    vi.stubGlobal("self", existing)
+
+    vi.resetModules()
+    await import("../globals.js")
+
+    expect(globalThis.self).toBe(existing)
   })
 
   it("leaves a pre-existing Image constructor in place on a later import", async () => {

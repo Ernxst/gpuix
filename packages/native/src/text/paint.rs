@@ -23,6 +23,7 @@ use gpui::{
     GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId, SharedString, StyledText,
     TextLayout, TextRun, Window,
 };
+use gpui::PaintOrderKey;
 
 use super::inline::{validate_runs, StyledTextRun};
 use super::selection::{self, SelectionState};
@@ -41,6 +42,7 @@ struct RegEntry {
     key: Arc<str>,
     text: SharedString,
     layout: TextLayout,
+    paint_order: PaintOrderKey,
     /// See [`selection::RegisteredText::group`].
     group: Option<u64>,
 }
@@ -535,6 +537,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                         key: key.clone(),
                         text: text.clone(),
                         layout: layout.clone(),
+                        paint_order: window.current_paint_order_key(),
                         group,
                     })
                 });
@@ -740,7 +743,11 @@ fn registry_point(position: gpui::Point<gpui::Pixels>) -> Option<(usize, usize)>
         for (ei, entry) in reg.iter().enumerate() {
             let b = entry.layout.bounds();
             if b.contains(&position) {
-                contained = Some(ei);
+                if contained.is_none_or(|best| {
+                    reg[best].paint_order < entry.paint_order
+                }) {
+                    contained = Some(ei);
+                }
                 continue;
             }
             let dy = if position.y < b.top() {
@@ -824,7 +831,7 @@ fn register_down_listener(window: &mut Window, selection: &SharedSelection) {
     use gpui::{DispatchPhase, MouseButton, MouseDownEvent};
 
     let selection = selection.clone();
-    window.on_mouse_event(move |e: &MouseDownEvent, phase, window, _cx| {
+    window.on_mouse_event(move |e: &MouseDownEvent, phase, window, cx| {
         if phase != DispatchPhase::Bubble || e.button != MouseButton::Left {
             return;
         }
@@ -850,12 +857,12 @@ fn register_down_listener(window: &mut Window, selection: &SharedSelection) {
         if let Some((key, text, ix)) = hit {
             match e.click_count {
                 2 => {
-                    window.blur();
+                    window.blur(cx);
                     let range = selection::word_range(&text, ix);
                     sel.begin_with_span(&key, &text, range);
                 }
                 n if n >= 3 => {
-                    window.blur();
+                    window.blur(cx);
                     sel.begin_with_span(&key, &text, 0..text.len());
                 }
                 // A tap must not select or blur. iOS uses that gesture to
@@ -897,7 +904,7 @@ fn register_drag_listeners(
             return;
         }
         if move_selection.lock().promote_pending() {
-            window.blur();
+            window.blur(cx);
         }
         if update_drag_at(&move_selection, event.position) {
             window.refresh();

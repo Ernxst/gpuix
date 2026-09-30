@@ -21,9 +21,11 @@ const ACCESSIBILITY_PROPS: &[&str] = &[
     "ariaRequired",
     "ariaInvalid",
     "ariaExpanded",
+    "ariaControls",
     "ariaCurrent",
     "ariaLive",
     "ariaAtomic",
+    "ariaModal",
     "ariaSelected",
     "ariaValueText",
     "ariaValueMin",
@@ -32,6 +34,7 @@ const ACCESSIBILITY_PROPS: &[&str] = &[
     "ariaLevel",
     "ariaRowIndex",
     "ariaColIndex",
+    "ariaSort",
     "ariaRowCount",
     "ariaColCount",
     "ariaRowSpan",
@@ -108,6 +111,7 @@ define_accessibility_roles! {
     "complementary" => Complementary, false,
     "contentinfo" => ContentInfo, false,
     "definition" => Definition, false,
+    "descriptionlist" => DescriptionList, false,
     "deletion" => ContentDeletion, false,
     "dialog" => Dialog, false,
     "document" => Document, false,
@@ -311,7 +315,7 @@ impl AccessibilityRole {
                     | Role::Switch
                     | Role::TreeGrid
             ),
-            "ariaExpanded" => matches!(self.role, Role::Button | Role::Link),
+            "ariaExpanded" => matches!(self.role, Role::Button | Role::ComboBox | Role::Link),
             "ariaSelected" => matches!(self.role, Role::ListBoxOption | Role::Tab),
             "ariaValueText" | "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => {
                 matches!(
@@ -328,6 +332,7 @@ impl AccessibilityRole {
                 self.role,
                 Role::Cell | Role::ColumnHeader | Role::GridCell | Role::Row | Role::RowHeader
             ),
+            "ariaSort" => matches!(self.role, Role::ColumnHeader | Role::RowHeader),
             "ariaRowCount" | "ariaColCount" => {
                 matches!(self.role, Role::Grid | Role::Table | Role::TreeGrid)
             }
@@ -337,6 +342,7 @@ impl AccessibilityRole {
             ),
             "disabled" | "ariaDisabled" => !matches!(self.role, Role::Heading | Role::Image),
             "ariaLive" | "ariaAtomic" => self.role != Role::GenericContainer,
+            "ariaModal" => matches!(self.role, Role::Dialog | Role::AlertDialog),
             // The roles WAI-ARIA 1.2 allows `aria-haspopup` on.
             "ariaHasPopup" => matches!(
                 self.role,
@@ -363,11 +369,96 @@ impl AccessibilityRole {
     }
 }
 
-fn resolved_role(element: &RetainedElement) -> Option<AccessibilityRole> {
+fn table_cell_header_role(tree: &RetainedTree, element: &RetainedElement) -> gpui::Role {
+    use gpui::Role;
+
+    match element
+        .custom_props
+        .get("scope")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some("row" | "rowgroup") => return Role::RowHeader,
+        Some("col" | "colgroup") => return Role::ColumnHeader,
+        _ => {}
+    }
+
+    let Some(row) = element
+        .parent
+        .and_then(|id| tree.elements.get(&id))
+        .filter(|parent| parent.element_type == "tr")
+    else {
+        return Role::ColumnHeader;
+    };
+    let first_cell = row
+        .children
+        .iter()
+        .filter_map(|id| tree.elements.get(id))
+        .filter(|child| matches!(child.element_type.as_str(), "th" | "td"))
+        .next()
+        .is_some_and(|first| first.id == element.id);
+    let in_table_header = row
+        .parent
+        .and_then(|id| tree.elements.get(&id))
+        .is_some_and(|group| group.element_type == "thead");
+    let mut ancestor_id = row.parent;
+    let mut table_id = None;
+    while let Some(id) = ancestor_id {
+        let Some(ancestor) = tree.elements.get(&id) else {
+            break;
+        };
+        if ancestor.element_type == "table" {
+            table_id = Some(ancestor.id);
+            break;
+        }
+        ancestor_id = ancestor.parent;
+    }
+    let first_row_id = table_id.and_then(|table_id| {
+        let mut pending: Vec<u64> = tree
+            .elements
+            .get(&table_id)?
+            .children
+            .iter()
+            .rev()
+            .copied()
+            .collect();
+        while let Some(id) = pending.pop() {
+            let child = tree.elements.get(&id)?;
+            if child.element_type == "tr" {
+                return Some(child.id);
+            }
+            pending.extend(child.children.iter().rev().copied());
+        }
+        None
+    });
+
+    if in_table_header || first_row_id == Some(row.id) || !first_cell {
+        Role::ColumnHeader
+    } else {
+        Role::RowHeader
+    }
+}
+
+fn resolved_role(tree: &RetainedTree, element: &RetainedElement) -> Option<AccessibilityRole> {
     if let Some(value) = element.custom_props.get("role") {
         return AccessibilityRole::parse(value).filter(|role| {
             !(role.role == gpui::Role::GenericContainer
                 && matches!(value.as_str(), Some("none" | "presentation")))
+        });
+    }
+
+    let table_role = match element.element_type.as_str() {
+        "table" => Some((gpui::Role::Table, false)),
+        "caption" => Some((gpui::Role::Caption, true)),
+        "thead" | "tbody" | "tfoot" => Some((gpui::Role::RowGroup, false)),
+        "tr" => Some((gpui::Role::Row, true)),
+        "td" => Some((gpui::Role::Cell, true)),
+        "th" => Some((table_cell_header_role(tree, element), true)),
+        _ => None,
+    };
+    if let Some((role, name_from_contents)) = table_role {
+        return Some(AccessibilityRole {
+            role,
+            name_from_contents,
         });
     }
 
@@ -473,6 +564,16 @@ fn parse_aria_current(value: &serde_json::Value) -> Option<gpui::accesskit::Aria
     }
 }
 
+fn parse_aria_sort(value: &serde_json::Value) -> Option<gpui::accesskit::SortDirection> {
+    match value.as_str()? {
+        "ascending" => Some(gpui::accesskit::SortDirection::Ascending),
+        "descending" => Some(gpui::accesskit::SortDirection::Descending),
+        "other" => Some(gpui::accesskit::SortDirection::Other),
+        "none" => None,
+        _ => None,
+    }
+}
+
 /// Why a subtree is being flattened. Whitespace, hiding and descent are the
 /// same for both; what an authored label does at the root is not.
 #[derive(Clone, Copy)]
@@ -534,8 +635,8 @@ fn flattened_text(tree: &RetainedTree, element: &RetainedElement, subject: NameS
 /// Accname recurses into a role-less descendant at step 2, so a label it carries
 /// names the subtree it sits on. Chromium and dom-accessibility-api both include
 /// it.
-fn carries_authored_name(node: &RetainedElement) -> bool {
-    resolved_role(node).is_some_and(|role| role.supports("ariaLabel"))
+fn carries_authored_name(tree: &RetainedTree, node: &RetainedElement) -> bool {
+    resolved_role(tree, node).is_some_and(|role| role.supports("ariaLabel"))
 }
 
 /// Whether `node` runs into its siblings instead of separating from them.
@@ -603,7 +704,7 @@ fn contribute_flattened_text(
     let carries_name = if is_root {
         !matches!(subject, NameSubject::Contents)
     } else {
-        carries_authored_name(node)
+        carries_authored_name(tree, node)
     };
     // A reference is never followed from inside a reference: one level is what
     // the spec resolves, and it is what makes a descendant pointing back at an
@@ -710,7 +811,10 @@ fn first_labelable_descendant(tree: &RetainedTree, element: &RetainedElement) ->
 
 /// The `<label>` that wraps this control without an `htmlFor`, when the
 /// control is the first labelable element inside it.
-fn implicit_label<'a>(tree: &'a RetainedTree, element: &RetainedElement) -> Option<&'a RetainedElement> {
+fn implicit_label<'a>(
+    tree: &'a RetainedTree,
+    element: &RetainedElement,
+) -> Option<&'a RetainedElement> {
     let mut current = element.parent;
     while let Some(id) = current {
         let ancestor = tree.elements.get(&id)?;
@@ -742,6 +846,18 @@ fn explicit_label_text(tree: &RetainedTree, element: &RetainedElement) -> Option
         }
     }
     (!parts.is_empty()).then(|| parts.join(" "))
+}
+
+fn table_caption_text(tree: &RetainedTree, element: &RetainedElement) -> Option<String> {
+    if element.element_type != "table" {
+        return None;
+    }
+    let caption = element
+        .children
+        .iter()
+        .filter_map(|id| tree.elements.get(id))
+        .find(|child| child.element_type == "caption")?;
+    flattened_contents_text(tree, caption)
 }
 
 /// The subtree flattened to the string a role that names itself from its
@@ -827,9 +943,11 @@ struct AccessibilityProps<'a> {
     required: Option<bool>,
     invalid: Option<gpui::accesskit::Invalid>,
     expanded: Option<bool>,
+    controls: Option<&'a str>,
     current: Option<gpui::accesskit::AriaCurrent>,
     live: Option<gpui::Live>,
     atomic: Option<bool>,
+    modal: Option<bool>,
     selected: Option<bool>,
     value: Option<&'a str>,
     value_min: Option<f64>,
@@ -843,6 +961,7 @@ struct AccessibilityProps<'a> {
     level: Option<usize>,
     row_index: Option<usize>,
     column_index: Option<usize>,
+    sort_direction: Option<gpui::accesskit::SortDirection>,
     row_count: Option<usize>,
     column_count: Option<usize>,
     row_span: Option<usize>,
@@ -857,7 +976,7 @@ impl<'a> AccessibilityProps<'a> {
         // does in Chromium.
         let range = crate::custom_elements::range_input::range_values(element);
         Self {
-            role: resolved_role(element),
+            role: resolved_role(tree, element),
             label: element
                 .custom_props
                 .get("ariaLabel")
@@ -911,6 +1030,10 @@ impl<'a> AccessibilityProps<'a> {
                 .custom_props
                 .get("ariaExpanded")
                 .and_then(parse_booleanish),
+            controls: element
+                .custom_props
+                .get("ariaControls")
+                .and_then(serde_json::Value::as_str),
             current: element
                 .custom_props
                 .get("ariaCurrent")
@@ -922,6 +1045,10 @@ impl<'a> AccessibilityProps<'a> {
             atomic: element
                 .custom_props
                 .get("ariaAtomic")
+                .and_then(parse_booleanish),
+            modal: element
+                .custom_props
+                .get("ariaModal")
                 .and_then(parse_booleanish),
             selected: element
                 .custom_props
@@ -951,10 +1078,24 @@ impl<'a> AccessibilityProps<'a> {
             level: positive_integer(element.custom_props.get("ariaLevel")),
             row_index: positive_integer(element.custom_props.get("ariaRowIndex")),
             column_index: positive_integer(element.custom_props.get("ariaColIndex")),
+            sort_direction: element
+                .custom_props
+                .get("ariaSort")
+                .and_then(parse_aria_sort),
             row_count: positive_integer(element.custom_props.get("ariaRowCount")),
             column_count: positive_integer(element.custom_props.get("ariaColCount")),
-            row_span: positive_integer(element.custom_props.get("ariaRowSpan")),
-            column_span: positive_integer(element.custom_props.get("ariaColSpan")),
+            row_span: positive_integer(
+                element
+                    .custom_props
+                    .get("rowSpan")
+                    .or_else(|| element.custom_props.get("ariaRowSpan")),
+            ),
+            column_span: positive_integer(
+                element
+                    .custom_props
+                    .get("colSpan")
+                    .or_else(|| element.custom_props.get("ariaColSpan")),
+            ),
             disabled: is_action_disabled(element),
         }
     }
@@ -1050,8 +1191,11 @@ pub(crate) fn has_semantics(element: &RetainedElement) -> bool {
         .any(|key| is_accessibility_prop(key))
 }
 
-pub(crate) fn role_supports_name_from_contents(element: &RetainedElement) -> bool {
-    resolved_role(element).is_some_and(|role| role.name_from_contents)
+pub(crate) fn role_supports_name_from_contents(
+    tree: &RetainedTree,
+    element: &RetainedElement,
+) -> bool {
+    resolved_role(tree, element).is_some_and(|role| role.name_from_contents)
 }
 
 pub(crate) fn is_native_disabled(element: &RetainedElement) -> bool {
@@ -1163,7 +1307,22 @@ fn roleless_reason(property: &str) -> &'static str {
 }
 
 fn supports_accessibility_host(element_type: &str) -> bool {
-    matches!(element_type, "div" | "text" | "input" | "textarea" | "img")
+    matches!(
+        element_type,
+        "div"
+            | "text"
+            | "input"
+            | "textarea"
+            | "img"
+            | "table"
+            | "caption"
+            | "thead"
+            | "tbody"
+            | "tfoot"
+            | "tr"
+            | "th"
+            | "td"
+    )
 }
 
 /// Element types whose accessibility declaration reaches an AccessKit node.
@@ -1303,7 +1462,7 @@ pub(crate) fn element_problems(
 ) -> Vec<AccessibilityProblem> {
     let mut problems = Vec::new();
     let role_value = element.custom_props.get("role");
-    let role = resolved_role(element);
+    let role = resolved_role(tree, element);
     let explicit = role_value.and_then(AccessibilityRole::parse);
 
     if has_semantics(element)
@@ -1350,6 +1509,7 @@ pub(crate) fn element_problems(
             | "ariaLabelledBy"
             | "ariaDescribedBy"
             | "ariaRoleDescription" => !value.is_string(),
+            "ariaControls" => !value.is_string(),
             "ariaHasPopup" => parse_has_popup(value).is_none(),
             "ariaChecked" | "ariaPressed" => {
                 !(value.is_boolean() || value.as_str() == Some("mixed"))
@@ -1363,8 +1523,12 @@ pub(crate) fn element_problems(
                     ))
             }
             "ariaCurrent" => parse_aria_current(value).is_none(),
+            "ariaSort" => !matches!(
+                value.as_str(),
+                Some("ascending" | "descending" | "other" | "none")
+            ),
             "ariaLive" => parse_aria_live(value).is_none(),
-            "ariaExpanded" | "ariaSelected" | "ariaAtomic" | "ariaDisabled" | "ariaHidden"
+            "ariaExpanded" | "ariaSelected" | "ariaAtomic" | "ariaModal" | "ariaDisabled" | "ariaHidden"
             | "ariaReadOnly" | "ariaRequired" => parse_booleanish(value).is_none(),
             "visuallyHidden" => VisuallyHiddenMode::parse(value).is_none(),
             "disabled" => !(value.is_boolean() || value.is_string()),
@@ -1383,7 +1547,9 @@ pub(crate) fn element_problems(
                 "ariaHasPopup" => {
                     "a boolean or one of \"true\", \"false\", \"menu\", \"listbox\", \"tree\", \"grid\", or \"dialog\""
                 }
-                "ariaLabelledBy" | "ariaDescribedBy" => "a string of space-separated element ids",
+                "ariaLabelledBy" | "ariaDescribedBy" | "ariaControls" => {
+                    "a string of space-separated element ids"
+                }
                 "ariaChecked" | "ariaPressed" => "a boolean or \"mixed\"",
                 "ariaOrientation" => "one of \"horizontal\" or \"vertical\"",
                 "ariaInvalid" => {
@@ -1392,7 +1558,9 @@ pub(crate) fn element_problems(
                 "ariaCurrent" => {
                     "one of \"page\", \"step\", \"location\", \"date\", \"time\", \"true\", or \"false\""
                 }
+                "ariaSort" => "one of \"ascending\", \"descending\", \"other\", or \"none\"",
                 "ariaLive" => "one of \"off\", \"polite\", or \"assertive\"",
+                "ariaModal" => "a boolean or \"true\" or \"false\"",
                 "ariaValueMin" | "ariaValueMax" | "ariaValueNow" => "a finite number",
                 "ariaLevel"
                 | "ariaRowIndex"
@@ -1467,6 +1635,7 @@ pub(crate) fn element_problems(
                 | "ariaCurrent"
                 | "ariaLive"
                 | "ariaAtomic"
+                | "ariaModal"
                 | "ariaSelected"
                 | "ariaValueText"
                 | "ariaValueMin"
@@ -1649,6 +1818,7 @@ where
                 .filter(|_| props.supports("ariaLabel"))
                 .map(str::to_owned)
                 .or(explicit_label)
+                .or_else(|| table_caption_text(tree, element))
                 .or_else(|| text.name_from_contents.map(str::to_owned))
                 .or_else(|| text.placeholder.map(str::to_owned))
                 .or_else(|| live_projection_name.map(str::to_owned))
@@ -1698,6 +1868,9 @@ where
     if let Some(expanded) = props.expanded.filter(|_| props.supports("ariaExpanded")) {
         el = el.aria_expanded(expanded);
     }
+    if let Some(controls) = props.controls {
+        el = el.aria_controls(controls.split_whitespace().map(str::to_owned));
+    }
     if let Some(current) = props.current.filter(|_| props.supports("ariaCurrent")) {
         el = el.aria_current(current);
     }
@@ -1710,6 +1883,9 @@ where
         .filter(|_| props.supports("ariaAtomic"))
     {
         el = el.aria_atomic(atomic);
+    }
+    if let Some(modal) = props.modal.filter(|_| props.supports("ariaModal")) {
+        el = el.aria_modal(modal);
     }
     if let Some(selected) = props.selected.filter(|_| props.supports("ariaSelected")) {
         el = el.aria_selected(selected);
@@ -1754,6 +1930,9 @@ where
         .filter(|_| props.supports("ariaColIndex"))
     {
         el = el.aria_column_index(index);
+    }
+    if let Some(direction) = props.sort_direction.filter(|_| props.supports("ariaSort")) {
+        el = el.aria_sort(direction);
     }
     if let Some(count) = props.row_count.filter(|_| props.supports("ariaRowCount")) {
         el = el.aria_row_count(count);
@@ -2017,19 +2196,19 @@ mod tests {
     fn resolves_the_role_a_host_type_or_a_name_implies() {
         let mut input = RetainedElement::new(1, "input".to_string(), 1);
         assert_eq!(
-            resolved_role(&input).map(|role| role.role),
+            resolved_role(&detached_tree(), &input).map(|role| role.role),
             Some(gpui::Role::TextInput)
         );
 
         let textarea = RetainedElement::new(2, "textarea".to_string(), 1);
         assert_eq!(
-            resolved_role(&textarea).map(|role| role.role),
+            resolved_role(&detached_tree(), &textarea).map(|role| role.role),
             Some(gpui::Role::MultilineTextInput)
         );
 
         input.custom_props.insert("role".into(), "searchbox".into());
         assert_eq!(
-            resolved_role(&input).map(|role| role.role),
+            resolved_role(&detached_tree(), &input).map(|role| role.role),
             Some(gpui::Role::SearchInput)
         );
 
@@ -2038,7 +2217,7 @@ mod tests {
             .custom_props
             .insert("ariaLabel".into(), "Ledger".into());
         assert_eq!(
-            resolved_role(&labelled).map(|role| role.role),
+            resolved_role(&detached_tree(), &labelled).map(|role| role.role),
             Some(gpui::Role::GenericContainer)
         );
 
@@ -2047,7 +2226,7 @@ mod tests {
             .custom_props
             .insert("ariaDescribedBy".into(), "hint".into());
         assert_eq!(
-            resolved_role(&described).map(|role| role.role),
+            resolved_role(&detached_tree(), &described).map(|role| role.role),
             Some(gpui::Role::GenericContainer)
         );
 
@@ -2058,16 +2237,16 @@ mod tests {
         presentational
             .custom_props
             .insert("ariaLabel".into(), "x".into());
-        assert_eq!(resolved_role(&presentational).map(|role| role.role), None);
+        assert_eq!(resolved_role(&detached_tree(), &presentational).map(|role| role.role), None);
 
         let mut empty_label = RetainedElement::new(6, "div".to_string(), 1);
         empty_label
             .custom_props
             .insert("ariaLabel".into(), "".into());
-        assert_eq!(resolved_role(&empty_label).map(|role| role.role), None);
+        assert_eq!(resolved_role(&detached_tree(), &empty_label).map(|role| role.role), None);
 
         let bare = RetainedElement::new(7, "div".to_string(), 1);
-        assert_eq!(resolved_role(&bare).map(|role| role.role), None);
+        assert_eq!(resolved_role(&detached_tree(), &bare).map(|role| role.role), None);
     }
 
     #[test]
@@ -2126,7 +2305,7 @@ mod tests {
             .copied()
             .collect::<std::collections::HashSet<_>>();
 
-        assert_eq!(SUPPORTED_ACCESSIBILITY_ROLE_NAMES.len(), 129);
+        assert_eq!(SUPPORTED_ACCESSIBILITY_ROLE_NAMES.len(), 130);
         assert_eq!(unique.len(), SUPPORTED_ACCESSIBILITY_ROLE_NAMES.len());
         for name in SUPPORTED_ACCESSIBILITY_ROLE_NAMES {
             assert!(

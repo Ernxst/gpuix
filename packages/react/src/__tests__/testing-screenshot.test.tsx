@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest"
 
 import { createTestRoot, isNativeTestRendererAvailable, type TestRoot } from "../testing.js"
 import { configureScreenshots, gpuixMatchers, type GpuixMatchers } from "../testing-expect.js"
-import { decodePng, readPngSize } from "../testing-png.js"
+import { cropImage, decodePng, readPngSize } from "../testing-png.js"
 import {
   decideScreenshotOutcome,
   sanitizeArg,
@@ -32,8 +32,10 @@ import { withNewGoldenWrites } from "./test-utils.js"
 expect.extend(gpuixMatchers)
 
 declare module "vitest" {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  interface Matchers<T = any> extends GpuixMatchers<T> {}
+  interface Matchers<
+    R extends void | Promise<void> = void | Promise<void>,
+    T = unknown,
+  > extends GpuixMatchers<R> {}
 }
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
@@ -84,10 +86,11 @@ function scratchDirectory(): string {
 
 /** A test root and a temp directory, both released when `body` returns. */
 async function withScene(
-  body: (screen: TestRoot, directory: string) => Promise<void>
+  body: (screen: TestRoot, directory: string) => Promise<void>,
+  options: { scaleFactor?: number } = {}
 ): Promise<void> {
   const directory = scratchDirectory()
-  const screen = createTestRoot({ width: 200, height: 120 })
+  const screen = createTestRoot({ width: 200, height: 120, ...options })
   try {
     await body(screen, directory)
   } finally {
@@ -263,10 +266,11 @@ describeNative("toMatchScreenshot", () => {
       await expect(mark).toMatchScreenshot(options)
 
       const { scaleFactor } = screen.renderer.getWindowSize()
+      expect(scaleFactor).toBe(2)
       const image = decodePng(readFileSync(golden), golden)
       expect({ width: image.width, height: image.height }).toEqual({
-        width: 16 * scaleFactor,
-        height: 16 * scaleFactor,
+        width: 32,
+        height: 32,
       })
 
       // The outermost ring of pixels is the border, the centre is the fill.
@@ -284,7 +288,29 @@ describeNative("toMatchScreenshot", () => {
         expect(rgba(image.width - 1, y)).toEqual(green)
       }
       expect(rgba(image.width / 2, image.height / 2)).toEqual([255, 0, 0, 255])
-    })
+
+      // The native capture must contain the same pixels the previous full-window
+      // capture and JavaScript crop produced for these independently rounded edges.
+      const wholeWindow = path.join(directory, "whole-window.png")
+      screen.renderer.captureScreenshot(wholeWindow)
+      const fullImage = decodePng(readFileSync(wholeWindow), wholeWindow)
+      const rect = mark.getBoundingClientRect()
+      const left = Math.max(0, Math.round(rect.left * scaleFactor))
+      const top = Math.max(0, Math.round(rect.top * scaleFactor))
+      const right = Math.min(fullImage.width, Math.round(rect.right * scaleFactor))
+      const bottom = Math.min(fullImage.height, Math.round(rect.bottom * scaleFactor))
+      const previousCrop = cropImage(fullImage, {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+      })
+      expect({ width: previousCrop.width, height: previousCrop.height }).toEqual({
+        width: image.width,
+        height: image.height,
+      })
+      expect(previousCrop.data).toEqual(image.data)
+    }, { scaleFactor: 2 })
   })
 
   it("fails on a dimension mismatch instead of skipping", async () => {
@@ -524,13 +550,19 @@ describeNative("toMatchScreenshot", () => {
     })
   })
 
-  it("refuses a negated assertion and a receiver it cannot capture", async () => {
+  it("supports negated assertions and rejects a receiver it cannot capture", async () => {
     await withScene(async (screen, directory) => {
       screen.render(<Scene />)
       const options = { resolveScreenshotPath: () => path.join(directory, "tile.png") }
 
+      await withNewGoldenWrites(() =>
+        expect(expect(screen).toMatchScreenshot(options)).rejects.toThrowError(/a new one was created/)
+      )
+      screen.render(<Scene color={BLUE} />)
+      await expect(screen).not.toMatchScreenshot(options)
+      screen.render(<Scene />)
       await expect(expect(screen).not.toMatchScreenshot(options)).rejects.toThrowError(
-        `'toMatchScreenshot' cannot be used with "not"`
+        "Screenshot matches the stored reference, but was expected to differ."
       )
       await expect(expect({ nothing: true }).toMatchScreenshot(options)).rejects.toThrowError(
         /toMatchScreenshot expects a render result, a TestRenderer, or a TestElement/

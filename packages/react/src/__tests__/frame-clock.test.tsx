@@ -174,6 +174,37 @@ describe("requestAnimationFrame", () => {
     expect(timestamps[0]).toBeCloseTo(PERFORMANCE_ORIGIN_MS + 7, 8)
   })
 
+  it("keeps frame timestamps consistent when a pending frame is drawn before an advance", () => {
+    vi.spyOn(performance, "now").mockReturnValue(PERFORMANCE_ORIGIN_MS)
+    root = createTestRoot()
+    root.render(<text>pending frame</text>)
+    const timestamps: number[] = []
+
+    root.renderer.requestFrame((timestamp) => timestamps.push(timestamp))
+    root.renderer.drawPendingFrame()
+    root.renderer.requestFrame((timestamp) => timestamps.push(timestamp))
+    root.renderer.advanceAsyncClock(16)
+
+    expect(timestamps).toEqual([PERFORMANCE_ORIGIN_MS + 16, PERFORMANCE_ORIGIN_MS + 16])
+  })
+
+  for (const asyncTaskMode of ["eager", "manual"] as const) {
+    it(`delivers a frame requested before a pending draw on the next advance in ${asyncTaskMode} mode`, async () => {
+      vi.spyOn(performance, "now").mockReturnValue(PERFORMANCE_ORIGIN_MS)
+      root = createTestRoot({ asyncTaskMode })
+      root.render(<text>pending frame</text>)
+      const timestamps: number[] = []
+
+      requestAnimationFrame((timestamp) => timestamps.push(timestamp))
+      await settleFrameRequest()
+      root.renderer.drawPendingFrame()
+      expect(timestamps).toEqual([])
+
+      root.renderer.advanceAsyncClock(16)
+      expect(timestamps).toEqual([PERFORMANCE_ORIGIN_MS + 16])
+    })
+  }
+
   it("keeps delivering direct frame requests after one throws, and still dispatches events", () => {
     root = createTestRoot()
     root.render(<text>direct throw</text>)

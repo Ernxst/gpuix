@@ -1,6 +1,6 @@
 /// Fixture for `testing-per-file-isolation.test.tsx`. First asserts that
-/// `01-menu.fixture.tsx`'s custom menu action is gone from this file's fresh
-/// window — proving window disposal happened on its own, before any
+/// `01-menu.fixture.tsx`'s custom menu action is gone from this file's reset
+/// window — proving the window reset happened on its own, before any
 /// `configureTestWindow` / `configureScreenshots` call in this file could be
 /// blamed for it. Then, in `afterAll`, dirties both module-level defaults for
 /// `03-verify.fixture.tsx` to find restored.

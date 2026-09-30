@@ -17,6 +17,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use image::ImageEncoder;
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
 
@@ -30,167 +31,17 @@ use crate::renderer::{
     dispatch_application_menu_action, drain_style_diagnostics, first_canvas_diagnostic_message,
     forget_canvas_diagnostics, fresh_canvas_diagnostics, has_application_menus,
     init_application_menu_support, install_application_menus, parse_canvas_image_source,
-    parse_debug_frame_overlay_mode, set_application_menus, take_style_diagnostics_for_reporting,
-    to_element_id, validate_canvas_target, CanvasImageLoadState, DebugFrameOverlayStats,
-    ElementInteractionState, EventCallback, FocusDirection, FrameTimestampOrigin,
-    GpuixStyleDiagnostic, GpuixView, MenuSpec, PendingStyleDiagnostics, WindowSize,
+    parse_debug_frame_overlay_mode, reset_application_menus, set_application_menus,
+    take_style_diagnostics_for_reporting, to_element_id, validate_canvas_target,
+    CanvasImageLoadState, DebugFrameOverlayStats, ElementInteractionState, EventCallback,
+    FocusDirection, FrameTimestampOrigin, GpuixStyleDiagnostic, GpuixView, InteractiveStyleState,
+    MenuSpec, PendingStyleDiagnostics, WindowSize,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
 
 #[cfg(all(target_os = "macos", feature = "test-support"))]
-use metal::foreign_types::ForeignType;
-#[cfg(all(target_os = "macos", feature = "test-support"))]
-use objc::{sel, sel_impl};
-
-#[cfg(all(target_os = "macos", feature = "test-support"))]
-struct TestGpuCanvasResource {
-    texture: Arc<wgpu::Texture>,
-    released: Arc<AtomicU64>,
-}
-
-#[cfg(all(target_os = "macos", feature = "test-support"))]
-impl Drop for TestGpuCanvasResource {
-    fn drop(&mut self) {
-        self.released.fetch_add(1, Ordering::Relaxed);
-    }
-}
-
-/// GPU-only producer state for the narrow visual-test canvas seam. The
-/// presentation store owns the matching `SurfaceSource`; this record owns the
-/// producer queue while the element remains mounted.
-#[cfg(all(target_os = "macos", feature = "test-support"))]
-struct TestGpuCanvas {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    metal_texture: metal::Texture,
-    resource: Arc<TestGpuCanvasResource>,
-    width: u32,
-    height: u32,
-}
-
-#[cfg(all(target_os = "macos", feature = "test-support"))]
-impl TestGpuCanvas {
-    fn new(width: u32, height: u32, released: Arc<AtomicU64>) -> Result<Self> {
-        if width == 0 || height == 0 {
-            return Err(Error::from_reason(
-                "Test GPU canvas dimensions must be positive",
-            ));
-        }
-
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            force_fallback_adapter: false,
-            ..Default::default()
-        }))
-        .map_err(|error| {
-            Error::from_reason(format!("Test GPU canvas requires a Metal adapter: {error}"))
-        })?;
-        if adapter.get_info().device_type == wgpu::DeviceType::Cpu {
-            return Err(Error::from_reason(
-                "Test GPU canvas requires a hardware Metal adapter, not a CPU fallback",
-            ));
-        }
-        let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))
-            .map_err(|error| {
-                Error::from_reason(format!("Test GPU canvas device creation failed: {error}"))
-            })?;
-        let texture = Arc::new(device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("GPU-IX visual test canvas texture"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Bgra8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        }));
-        let texture_hal = unsafe { texture.as_hal::<wgpu::hal::api::Metal>() }
-            .ok_or_else(|| Error::from_reason("Test GPU canvas texture did not use Metal"))?;
-        let raw = texture_hal.raw_handle() as *const _ as *mut objc::runtime::Object;
-        #[allow(unexpected_cfgs)]
-        let retained: *mut objc::runtime::Object = unsafe { objc::msg_send![raw, retain] };
-        if retained.is_null() {
-            return Err(Error::from_reason(
-                "Test GPU canvas could not retain its Metal texture",
-            ));
-        }
-        let metal_texture = unsafe { metal::Texture::from_ptr(retained.cast()) };
-
-        Ok(Self {
-            device,
-            queue,
-            metal_texture,
-            resource: Arc::new(TestGpuCanvasResource { texture, released }),
-            width,
-            height,
-        })
-    }
-
-    fn present(&self, rgba: u32) -> Result<gpui::SurfaceSource> {
-        let red = ((rgba >> 24) & 0xff) as f64 / 255.0;
-        let green = ((rgba >> 16) & 0xff) as f64 / 255.0;
-        let blue = ((rgba >> 8) & 0xff) as f64 / 255.0;
-        let alpha = (rgba & 0xff) as f64 / 255.0;
-        let view = self.resource.texture.create_view(&Default::default());
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("GPU-IX visual test canvas frame"),
-            });
-        {
-            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("clear GPU-IX visual test canvas frame"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    depth_slice: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: red,
-                            g: green,
-                            b: blue,
-                            a: alpha,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-        }
-        self.queue.submit([encoder.finish()]);
-        self.device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .map_err(|error| {
-                Error::from_reason(format!("Test GPU canvas producer failed: {error}"))
-            })?;
-
-        let surface = gpui_apple::metal_renderer::MetalTextureSurface::new(
-            self.metal_texture.to_owned(),
-            1,
-            self.resource.clone(),
-        );
-        surface.ready_event.set_signaled_value(1);
-        Ok(surface.surface_source(gpui::size(
-            gpui::DevicePixels(self.width as i32),
-            gpui::DevicePixels(self.height as i32),
-        )))
-    }
-}
-
-#[cfg(all(target_os = "macos", feature = "test-support"))]
-#[derive(Default)]
-struct TestGpuCanvasStore {
-    canvases: Mutex<rustc_hash::FxHashMap<u64, TestGpuCanvas>>,
-    released: Arc<AtomicU64>,
-}
+use crate::webgpu_canvas::WebGpuCanvasStore;
 
 #[napi(object)]
 pub struct TestGpuCanvasState {
@@ -199,40 +50,21 @@ pub struct TestGpuCanvasState {
     pub released: u32,
 }
 
-#[cfg(all(target_os = "macos", feature = "test-support"))]
-impl TestGpuCanvasStore {
-    fn install(&self, id: u64, width: u32, height: u32, rgba: u32) -> Result<gpui::SurfaceSource> {
-        let canvas = TestGpuCanvas::new(width, height, self.released.clone())?;
-        let source = canvas.present(rgba)?;
-        self.canvases.lock().unwrap().insert(id, canvas);
-        Ok(source)
-    }
+#[napi(object)]
+pub struct ScreenshotCaptureTimings {
+    pub capture_ms: f64,
+    pub crop_ms: f64,
+    pub encode_ms: f64,
+    pub write_ms: f64,
+}
 
-    fn advance(&self, id: u64, rgba: u32) -> Result<gpui::SurfaceSource> {
-        self.canvases
-            .lock()
-            .unwrap()
-            .get(&id)
-            .ok_or_else(|| {
-                Error::from_reason(format!("No test GPU canvas is installed for element {id}"))
-            })?
-            .present(rgba)
-    }
-
-    fn remove(&self, ids: &[u64]) {
-        let mut canvases = self.canvases.lock().unwrap();
-        for id in ids {
-            canvases.remove(id);
-        }
-    }
-
-    fn state(&self, presentations: u32) -> TestGpuCanvasState {
-        TestGpuCanvasState {
-            installed: self.canvases.lock().unwrap().len() as u32,
-            presentations,
-            released: self.released.load(Ordering::Relaxed) as u32,
-        }
-    }
+#[napi(object)]
+pub struct ScreenshotImageData {
+    pub pixels: Buffer,
+    pub width: u32,
+    pub height: u32,
+    pub capture_ms: f64,
+    pub crop_ms: f64,
 }
 
 // ── Thread-local storage for !Send GPUI types ────────────────────────
@@ -321,6 +153,15 @@ fn dispose_test_state(state_id: u64) {
     let _ = TEST_STATES.try_with(|cell| cell.borrow_mut().remove(&state_id));
 }
 
+/// The application name the test app's menus and view are built with.
+const TEST_APP_NAME: &str = "GPUIX Test";
+
+/// The key bindings every test app starts with, before any menu adds its own.
+fn bind_test_app_keys(cx: &mut gpui::App) {
+    crate::renderer::init_key_bindings(cx);
+    crate::custom_elements::input::init(cx);
+}
+
 /// Default offscreen window size. Matches gpui's `open_offscreen_window_default`,
 /// so a `new TestGpuixRenderer()` with no size behaves exactly as before.
 ///
@@ -389,7 +230,40 @@ fn point_is_inside(bounds: crate::automation::ElementBounds, point: (f64, f64)) 
         && point.1 < bounds.y + bounds.height
 }
 
-fn ancestor_hover_groups(tree: &RetainedTree, element_id: u64) -> Vec<u64> {
+fn crop_screenshot(
+    image: &image::RgbaImage,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> std::result::Result<image::RgbaImage, String> {
+    let left = i64::from(x).max(0);
+    let top = i64::from(y).max(0);
+    let right = (i64::from(x) + i64::from(width)).min(i64::from(image.width()));
+    let bottom = (i64::from(y) + i64::from(height)).min(i64::from(image.height()));
+
+    if width == 0 || height == 0 || right <= left || bottom <= top {
+        return Err(format!(
+            "Crop [x={x}, y={y}, width={width}, height={height}] does not intersect the {}x{} screenshot",
+            image.width(),
+            image.height()
+        ));
+    }
+
+    Ok(image::imageops::crop_imm(
+        image,
+        left as u32,
+        top as u32,
+        (right - left) as u32,
+        (bottom - top) as u32,
+    )
+    .to_image())
+}
+
+/// Ancestor `hoverGroup` sources for `element_id`. `target` mirrors
+/// `hoverWithinGroup`: `None` collects every marked ancestor; `Some(name)`
+/// collects every ancestor whose own `hoverGroup` equals it.
+fn ancestor_hover_groups(tree: &RetainedTree, element_id: u64, target: Option<&str>) -> Vec<u64> {
     let mut groups = Vec::new();
     let mut current = tree
         .elements
@@ -399,13 +273,16 @@ fn ancestor_hover_groups(tree: &RetainedTree, element_id: u64) -> Vec<u64> {
         let Some(element) = tree.elements.get(&id) else {
             break;
         };
-        if element
+        let name = element
             .style
             .as_deref()
-            .and_then(|style| style.hover_group.as_deref())
-            .is_some()
-        {
-            groups.push(id);
+            .and_then(|style| style.hover_group.as_deref());
+        match (target, name) {
+            (Some(target_name), Some(name)) if target_name == name => {
+                groups.push(id);
+            }
+            (None, Some(_)) => groups.push(id),
+            _ => {}
         }
         current = element.parent;
     }
@@ -458,6 +335,12 @@ pub struct ImageComparisonResult {
     pub max_channel_delta: u32,
     pub max_channel_delta_outside_golden_contour: u32,
     pub eroded_geometry_mismatch_ratio: f64,
+}
+
+#[napi(object)]
+pub struct ScreenshotComparisonResult {
+    pub differing_pixel_ratio: f64,
+    pub max_channel_delta: u32,
 }
 
 fn pixels_differ(pixel_a: &[u8], pixel_b: &[u8], tolerance: u8) -> bool {
@@ -612,9 +495,12 @@ pub struct TestGpuixRenderer {
     tree: Arc<Mutex<RetainedTree>>,
     canvas_display_lists: crate::canvas::SharedDisplayLists,
     #[cfg(all(target_os = "macos", feature = "test-support"))]
-    test_gpu_canvases: TestGpuCanvasStore,
+    test_gpu_canvases: WebGpuCanvasStore,
     events: Arc<Mutex<Vec<EventPayload>>>,
-    frame_timestamps: Arc<Mutex<Vec<f64>>>,
+    frame_timestamps: Mutex<Vec<f64>>,
+    /// Test frame requests wait for advance_async_clock, even if another
+    /// renderer operation asks GPUI to simulate a frame first.
+    pending_frame_requests: Mutex<usize>,
     /// Same handle GpuixView paints against, so tests can assert on the live
     /// selection after simulating a drag.
     selection: crate::text::SharedSelection,
@@ -626,6 +512,8 @@ pub struct TestGpuixRenderer {
     /// can observe an asynchronously populated image handle before its repaint;
     /// keeping the drawn pixels is what makes current-frame capture exact.
     manual_frame: Mutex<Option<image::RgbaImage>>,
+    /// Whether GPUI state has advanced beyond the last explicit manual frame.
+    manual_frame_pending: AtomicBool,
     /// The test scheduler's clock advance primitive also runs its task queue.
     /// Manual mode holds `advanceTime` deltas until the explicit drain boundary.
     manual_async_clock_advance: Mutex<Duration>,
@@ -639,6 +527,10 @@ pub struct TestGpuixRenderer {
     /// Whether the test input path has an active simulated external drag, so
     /// subsequent moves use GPUI's Pending event rather than Entered.
     file_drag_active: AtomicBool,
+    /// GPUI's total frame count when `reset_window_state` last ran. GPUI keeps
+    /// that count for the window's lifetime, so the stats report frames drawn
+    /// since this point, which is what a newly opened window would report.
+    debug_frame_overlay_frame_origin: AtomicU64,
 }
 
 #[napi]
@@ -660,7 +552,6 @@ impl TestGpuixRenderer {
         let tree = Arc::new(Mutex::new(RetainedTree::new()));
         let canvas_display_lists = crate::canvas::SharedDisplayLists::default();
         let events: Arc<Mutex<Vec<EventPayload>>> = Arc::new(Mutex::new(Vec::new()));
-        let frame_timestamps: Arc<Mutex<Vec<f64>>> = Arc::new(Mutex::new(Vec::new()));
 
         // Event callback: push to Vec instead of ThreadsafeFunction.
         let events_clone = events.clone();
@@ -684,10 +575,9 @@ impl TestGpuixRenderer {
         };
         cx.update(|cx| {
             cx.set_http_client(default_http_client());
-            crate::renderer::init_key_bindings(cx);
-            crate::custom_elements::input::init(cx);
+            bind_test_app_keys(cx);
             init_application_menu_support(cx, event_callback.clone());
-            install_application_menus(cx, "GPUIX Test", None).expect("default test menu is valid");
+            install_application_menus(cx, TEST_APP_NAME, None).expect("default test menu is valid");
         });
 
         // Open an offscreen window at (-10000, -10000) with the same GpuixView
@@ -700,7 +590,7 @@ impl TestGpuixRenderer {
                         canvas_display_lists_for_view,
                         callback_clone,
                         Arc::new(Mutex::new(event_callback.clone())),
-                        "GPUIX Test".to_string(),
+                        TEST_APP_NAME.to_string(),
                         selection_clone,
                         image_network_policy_for_view,
                         cx,
@@ -749,13 +639,15 @@ impl TestGpuixRenderer {
             tree,
             canvas_display_lists,
             #[cfg(all(target_os = "macos", feature = "test-support"))]
-            test_gpu_canvases: TestGpuCanvasStore::default(),
+            test_gpu_canvases: WebGpuCanvasStore::default(),
             events,
-            frame_timestamps,
+            frame_timestamps: Mutex::new(Vec::new()),
+            pending_frame_requests: Mutex::new(0),
             selection,
             image_network_policy,
             auto_drain_async_tasks: AtomicBool::new(true),
             manual_frame: Mutex::new(None),
+            manual_frame_pending: AtomicBool::new(false),
             manual_async_clock_advance: Mutex::new(Duration::ZERO),
             strict_styles: AtomicBool::new(true),
             style_diagnostics: Mutex::new(PendingStyleDiagnostics::default()),
@@ -763,6 +655,7 @@ impl TestGpuixRenderer {
             animation_frame_timestamp_origin: Arc::new(Mutex::new(None)),
             active_pointer_origin: Mutex::new(None),
             file_drag_active: AtomicBool::new(false),
+            debug_frame_overlay_frame_origin: AtomicU64::new(0),
         })
     }
 
@@ -773,6 +666,59 @@ impl TestGpuixRenderer {
         dispose_test_state(self.state_id);
     }
 
+    /// Return the window-level state a test can leave behind, and that outlives
+    /// the React tree, to what a newly opened window has: the keymap and
+    /// application menus, the debug frame overlay's mode and statistics, a
+    /// held or captured pointer, an OS file drag still over the window,
+    /// requested frames, native WebGPU devices and their resources, and the
+    /// frames, diagnostics and manual-mode pixels this renderer buffers.
+    ///
+    /// Events the reset produces, such as the `pointerCancel` for a held
+    /// pointer, are queued like any other; the caller drains them.
+    #[napi]
+    pub fn reset_window_state(&self) -> Result<()> {
+        let file_drag_active = self.file_drag_active.swap(false, Ordering::Relaxed);
+        let frames = with_test_state(self.state_id, |cx, window, view| {
+            if file_drag_active {
+                self.simulate_event(cx, window, gpui::FileDropEvent::Exited)?;
+            }
+            cx.update(|cx| {
+                cx.clear_key_bindings();
+                bind_test_app_keys(cx);
+                reset_application_menus(cx, TEST_APP_NAME)
+            })
+            .map_err(Error::from_reason)?;
+            let view = view.clone();
+            let frames = cx
+                .update_window(window, |_, window, app| {
+                    view.update(app, |view, _cx| view.cancel_pointer_sequence(window));
+                    window.release_pointer();
+                    window.set_debug_frame_overlay_mode(gpui::DebugFrameOverlayMode::Hidden);
+                    window.reset_debug_frame_overlay_stats();
+                    window.debug_frame_overlay_stats().frames
+                })
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            self.drain_async_tasks_if_eager(cx);
+            Ok(frames)
+        })?;
+        self.debug_frame_overlay_frame_origin
+            .store(frames, Ordering::Relaxed);
+        *self.active_pointer_origin.lock().unwrap() = None;
+        self.frame_timestamps.lock().unwrap().clear();
+        *self.pending_frame_requests.lock().unwrap() = 0;
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        self.test_gpu_canvases.reset();
+        *self.animation_frame_timestamp_origin.lock().unwrap() = None;
+        self.style_diagnostics.lock().unwrap().clear();
+        self.canvas_diagnostic_members.lock().unwrap().clear();
+        self.manual_frame.lock().unwrap().take();
+        self.manual_frame_pending.store(false, Ordering::Relaxed);
+        *self.manual_async_clock_advance.lock().unwrap() = Duration::ZERO;
+        // Draw the reset window, empty as a newly opened one is after its
+        // first frame, which its statistics count.
+        self.flush()
+    }
+
     /// Preserve eager test-root behavior by default, while allowing callers to
     /// make `advanceAsyncClock` the only operation that drains queued tasks.
     #[napi]
@@ -781,6 +727,7 @@ impl TestGpuixRenderer {
             .store(enabled, Ordering::Relaxed);
         if enabled {
             self.manual_frame.lock().unwrap().take();
+            self.manual_frame_pending.store(false, Ordering::Relaxed);
             *self.manual_async_clock_advance.lock().unwrap() = Duration::ZERO;
         }
     }
@@ -791,8 +738,21 @@ impl TestGpuixRenderer {
 
     fn drain_async_tasks_if_eager(&self, cx: &mut gpui::VisualTestAppContext) {
         if self.auto_drains_async_tasks() {
-            cx.run_until_parked();
+            Self::run_tasks_without_auto_draw(cx);
+            // A read can enter with a clean window, then have the drain load
+            // an intrinsic image. Finish that repaint before returning the
+            // read, as GPUI's automatic test draw did before batching.
+            cx.update(|_| ());
         }
+    }
+
+    /// GPUI's test mode otherwise draws a dirty window after each task's
+    /// effect flush. Keep those invalidations, then let the caller draw once
+    /// after the executor parks.
+    fn run_tasks_without_auto_draw(cx: &mut gpui::VisualTestAppContext) {
+        cx.set_auto_draw(false);
+        cx.run_until_parked();
+        cx.set_auto_draw(true);
     }
 
     fn remember_manual_frame(
@@ -808,6 +768,7 @@ impl TestGpuixRenderer {
             .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {e}")))?
             .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {e}")))?;
         *self.manual_frame.lock().unwrap() = Some(image);
+        self.manual_frame_pending.store(false, Ordering::Relaxed);
         Ok(())
     }
 
@@ -818,7 +779,18 @@ impl TestGpuixRenderer {
         event: E,
     ) -> Result<()> {
         if self.auto_drains_async_tasks() {
-            cx.simulate_event(window, event);
+            cx.update_window(window, |_, window, app| {
+                if window.is_dirty() {
+                    window.draw(app).clear(app);
+                }
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.update_window(window, |_, window, app| {
+                window.dispatch_event(event.to_platform_input(), app);
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            Self::run_tasks_without_auto_draw(cx);
+            Self::draw_if_dirty(cx, window)?;
             return Ok(());
         }
         cx.update_window(window, |_, window, app| {
@@ -827,18 +799,15 @@ impl TestGpuixRenderer {
         .map_err(|error| Error::from_reason(error.to_string()))
     }
 
-    fn dispatch_keystroke(
-        &self,
+    /// Draw the window only if something invalidated it since the last draw.
+    fn draw_if_dirty(
         cx: &mut gpui::VisualTestAppContext,
         window: gpui::AnyWindowHandle,
-        keystroke: gpui::Keystroke,
     ) -> Result<()> {
-        if self.auto_drains_async_tasks() {
-            cx.dispatch_keystroke(window, keystroke);
-            return Ok(());
-        }
         cx.update_window(window, |_, window, app| {
-            window.dispatch_keystroke(keystroke, app);
+            if window.is_dirty() {
+                window.draw(app).clear(app);
+            }
         })
         .map_err(|error| Error::from_reason(error.to_string()))
     }
@@ -862,19 +831,20 @@ impl TestGpuixRenderer {
     /// Microseconds spent rebuilding the element tree since the last call,
     /// cleared on read. Whatever a draw costs beyond this is layout, prepaint
     /// and paint, which is the split #480 turns on.
-    /// Whether the window still needs drawing.
+    /// Whether the current visible frame is stale.
     ///
-    /// A tree at rest reports `false` after a draw, so `drawPendingFrame` is a
-    /// no-op. Anything that re-dirties the window every frame makes a page pay
-    /// a second full draw per update, which is invisible to a timing harness
-    /// that only calls `flush`. Reading this needs no debug overlay, which
-    /// would itself dirty the window.
+    /// Eager mode reports GPUI's window dirtiness. Manual mode also reports
+    /// state changes that have not reached its last explicitly captured frame.
+    /// Reading this needs no debug overlay, which would itself dirty the window.
     #[napi]
     pub fn is_window_dirty(&self) -> Result<bool> {
-        with_test_state(self.state_id, |cx, window, _view| {
+        let window_dirty = with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, |_, window, _app| window.is_dirty())
                 .map_err(|error| Error::from_reason(error.to_string()))
-        })
+        })?;
+        Ok(window_dirty
+            || (!self.auto_drains_async_tasks()
+                && self.manual_frame_pending.load(Ordering::Relaxed)))
     }
 
     /// Microseconds spent re-deriving gpui styles from `StyleDesc` since the
@@ -978,14 +948,62 @@ impl TestGpuixRenderer {
     }
 
     #[napi]
-    pub fn apply_canvas_command_delta(&self,id:f64,ops:Uint32Array,operands:Float64Array,strings:Vec<String>)->Result<()>{self.surface_canvas_preparation_diagnostics()?;let id=to_element_id(id)?;let tree=self.tree.lock().unwrap();validate_canvas_target(&tree,id).map_err(Error::from_reason)?;let decoded=crate::canvas::decode_delta(&self.canvas_display_lists,id,ops.as_ref(),operands.as_ref(),&strings,canvas_size(&tree,id)).map_err(|e|Error::from_reason(format!("<canvas> element {id}: {e}")))?;let strict=self.strict_styles.load(Ordering::Relaxed);if strict&&!decoded.diagnostics.is_empty(){return Err(Error::from_reason(first_canvas_diagnostic_message(&tree,id,&decoded.diagnostics).unwrap()));}let outcome=crate::canvas::install_decoded_delta(&self.canvas_display_lists,id,decoded);drop(tree);if !strict{self.style_diagnostics.lock().unwrap().extend(fresh_canvas_diagnostics(id,outcome.diagnostics,&self.canvas_diagnostic_members));}if outcome.invalidates{self.request_invalidate()?;}Ok(())}
+    pub fn apply_canvas_command_delta(
+        &self,
+        id: f64,
+        ops: Uint32Array,
+        operands: Float64Array,
+        strings: Vec<String>,
+    ) -> Result<()> {
+        self.surface_canvas_preparation_diagnostics()?;
+        let id = to_element_id(id)?;
+        let tree = self.tree.lock().unwrap();
+        validate_canvas_target(&tree, id).map_err(Error::from_reason)?;
+        let decoded = crate::canvas::decode_delta(
+            &self.canvas_display_lists,
+            id,
+            ops.as_ref(),
+            operands.as_ref(),
+            &strings,
+            canvas_size(&tree, id),
+        )
+        .map_err(|e| Error::from_reason(format!("<canvas> element {id}: {e}")))?;
+        let strict = self.strict_styles.load(Ordering::Relaxed);
+        if strict && !decoded.diagnostics.is_empty() {
+            return Err(Error::from_reason(
+                first_canvas_diagnostic_message(&tree, id, &decoded.diagnostics).unwrap(),
+            ));
+        }
+        let outcome = crate::canvas::install_decoded_delta(&self.canvas_display_lists, id, decoded);
+        drop(tree);
+        if !strict {
+            self.style_diagnostics
+                .lock()
+                .unwrap()
+                .extend(fresh_canvas_diagnostics(
+                    id,
+                    outcome.diagnostics,
+                    &self.canvas_diagnostic_members,
+                ));
+        }
+        if outcome.invalidates {
+            self.request_invalidate()?;
+        }
+        Ok(())
+    }
 
     #[napi]
-    pub fn reset_canvas(&self,id:f64)->Result<()>{let id=to_element_id(id)?;let tree=self.tree.lock().unwrap();validate_canvas_target(&tree,id).map_err(Error::from_reason)?;drop(tree);crate::canvas::reset_canvas(&self.canvas_display_lists,id);self.request_invalidate()}
+    pub fn reset_canvas(&self, id: f64) -> Result<()> {
+        let id = to_element_id(id)?;
+        let tree = self.tree.lock().unwrap();
+        validate_canvas_target(&tree, id).map_err(Error::from_reason)?;
+        drop(tree);
+        crate::canvas::reset_canvas(&self.canvas_display_lists, id);
+        self.request_invalidate()
+    }
 
     /// Install a GPU-only test texture into one live `<canvas>` presentation.
-    /// This exists solely to exercise the retained Metal surface path before a
-    /// browser WebGPU API is exposed.
+    /// This exercises the same retained Metal surface path as production.
     #[napi]
     pub fn install_test_gpu_canvas(
         &self,
@@ -998,7 +1016,10 @@ impl TestGpuixRenderer {
         validate_canvas_target(&self.tree.lock().unwrap(), id).map_err(Error::from_reason)?;
         #[cfg(all(target_os = "macos", feature = "test-support"))]
         {
-            let source = self.test_gpu_canvases.install(id, width, height, rgba)?;
+            let source = self
+                .test_gpu_canvases
+                .install(id, width, height, rgba)
+                .map_err(|error| Error::from_reason(error.to_string()))?;
             self.canvas_display_lists.install_presentation(id, source);
             return self.request_invalidate();
         }
@@ -1018,7 +1039,10 @@ impl TestGpuixRenderer {
         let id = to_element_id(id)?;
         #[cfg(all(target_os = "macos", feature = "test-support"))]
         {
-            let source = self.test_gpu_canvases.advance(id, rgba)?;
+            let source = self
+                .test_gpu_canvases
+                .advance(id, rgba)
+                .map_err(|error| Error::from_reason(error.to_string()))?;
             self.canvas_display_lists.install_presentation(id, source);
             return self.request_invalidate();
         }
@@ -1036,9 +1060,11 @@ impl TestGpuixRenderer {
     pub fn get_test_gpu_canvas_state(&self) -> TestGpuCanvasState {
         #[cfg(all(target_os = "macos", feature = "test-support"))]
         {
-            return self
-                .test_gpu_canvases
-                .state(self.canvas_display_lists.presentation_count());
+            return TestGpuCanvasState {
+                installed: self.test_gpu_canvases.installed_count(),
+                presentations: self.canvas_display_lists.presentation_count(),
+                released: self.test_gpu_canvases.released_count(),
+            };
         }
         #[cfg(not(all(target_os = "macos", feature = "test-support")))]
         {
@@ -1047,6 +1073,263 @@ impl TestGpuixRenderer {
                 presentations: 0,
                 released: 0,
             }
+        }
+    }
+
+    /// Create one renderer-owned logical WebGPU device over the shared test producer.
+    #[napi]
+    pub fn create_web_gpu_device(&self) -> Result<f64> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .create_device()
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        Err(Error::from_reason(
+            "Native WebGPU resources require the macOS test-support build",
+        ))
+    }
+
+    /// Destroy a logical WebGPU device and every native resource it owns.
+    #[napi]
+    pub fn destroy_web_gpu_device(&self, device_id: f64) -> Result<()> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .destroy_device(device_id)
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = device_id;
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    /// Compile one WGSL shader module for a logical WebGPU device.
+    #[napi]
+    pub fn create_web_gpu_shader_module(
+        &self,
+        device_id: f64,
+        label: Option<String>,
+        code: String,
+    ) -> Result<f64> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .create_shader_module(device_id, label, code)
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (device_id, label, code);
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    /// Create one logical-device-owned WebGPU buffer.
+    #[napi]
+    pub fn create_web_gpu_buffer(
+        &self,
+        device_id: f64,
+        label: Option<String>,
+        size: f64,
+        usage: u32,
+        initial_data: Uint8Array,
+    ) -> Result<f64> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .create_buffer(device_id, label, size, usage, initial_data.as_ref())
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (device_id, label, size, usage, initial_data);
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    /// Destroy one logical-device-owned WebGPU buffer.
+    #[napi]
+    pub fn destroy_web_gpu_buffer(&self, device_id: f64, buffer_id: f64) -> Result<()> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .destroy_buffer(device_id, buffer_id)
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (device_id, buffer_id);
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    #[napi]
+    pub fn destroy_web_gpu_shader_module(
+        &self,
+        device_id: f64,
+        shader_module_id: f64,
+    ) -> Result<()> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .destroy_shader_module(device_id, shader_module_id)
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (device_id, shader_module_id);
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    #[napi]
+    pub fn destroy_web_gpu_render_pipeline(
+        &self,
+        device_id: f64,
+        render_pipeline_id: f64,
+    ) -> Result<()> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .destroy_render_pipeline(device_id, render_pipeline_id)
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (device_id, render_pipeline_id);
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    /// Queue one copy into a logical-device-owned WebGPU buffer.
+    #[napi]
+    pub fn write_web_gpu_buffer(
+        &self,
+        device_id: f64,
+        buffer_id: f64,
+        offset: f64,
+        data: Uint8Array,
+    ) -> Result<()> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .write_buffer(device_id, buffer_id, offset, data.as_ref())
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (device_id, buffer_id, offset, data);
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    /// Create a triangle-list WebGPU render pipeline with optional vertex layouts.
+    #[napi]
+    pub fn create_web_gpu_render_pipeline(
+        &self,
+        device_id: f64,
+        label: Option<String>,
+        vertex_module_id: f64,
+        vertex_entry_point: Option<String>,
+        fragment_module_id: f64,
+        fragment_entry_point: Option<String>,
+        vertex_buffers_json: String,
+        sample_mask: u32,
+    ) -> Result<f64> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            return self
+                .test_gpu_canvases
+                .create_render_pipeline(
+                    device_id,
+                    label,
+                    vertex_module_id,
+                    vertex_entry_point,
+                    fragment_module_id,
+                    fragment_entry_point,
+                    vertex_buffers_json,
+                    sample_mask,
+                )
+                .map_err(|error| Error::from_reason(error.to_string()));
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (
+                device_id,
+                label,
+                vertex_module_id,
+                vertex_entry_point,
+                fragment_module_id,
+                fragment_entry_point,
+                vertex_buffers_json,
+                sample_mask,
+            );
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
+        }
+    }
+
+    /// Submit ordered WebGPU command buffers, then install every completed canvas frame.
+    #[napi]
+    pub fn submit_web_gpu_commands(
+        &self,
+        device_id: f64,
+        submission_json: String,
+        ops: Uint32Array,
+        operands: Float64Array,
+    ) -> Result<()> {
+        #[cfg(all(target_os = "macos", feature = "test-support"))]
+        {
+            let canvas_ids = crate::webgpu_canvas::submission_canvas_ids(&submission_json)
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            {
+                let tree = self.tree.lock().unwrap();
+                for id in &canvas_ids {
+                    validate_canvas_target(&tree, *id).map_err(Error::from_reason)?;
+                }
+            }
+            let sources = self
+                .test_gpu_canvases
+                .submit_commands(device_id, submission_json, ops.as_ref(), operands.as_ref())
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            for (id, source) in sources {
+                self.canvas_display_lists.install_presentation(id, source);
+            }
+            return self.request_invalidate();
+        }
+        #[cfg(not(all(target_os = "macos", feature = "test-support")))]
+        {
+            let _ = (device_id, submission_json, ops, operands);
+            Err(Error::from_reason(
+                "Native WebGPU resources require the macOS test-support build",
+            ))
         }
     }
 
@@ -1167,6 +1450,9 @@ impl TestGpuixRenderer {
                 window.refresh();
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
+            if !self.auto_drains_async_tasks() {
+                self.manual_frame_pending.store(true, Ordering::Relaxed);
+            }
             Ok(())
         })
     }
@@ -1180,11 +1466,10 @@ impl TestGpuixRenderer {
     /// is in production — a deferred effect only flushes when that update
     /// finishes — followed by a park so async work the draw spawned (an
     /// intrinsic image load, for example) can dirty layout again before the
-    /// next pass checks it. Every pass parks, including the final one that
-    /// finds the window clean, so pending async work advances even when
-    /// nothing needed drawing; that matches the unconditional park this
-    /// replaced, and like it, work that dirties the window during that last
-    /// park waits for the next read.
+    /// next pass checks it. Every pass parks, including one that finds the
+    /// window clean, so pending async work advances even when nothing needed
+    /// drawing. If that drain dirties the window, the next pass paints it
+    /// before returning the read.
     fn settle_for_read(&self) -> Result<()> {
         if !self.auto_drains_async_tasks() {
             return self.surface_canvas_preparation_diagnostics();
@@ -1194,8 +1479,16 @@ impl TestGpuixRenderer {
                 let drew = cx
                     .update_window(window, |_, window, app| pass(window, app))
                     .map_err(|error| Error::from_reason(error.to_string()))?;
-                self.drain_async_tasks_if_eager(cx);
-                Ok(drew)
+                Self::run_tasks_without_auto_draw(cx);
+                // Inspect dirtiness without letting this check trigger GPUI's
+                // automatic test draw. The next pass must paint the completed
+                // image before returning its intrinsic bounds.
+                cx.set_auto_draw(false);
+                let dirty = cx
+                    .update_window(window, |_, window, _| window.is_dirty())
+                    .map_err(|error| Error::from_reason(error.to_string()));
+                cx.set_auto_draw(true);
+                Ok(drew || dirty?)
             })
         })?;
         self.surface_canvas_preparation_diagnostics()
@@ -1222,10 +1515,9 @@ impl TestGpuixRenderer {
     pub fn flush(&self) -> Result<()> {
         self.request_invalidate()?;
         with_test_state(self.state_id, |cx, window, _view| {
-            cx.update_window(window, |_, window, app| window.draw(app).clear(app))
-                .map_err(|e| Error::from_reason(e.to_string()))?;
-            self.remember_manual_frame(cx, window)?;
             self.drain_async_tasks_if_eager(cx);
+            Self::draw_if_dirty(cx, window)?;
+            self.remember_manual_frame(cx, window)?;
             Ok(())
         })?;
         self.surface_canvas_preparation_diagnostics()
@@ -1312,22 +1604,28 @@ impl TestGpuixRenderer {
                 );
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            self.drain_async_tasks_if_eager(cx);
             Ok(())
         })
     }
 
     /// Draw one platform-style pending frame without notifying the view first.
-    /// Unlike `flush`, this does not request invalidation; it only draws when
-    /// the window is already dirty.
-    /// A clean window remains clean, so this only repaints work already
-    /// scheduled by production code such as an async image load completion.
+    /// Unlike `flush`, this does not notify the view. It draws GPUI dirtiness
+    /// or materializes state waiting behind the manual-mode frame boundary.
     #[napi]
     pub fn draw_pending_frame(&self) -> Result<()> {
         with_test_state(self.state_id, |cx, window, _view| {
             let drew = cx
                 .update_window(window, |_, window, app| {
-                    if window.is_dirty() {
+                    // GPUI's phased scroll hover suppression is released from
+                    // its next-frame callback. A manual draw must advance that
+                    // callback before painting the pending frame.
+                    window.simulate_next_frame(app);
+                    let manual_frame_pending = !self.auto_drains_async_tasks()
+                        && self.manual_frame_pending.load(Ordering::Relaxed);
+                    if window.is_dirty() || manual_frame_pending {
+                        if !window.is_dirty() {
+                            window.refresh();
+                        }
                         window.draw(app).clear(app);
                         true
                     } else {
@@ -1344,32 +1642,22 @@ impl TestGpuixRenderer {
         self.surface_canvas_preparation_diagnostics()
     }
 
-    /// Queue one callback for the next manually advanced GPUI frame without
-    /// dirtying or synchronously drawing the offscreen window.
+    /// Queue one callback for the next `advanceAsyncClock()` without dirtying or
+    /// synchronously drawing the offscreen window.
     #[napi]
     pub fn request_frame(&self, performance_timestamp_ms: f64) -> Result<()> {
-        let timestamp_origin = self.animation_frame_timestamp_origin.clone();
-        let frame_timestamps = self.frame_timestamps.clone();
         with_test_state(self.state_id, |cx, window, _view| {
-            cx.update_window(window, move |_, window, app| {
-                let origin = animation_frame_origin(
-                    &timestamp_origin,
+            cx.update_window(window, |_, _window, app| {
+                animation_frame_origin(
+                    &self.animation_frame_timestamp_origin,
                     crate::renderer::FrameTimestampOriginPair::new(
                         app.background_executor().now(),
                         performance_timestamp_ms,
                     ),
                 );
-                window.on_next_frame(move |_window, app| {
-                    frame_timestamps
-                        .lock()
-                        .unwrap()
-                        .push(animation_frame_timestamp_ms(
-                            origin,
-                            app.background_executor().now(),
-                        ));
-                });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
+            *self.pending_frame_requests.lock().unwrap() += 1;
             Ok(())
         })
     }
@@ -1393,10 +1681,27 @@ impl TestGpuixRenderer {
                 delta = delta.saturating_add(*pending);
                 *pending = Duration::ZERO;
             }
+            let auto_drain = self.auto_drains_async_tasks();
             cx.advance_clock(delta);
             let view = view.clone();
             cx.update_window(window, |_, window, app| {
-                window.simulate_next_frame(app);
+                if auto_drain {
+                    window.simulate_next_frame(app);
+                }
+                let pending = std::mem::take(&mut *self.pending_frame_requests.lock().unwrap());
+                if pending > 0 {
+                    let origin = self
+                        .animation_frame_timestamp_origin
+                        .lock()
+                        .unwrap()
+                        .expect("frame requests establish a timestamp origin");
+                    let timestamp =
+                        animation_frame_timestamp_ms(origin, app.background_executor().now());
+                    self.frame_timestamps
+                        .lock()
+                        .unwrap()
+                        .extend(std::iter::repeat(timestamp).take(pending));
+                }
                 view.update(app, |view, cx| {
                     if view.clock.fast_forward_if_frozen_ms(delta_ms).is_some() {
                         cx.notify();
@@ -1404,17 +1709,16 @@ impl TestGpuixRenderer {
                 });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
-            if self.auto_drains_async_tasks() {
-                cx.update_window(window, |_, window, app| window.draw(app).clear(app))
-                    .map_err(|error| Error::from_reason(error.to_string()))?;
-            }
-            cx.run_until_parked();
-            if !self.auto_drains_async_tasks() {
+            Self::run_tasks_without_auto_draw(cx);
+            if auto_drain {
+                Self::draw_if_dirty(cx, window)?;
+            } else {
                 // Manual mode separates task progress from paint: async
                 // completions and frame callbacks become visible only after an
                 // explicit `drawPendingFrame`.
                 cx.update_window(window, |_, window, _app| window.refresh())
                     .map_err(|error| Error::from_reason(error.to_string()))?;
+                self.manual_frame_pending.store(true, Ordering::Relaxed);
             }
             Ok(())
         })
@@ -1469,7 +1773,7 @@ impl TestGpuixRenderer {
                     .motion_states
                     .values()
                     .filter(|state| {
-                        state.is_valid() && state.frame(now, reduce_motion).active
+                        state.is_valid() && state.sampled_frame(now, reduce_motion).active
                     })
                     .count();
                 u32::try_from(transitions.saturating_add(motions)).unwrap_or(u32::MAX)
@@ -1615,22 +1919,34 @@ impl TestGpuixRenderer {
             // Offscreen windows receive no platform activation. Tab traversal
             // nevertheless models input to the active production window, and
             // GPUI intentionally suppresses focus paths for inactive windows.
-            if keystrokes
-                .iter()
-                .any(|keystroke| keystroke.key.eq_ignore_ascii_case("tab"))
-            {
-                cx.update_window(window, |_, window, app| {
-                    if !window.is_window_active() {
-                        window.simulate_active_status_change(true, app);
-                    }
-                })
-                .map_err(|error| Error::from_reason(error.to_string()))?;
-            }
-
+            // Dispatch directly rather than through `VisualTestAppContext`,
+            // whose keystroke and event helpers redraw after every key even
+            // when nothing changed. A clean window's last frame is already
+            // current, and a redraw rebuilds and lays out the whole tree (#663).
+            let auto_drain = self.auto_drains_async_tasks();
             for keystroke in keystrokes {
                 // Match GPUI's simulated key-down/text-input path before releasing the key.
-                self.dispatch_keystroke(cx, window, keystroke.clone())?;
-                self.simulate_event(cx, window, gpui::KeyUpEvent { keystroke })?;
+                cx.update_window(window, |_, window, app| {
+                    // Activate the offscreen window in the same update as the
+                    // first Tab. Separate updates let GPUI paint an activation
+                    // frame before it processes the focus move.
+                    if keystroke.key.eq_ignore_ascii_case("tab") && !window.is_window_active() {
+                        window.simulate_active_status_change(true, app);
+                    }
+                    window.dispatch_keystroke(keystroke.clone(), app);
+                })
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+                cx.update_window(window, |_, window, app| {
+                    window.dispatch_event(
+                        gpui::InputEvent::to_platform_input(gpui::KeyUpEvent { keystroke }),
+                        app,
+                    );
+                })
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+                if auto_drain {
+                    Self::run_tasks_without_auto_draw(cx);
+                    Self::draw_if_dirty(cx, window)?;
+                }
             }
             Ok(())
         })
@@ -1691,7 +2007,10 @@ impl TestGpuixRenderer {
     ) -> Result<()> {
         let modifiers =
             crate::automation::parse_modifiers(modifiers.as_deref()).map_err(Error::from_reason)?;
-        with_test_state(self.state_id, |cx, window, _view| {
+        with_test_state(self.state_id, |cx, window, view| {
+            view.update(cx, |view, _cx| {
+                view.last_pointer_position = Some((x, y));
+            });
             let button: Option<gpui::MouseButton> = pressed_button.map(u32_to_mouse_button);
 
             self.simulate_event(
@@ -1782,7 +2101,7 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn blur(&self) -> Result<()> {
         with_test_state(self.state_id, |cx, window, _view| {
-            cx.update_window(window, |_, window, _app| window.blur())
+            cx.update_window(window, |_, window, app| window.blur(app))
                 .map_err(|error| Error::from_reason(error.to_string()))?;
             self.drain_async_tasks_if_eager(cx);
             Ok(())
@@ -1811,6 +2130,38 @@ impl TestGpuixRenderer {
             cx.update_window(window, |_, window, app| {
                 view.update(app, |view, cx| {
                     view.move_focus(FocusDirection::Previous, window, cx);
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            self.drain_async_tasks_if_eager(cx);
+            Ok(())
+        })
+    }
+
+    #[napi]
+    pub fn focus_next_within(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.move_focus_within(id, FocusDirection::Next, window, cx);
+                });
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            self.drain_async_tasks_if_eager(cx);
+            Ok(())
+        })
+    }
+
+    #[napi]
+    pub fn focus_previous_within(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        with_test_state(self.state_id, |cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.move_focus_within(id, FocusDirection::Previous, window, cx);
                 });
             })
             .map_err(|error| Error::from_reason(error.to_string()))?;
@@ -2433,9 +2784,14 @@ impl TestGpuixRenderer {
     /// Same numbers as the on-screen overlay: current, p90, p99, max, frames.
     #[napi]
     pub fn get_debug_frame_overlay_stats(&self) -> Result<DebugFrameOverlayStats> {
+        let origin = self
+            .debug_frame_overlay_frame_origin
+            .load(Ordering::Relaxed);
         with_test_state(self.state_id, |cx, window, _view| {
             cx.update_window(window, |_, window, _app| {
-                debug_frame_overlay_stats_js(window.debug_frame_overlay_stats())
+                let mut stats = window.debug_frame_overlay_stats();
+                stats.frames = stats.frames.saturating_sub(origin);
+                debug_frame_overlay_stats_js(stats)
             })
             .map_err(|e| Error::from_reason(e.to_string()))
         })
@@ -2526,40 +2882,7 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn capture_screenshot(&self, path: String) -> Result<()> {
         with_test_state(self.state_id, |cx, window, view| {
-            if self.auto_drains_async_tasks() {
-                let view = view.clone();
-
-                // Flush: notify view and run until parked so layout/rendering are current.
-                cx.update_window(window, |_, _window, app| {
-                    view.update(app, |_, cx| {
-                        cx.notify();
-                    });
-                })
-                .map_err(|e| Error::from_reason(e.to_string()))?;
-
-                // Force a window refresh before capture so render_to_image reads
-                // the most recent frame scene.
-                cx.update_window(window, |_, window, _app| {
-                    window.refresh();
-                })
-                .map_err(|e| Error::from_reason(e.to_string()))?;
-
-                self.drain_async_tasks_if_eager(cx);
-            }
-
-            // Eager capture draws the latest state. Manual capture reads the
-            // scene retained by the last explicit draw without consuming a
-            // pending repaint.
-            let image = if self.auto_drains_async_tasks() {
-                cx.capture_screenshot(window)
-                    .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {e}")))?
-            } else {
-                self.manual_frame.lock().unwrap().clone().ok_or_else(|| {
-                    Error::from_reason(
-                        "No manual-mode frame has been drawn; call flush() before captureScreenshot()",
-                    )
-                })?
-            };
+            let image = self.capture_rendered_image(cx, window, view)?;
 
             // Save as PNG (format inferred from file extension).
             image
@@ -2568,6 +2891,119 @@ impl TestGpuixRenderer {
 
             Ok(())
         })
+    }
+
+    /// Capture the current rendered state as RGBA pixels without encoding a PNG.
+    #[napi]
+    pub fn capture_screenshot_raw(&self) -> Result<ScreenshotImageData> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let capture_start = std::time::Instant::now();
+            let image = self.capture_rendered_image(cx, window, view)?;
+            Ok(ScreenshotImageData {
+                width: image.width(),
+                height: image.height(),
+                pixels: Buffer::from(image.into_raw()),
+                capture_ms: capture_start.elapsed().as_secs_f64() * 1000.0,
+                crop_ms: 0.0,
+            })
+        })
+    }
+
+    /// Capture and crop a rectangle in device pixels, returning RGBA pixels.
+    #[napi]
+    pub fn capture_screenshot_clip_raw(
+        &self,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    ) -> Result<ScreenshotImageData> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let capture_start = std::time::Instant::now();
+            let image = self.capture_rendered_image(cx, window, view)?;
+            let capture_ms = capture_start.elapsed().as_secs_f64() * 1000.0;
+            let crop_start = std::time::Instant::now();
+            let clipped =
+                crop_screenshot(&image, x, y, width, height).map_err(Error::from_reason)?;
+            let crop_ms = crop_start.elapsed().as_secs_f64() * 1000.0;
+            Ok(ScreenshotImageData {
+                width: clipped.width(),
+                height: clipped.height(),
+                pixels: Buffer::from(clipped.into_raw()),
+                capture_ms,
+                crop_ms,
+            })
+        })
+    }
+
+    /// Capture and crop to a rectangle in device pixels before PNG encoding.
+    #[napi]
+    pub fn capture_screenshot_clip(
+        &self,
+        path: String,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    ) -> Result<ScreenshotCaptureTimings> {
+        with_test_state(self.state_id, |cx, window, view| {
+            let capture_start = std::time::Instant::now();
+            let image = self.capture_rendered_image(cx, window, view)?;
+            let capture_ms = capture_start.elapsed().as_secs_f64() * 1000.0;
+            let crop_start = std::time::Instant::now();
+            let clipped =
+                crop_screenshot(&image, x, y, width, height).map_err(Error::from_reason)?;
+            let crop_ms = crop_start.elapsed().as_secs_f64() * 1000.0;
+            let mut png = Vec::new();
+            let encode_start = std::time::Instant::now();
+            image::codecs::png::PngEncoder::new(&mut png)
+                .write_image(
+                    clipped.as_raw(),
+                    clipped.width(),
+                    clipped.height(),
+                    image::ExtendedColorType::Rgba8,
+                )
+                .map_err(|e| Error::from_reason(format!("Failed to encode screenshot: {e}")))?;
+            let encode_ms = encode_start.elapsed().as_secs_f64() * 1000.0;
+            let write_start = std::time::Instant::now();
+            std::fs::write(&path, png)
+                .map_err(|e| Error::from_reason(format!("Failed to save screenshot: {e}")))?;
+            Ok(ScreenshotCaptureTimings {
+                capture_ms,
+                crop_ms,
+                encode_ms,
+                write_ms: write_start.elapsed().as_secs_f64() * 1000.0,
+            })
+        })
+    }
+
+    fn capture_rendered_image(
+        &self,
+        cx: &mut gpui::VisualTestAppContext,
+        window: gpui::AnyWindowHandle,
+        view: &gpui::Entity<GpuixView>,
+    ) -> Result<image::RgbaImage> {
+        if self.auto_drains_async_tasks() {
+            let view = view.clone();
+            cx.update_window(window, |_, _, app| {
+                view.update(app, |_, cx| cx.notify());
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            cx.update_window(window, |_, window, _app| window.refresh())
+                .map_err(|e| Error::from_reason(e.to_string()))?;
+            self.drain_async_tasks_if_eager(cx);
+        }
+
+        if self.auto_drains_async_tasks() {
+            cx.capture_screenshot(window)
+                .map_err(|e| Error::from_reason(format!("Screenshot capture failed: {e}")))
+        } else {
+            self.manual_frame.lock().unwrap().clone().ok_or_else(|| {
+                Error::from_reason(
+                    "No manual-mode frame has been drawn; call flush() before captureScreenshot()",
+                )
+            })
+        }
     }
 
     /// Compare a reference PNG with an actual screenshot using an absolute tolerance for each
@@ -2617,6 +3053,71 @@ impl TestGpuixRenderer {
             usize::try_from(u32::from(size_a.height)).unwrap(),
             tolerance,
         ))
+    }
+
+    /// Compare a reference PNG with raw screenshot pixels without encoding or decoding the actual.
+    #[napi]
+    pub fn compare_image_pixels(
+        &self,
+        reference_path: String,
+        actual_pixels: Buffer,
+        width: u32,
+        height: u32,
+        tolerance: u32,
+    ) -> Result<ScreenshotComparisonResult> {
+        let tolerance = u8::try_from(tolerance).map_err(|_| {
+            Error::from_reason(format!(
+                "Image comparison tolerance must be between 0 and 255, got {tolerance}"
+            ))
+        })?;
+        let reference = decode_png_for_comparison(&reference_path)?;
+        let reference_size = reference.size(0);
+        let width = usize::try_from(width).unwrap();
+        let height = usize::try_from(height).unwrap();
+        if usize::from(reference_size.width) != width
+            || usize::from(reference_size.height) != height
+        {
+            return Err(Error::from_reason(format!(
+                "Image dimensions differ: {reference_path} is {}x{}, screenshot is {width}x{height}",
+                u32::from(reference_size.width),
+                u32::from(reference_size.height),
+            )));
+        }
+        let expected_bytes = width * height * 4;
+        if actual_pixels.len() != expected_bytes {
+            return Err(Error::from_reason(format!(
+                "Screenshot pixel buffer has {} bytes; expected {expected_bytes}",
+                actual_pixels.len()
+            )));
+        }
+        let reference_pixels = reference.as_bytes(0).ok_or_else(|| {
+            Error::from_reason(format!("Decoded PNG has no frame: {reference_path}"))
+        })?;
+        // GPUI exposes decoded PNG channels in BGRA order; native captures are RGBA.
+        let actual_rgba = actual_pixels.as_ref();
+        let mut differing_pixels = 0usize;
+        let mut max_channel_delta = 0u8;
+        for index in 0..width * height {
+            let offset = index * 4;
+            let golden_pixel = &reference_pixels[offset..offset + 4];
+            let actual_pixel = &actual_rgba[offset..offset + 4];
+            let mut pixel_differs = false;
+            for (channel, actual_channel) in [2, 1, 0, 3].into_iter().enumerate() {
+                let delta = golden_pixel[channel].abs_diff(actual_pixel[actual_channel]);
+                max_channel_delta = max_channel_delta.max(delta);
+                pixel_differs |= delta > tolerance;
+            }
+            differing_pixels += usize::from(pixel_differs);
+        }
+        let pixel_count = width * height;
+        Ok(ScreenshotComparisonResult {
+            differing_pixel_ratio: if pixel_count == 0 {
+                0.0
+            } else {
+                differing_pixels as f64 / pixel_count as f64
+            },
+            max_channel_delta: u32::from(max_channel_delta),
+        })
     }
 
     /// Return and clear all collected events since the last drain.
@@ -2713,14 +3214,17 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_resolved_style(&self, id: f64) -> Result<Option<String>> {
         let id = to_element_id(id)?;
-        let (style, hover_groups) = {
+        let (style, hover_groups, focus_groups) = {
             let tree = self.tree.lock().unwrap();
             let Some(element) = tree.elements.get(&id) else {
                 return Ok(None);
             };
+            let style = element.style.clone().unwrap_or_default();
+            let hover_within_group_target = style.hover_within_group.clone();
+            let focus_within_group_target = style.focus_within_group.clone();
             (
-                element.style.clone().unwrap_or_default(),
-                ancestor_hover_groups(&tree, id)
+                style,
+                ancestor_hover_groups(&tree, id, hover_within_group_target.as_deref())
                     .into_iter()
                     .map(|group_id| {
                         let accepts_pointer = tree
@@ -2732,6 +3236,7 @@ impl TestGpuixRenderer {
                         (group_id, accepts_pointer)
                     })
                     .collect::<Vec<_>>(),
+                ancestor_hover_groups(&tree, id, focus_within_group_target.as_deref()),
             )
         };
 
@@ -2745,10 +3250,14 @@ impl TestGpuixRenderer {
         let (
             pointer,
             focus,
+            focus_within,
             keyboard_input,
             hovered_state,
             hover_within_state,
             active_state,
+            active_within_state,
+            (group_focus_state, group_focus_within_state),
+            drag_over,
             transitioned_style,
             motion_style,
         ) = with_test_state(self.state_id, |cx, window, view| {
@@ -2761,7 +3270,33 @@ impl TestGpuixRenderer {
                     .focus_handles
                     .get(&id)
                     .is_some_and(|handle| handle.is_focused(window));
+                let focus_within = {
+                    let tree = view.tree.lock().unwrap();
+                    crate::renderer::is_focus_within(&tree, &view.focus_handles, id, window)
+                };
                 let keyboard = window.last_input_was_keyboard();
+                let group_focus = focus_groups
+                    .iter()
+                    .map(|group_id| {
+                        view.focus_handles
+                            .get(group_id)
+                            .is_some_and(|handle| handle.is_focused(window))
+                    })
+                    .collect::<Vec<_>>();
+                let group_focus_within = {
+                    let tree = view.tree.lock().unwrap();
+                    focus_groups
+                        .iter()
+                        .map(|group_id| {
+                            crate::renderer::is_focus_within(
+                                &tree,
+                                &view.focus_handles,
+                                *group_id,
+                                window,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                };
                 let hovered = view
                     .interactive_style_states
                     .get(&id)
@@ -2777,7 +3312,16 @@ impl TestGpuixRenderer {
                 let active = view
                     .interactive_style_states
                     .get(&id)
-                    .map(|state| state.active);
+                    .map(InteractiveStyleState::is_active);
+                let active_within = hover_groups
+                    .iter()
+                    .map(|(group_id, _)| {
+                        view.interactive_style_states
+                            .get(group_id)
+                            .map(InteractiveStyleState::is_active)
+                    })
+                    .collect::<Vec<_>>();
+                let drag_over = view.external_drag_target == Some(id);
                 let transitioned_style = view
                     .transition_states
                     .get(&id)
@@ -2786,14 +3330,18 @@ impl TestGpuixRenderer {
                     .motion_states
                     .get(&id)
                     .filter(|state| state.is_valid())
-                    .map(|state| state.frame(view.clock.now(), reduce_motion).style);
+                    .map(|state| state.sampled_frame(view.clock.now(), reduce_motion).style);
                 (
                     (f64::from(f32::from(mouse.x)), f64::from(f32::from(mouse.y))),
                     focus,
+                    focus_within,
                     keyboard,
                     hovered,
                     hover_within,
                     active,
+                    active_within,
+                    (group_focus, group_focus_within),
+                    drag_over,
                     transitioned_style,
                     motion_style,
                 )
@@ -2820,6 +3368,23 @@ impl TestGpuixRenderer {
                     element_bounds.is_some_and(|bounds| point_is_inside(bounds, origin))
                 })
         });
+        let active_within = active_within_state
+            .iter()
+            .zip(hover_groups.iter())
+            .zip(hover_group_bounds.iter())
+            .any(|((state, (_, accepts_pointer)), bounds)| {
+                state.unwrap_or_else(|| {
+                    *accepts_pointer
+                        && active_pointer_origin.is_some_and(|origin| {
+                            bounds.is_some_and(|bounds| point_is_inside(bounds, origin))
+                        })
+                })
+            });
+        let group_focus = group_focus_state.iter().any(|focused| *focused);
+        let group_focus_visible = group_focus && keyboard_input;
+        let group_focus_within = group_focus_within_state
+            .iter()
+            .any(|focused_within| *focused_within);
 
         let layered_style = motion_style.map(|motion_style| {
             let mut layered = transitioned_style
@@ -2832,18 +3397,52 @@ impl TestGpuixRenderer {
             .as_ref()
             .or(transitioned_style.as_ref())
             .unwrap_or(&style);
+        let group_resolved_style = (effective_style.hover_within_group.is_some()
+            || effective_style.focus_within_group.is_some())
+        .then(|| {
+            crate::renderer::effective_group_state_style(
+                effective_style,
+                hover_within,
+                active_within,
+                group_focus,
+                group_focus && keyboard_input,
+                group_focus_within,
+            )
+        });
+        let effective_style = group_resolved_style.as_ref().unwrap_or(effective_style);
         let mut resolved = style_object(effective_style)?;
+        if focus_within {
+            refine_style_object(&mut resolved, effective_style.focus_within.as_deref())?;
+        }
         if focus {
             refine_style_object(&mut resolved, effective_style.focus.as_deref())?;
         }
         if focus && keyboard_input {
             refine_style_object(&mut resolved, effective_style.focus_visible.as_deref())?;
         }
+        if group_focus {
+            refine_style_object(&mut resolved, effective_style.group_focus.as_deref())?;
+        }
+        if group_focus_visible {
+            refine_style_object(
+                &mut resolved,
+                effective_style.group_focus_visible.as_deref(),
+            )?;
+        }
+        if group_focus_within {
+            refine_style_object(&mut resolved, effective_style.group_focus_within.as_deref())?;
+        }
         if hover_within {
             refine_style_object(&mut resolved, effective_style.hover_within.as_deref())?;
         }
         if hovered {
             refine_style_object(&mut resolved, effective_style.hover.as_deref())?;
+        }
+        if drag_over {
+            refine_style_object(&mut resolved, effective_style.drag_over.as_deref())?;
+        }
+        if active_within {
+            refine_style_object(&mut resolved, effective_style.active_within.as_deref())?;
         }
         if active {
             refine_style_object(&mut resolved, effective_style.active.as_deref())?;
@@ -2936,8 +3535,7 @@ impl TestGpuixRenderer {
     pub fn get_element_bounds(&self, id: f64) -> Result<Option<crate::renderer::ElementBounds>> {
         let id = to_element_id(id)?;
         self.settle_for_read()?;
-        Ok(crate::automation::get_bounds(id)
-            .map(crate::renderer::ElementBounds::from_painted))
+        Ok(crate::automation::get_bounds(id).map(crate::renderer::ElementBounds::from_painted))
     }
 
     #[napi]
@@ -3074,5 +3672,47 @@ impl TestGpuixRenderer {
 impl Drop for TestGpuixRenderer {
     fn drop(&mut self) {
         dispose_test_state(self.state_id);
+    }
+}
+
+#[cfg(test)]
+mod screenshot_crop_tests {
+    use super::crop_screenshot;
+    use image::{ImageBuffer, Rgba};
+
+    fn numbered_image(width: u32, height: u32) -> image::RgbaImage {
+        ImageBuffer::from_fn(width, height, |x, y| {
+            Rgba([x as u8, y as u8, (x + y * width) as u8, 255])
+        })
+    }
+
+    #[test]
+    fn keeps_odd_device_pixel_bounds_and_pixels() {
+        let image = numbered_image(7, 5);
+        let cropped = crop_screenshot(&image, 1, 1, 3, 3).unwrap();
+
+        assert_eq!(cropped.dimensions(), (3, 3));
+        assert_eq!(*cropped.get_pixel(0, 0), Rgba([1, 1, 8, 255]));
+        assert_eq!(*cropped.get_pixel(2, 2), Rgba([3, 3, 24, 255]));
+    }
+
+    #[test]
+    fn clips_bounds_at_each_window_edge() {
+        let image = numbered_image(4, 3);
+
+        let top_left = crop_screenshot(&image, -1, -1, 3, 3).unwrap();
+        assert_eq!(top_left.dimensions(), (2, 2));
+        assert_eq!(*top_left.get_pixel(1, 1), Rgba([1, 1, 5, 255]));
+
+        let bottom_right = crop_screenshot(&image, 2, 1, 4, 4).unwrap();
+        assert_eq!(bottom_right.dimensions(), (2, 2));
+        assert_eq!(*bottom_right.get_pixel(1, 1), Rgba([3, 2, 11, 255]));
+    }
+
+    #[test]
+    fn rejects_bounds_without_visible_pixels() {
+        let image = numbered_image(4, 3);
+        assert!(crop_screenshot(&image, 5, 0, 1, 1).is_err());
+        assert!(crop_screenshot(&image, 0, 0, 0, 1).is_err());
     }
 }

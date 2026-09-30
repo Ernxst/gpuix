@@ -22,15 +22,22 @@
 
 import { afterEach, beforeAll, expect } from "vitest"
 
-import { cleanup, configuredTestWindow, configureTestWindow, disposeSharedWindow } from "./testing.js"
+import {
+  cleanup,
+  configuredTestWindow,
+  configureTestWindow,
+  resetSharedWindowForNextFile,
+} from "./testing.js"
 import { gpuixMatchers, type GpuixMatchers } from "./testing-expect.js"
 import { configuredScreenshots, configureScreenshots } from "./testing-screenshot.js"
 
 export * from "./testing.js"
 
 declare module "vitest" {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  interface Matchers<T = any> extends GpuixMatchers<T> {}
+  interface Matchers<
+    R extends void | Promise<void> = void | Promise<void>,
+    T = unknown,
+  > extends GpuixMatchers<R> {}
 }
 
 expect.extend(gpuixMatchers)
@@ -43,8 +50,9 @@ afterEach(() => {
 // file, so the `afterEach` above attaches per file — but the modules it
 // imports (`testing.ts`, `testing-screenshot.ts`) are evaluated once per
 // worker, not once per file. Their module-level defaults —
-// `configureTestWindow`, `configureScreenshots`, and the shared window itself
-// — would otherwise leak from one file into the next.
+// `configureTestWindow`, `configureScreenshots` — and the state of the shared
+// window itself would otherwise leak from one file into the next. The window
+// is kept: opening another costs far more than resetting this one.
 //
 // The restore is a function `beforeAll` returns, not a separate `afterAll`:
 // vitest calls a `beforeAll`'s returned cleanup after every `afterAll` in the
@@ -61,8 +69,8 @@ beforeAll(() => {
   return () => {
     configureTestWindow(testWindowSnapshot)
     configureScreenshots(screenshotSnapshot)
-    // Also the reset for menus, the debug frame overlay, and every other
-    // window-level knob `cleanup()` deliberately leaves alone.
-    disposeSharedWindow()
+    // Menus, the debug frame overlay, and every other window-level knob
+    // `cleanup()` deliberately leaves alone for the rest of the file.
+    resetSharedWindowForNextFile()
   }
 })

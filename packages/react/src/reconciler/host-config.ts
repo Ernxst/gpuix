@@ -6,6 +6,8 @@
 
 import { createContext } from "react"
 import { DefaultEventPriority } from "react-reconciler/constants.js"
+import { isCompiledStyle, unresolvedClassNames } from "../class-names.js"
+import { setResolvedStyle } from "../resolved-style.js"
 
 const NoEventPriority = 0
 import type {
@@ -18,6 +20,7 @@ import type {
   HostContext,
   Instance,
   MutationRenderer,
+  NativeStateStyleKey,
   Props,
   PublicInstance,
   SelectionDirection,
@@ -82,7 +85,7 @@ import {
   getOrCreateWebGpuContext,
   webGpuContext,
 } from "../canvas/webgpu.js"
-import { reportStyleDiagnostics } from "./renderer-diagnostics.js"
+import { enqueueRendererDiagnostic, reportStyleDiagnostics } from "./renderer-diagnostics.js"
 import type { GpuixDispatchableEvent } from "../pointer-event.js"
 import {
   DOCUMENT_POSITION_CONTAINED_BY,
@@ -93,6 +96,7 @@ import {
   DOCUMENT_POSITION_PRECEDING,
 } from "../dom-position.js"
 import { ownerDocument } from "../document.js"
+import { moveAnnouncerRegionsToRoot } from "../announce.js"
 
 let currentUpdatePriority = NoEventPriority
 
@@ -115,6 +119,8 @@ type HostNodeRegistry = {
   publicInstanceContainers: WeakMap<PublicInstance, Container>
   disconnectedRootOrder: WeakMap<HostNode, number>
   nextDisconnectedRootOrder: number
+  virtualListsByContainer: WeakMap<Container, Set<Instance>>
+  warnedVirtualListZeroHeights: WeakSet<Instance>
 }
 
 function hostNodeRegistry(): HostNodeRegistry {
@@ -123,13 +129,21 @@ function hostNodeRegistry(): HostNodeRegistry {
   // globals installed by an earlier evaluation can receive refs created by a
   // later one, so their ownership and tree-position state share that lifetime.
   const existing = Reflect.get(globalThis, HOST_NODE_REGISTRY_KEY) as HostNodeRegistry | undefined
-  if (existing) return existing
+  if (existing) {
+    // Keep the registry compatible with renderers mounted before a Bun --hot
+    // re-evaluation introduced these virtual-list diagnostics.
+    existing.virtualListsByContainer ??= new WeakMap()
+    existing.warnedVirtualListZeroHeights ??= new WeakSet()
+    return existing
+  }
 
   const created: HostNodeRegistry = {
     hostNodeStates: new WeakMap(),
     publicInstanceContainers: new WeakMap(),
     disconnectedRootOrder: new WeakMap(),
     nextDisconnectedRootOrder: 0,
+    virtualListsByContainer: new WeakMap(),
+    warnedVirtualListZeroHeights: new WeakSet(),
   }
   Reflect.set(globalThis, HOST_NODE_REGISTRY_KEY, created)
   return created
@@ -137,11 +151,16 @@ function hostNodeRegistry(): HostNodeRegistry {
 
 const sharedHostNodes = hostNodeRegistry()
 const { hostNodeStates, publicInstanceContainers } = sharedHostNodes
+const { virtualListsByContainer, warnedVirtualListZeroHeights } = sharedHostNodes
 const virtualListsPendingValidation = new WeakMap<Container, Set<Instance>>()
 const warnedVirtualListRowContracts = new WeakSet<Instance>()
 
 class InlineTextChildError extends Error {
   override name = "InlineTextChildError"
+}
+
+class VirtualListBoundedHeightError extends Error {
+  override name = "VirtualListBoundedHeightError"
 }
 
 function stateFor(node: HostNode): HostNodeState {
@@ -233,6 +252,49 @@ function validatePendingVirtualLists(container: Container): void {
   }
 }
 
+function diagnoseZeroHeightVirtualLists(container: Container): void {
+  const lists = virtualListsByContainer.get(container)
+  const getElementBounds = container.native.getElementBounds
+  if (!lists || !getElementBounds) return
+
+  for (const instance of lists) {
+    const state = stateFor(instance)
+    if (!state.mounted || state.children.length === 0) continue
+
+    // GPUI reports a zero-sized box for both collapsed and hidden elements, so
+    // check the retained React styles before treating zero height as a problem.
+    let ancestor: Instance | null = instance
+    let hidden = false
+    while (ancestor) {
+      if (styleForRenderer(ancestor, container, ancestor.props)?.display === "none") {
+        hidden = true
+        break
+      }
+      ancestor = stateFor(ancestor).parent
+    }
+    if (hidden) continue
+
+    const bounds = getElementBounds.call(container.native, instance.id)
+    if (!bounds || bounds.height !== 0) continue
+
+    const message =
+      `[gpuix] <virtual-list> (element ${instance.id}) needs a bounded height from its parent; ` +
+      "it currently lays out at 0 height."
+    if (container.strictStyles) throw new VirtualListBoundedHeightError(message)
+    if (warnedVirtualListZeroHeights.has(instance)) continue
+
+    warnedVirtualListZeroHeights.add(instance)
+    enqueueRendererDiagnostic(container.native, {
+      elementId: instance.id,
+      elementType: "virtual-list",
+      property: "height",
+      value: "0",
+      message,
+    })
+    console.warn(message)
+  }
+}
+
 function removeTrackedChild(state: HostNodeState, child: HostNode): void {
   const index = state.children.indexOf(child)
   if (index !== -1) state.children.splice(index, 1)
@@ -245,6 +307,14 @@ function appendTrackedChild(parent: Instance, state: HostNodeState, child: HostN
   state.children.push(child)
   child.parentId = parent.id
   stateFor(child).parent = parent
+}
+
+function assertCanHaveChildren(parent: Instance, child: Instance | TextInstance): void {
+  if (parent.type !== "hr" && parent.type !== "input") return
+  const childDescription = "type" in child ? `<${child.type}>` : "text"
+  throw new Error(
+    `[gpuix] <${parent.type}> is a void element and cannot contain children; received ${childDescription}.`
+  )
 }
 
 /** This node and every ancestor up to (and including) its root, root first. */
@@ -261,6 +331,9 @@ function ancestorChain(node: HostNode): HostNode[] {
 function markUnmounted(node: HostNode): void {
   const state = stateFor(node)
   state.mounted = false
+  if ("type" in node && node.type === "virtual-list") {
+    virtualListsByContainer.get(state.container)?.delete(node)
+  }
   for (const child of state.children) markUnmounted(child)
 }
 
@@ -325,14 +398,9 @@ function describeInvalidCompareDocumentPositionArgument(value: unknown): string 
  *
  * Two nodes with different roots are disconnected; the ordering picked for
  * them is arbitrary but stable within a process, matching the DOM's guarantee
- * that disconnected nodes still compare consistently. This also makes two
- * top-level siblings under the *same* container disconnected from each
- * other: {@link Container} tracks only its single current `rootElementId`,
- * not an ordered list of top-level children, so there is no ancestor to walk
- * up to for a common one. A single root under each container sidesteps this
- * — the only case the current call sites need — but two real top-level
- * siblings (e.g. two roots of one React Fragment mounted directly into a
- * container) will read as disconnected even though they share a container.
+ * that disconnected nodes still compare consistently. Several top-level
+ * children share the renderer-owned root after promotion, so they retain a
+ * common ancestor and their document order is observable like DOM siblings.
  */
 function compareDocumentPosition(self: HostNode, other: HostNode): number {
   if (!hostNodeStates.has(other)) {
@@ -421,6 +489,7 @@ const EVENT_PROPS = [
   ["onSubmit", "submit", "bubble"],
   ["onResetCapture", "reset", "capture"],
   ["onReset", "reset", "bubble"],
+  ["onMotionComplete", "motionComplete", "bubble"],
   // Mouse events
   ["onClickCapture", "click", "capture"],
   ["onClick", "click", "bubble"],
@@ -610,8 +679,18 @@ function diffEventListeners(
 
 function sendStyle(container: Container, instance: Instance): void {
   const style = styleForRenderer(instance, container, instance.props)
+  setResolvedStyle(instance, style)
   if (style == null || Object.keys(style).length === 0) return
   container.renderer.setStyle(instance.id, style)
+}
+
+function isFormControl(instance: Pick<Instance, "type">): boolean {
+  return instance.type === "input" || instance.type === "textarea" || instance.type === "button"
+}
+
+function isDisabledFormControl(instance: Pick<Instance, "type" | "props">): boolean {
+  const { disabled } = instance.props
+  return isFormControl(instance) && (disabled === true || typeof disabled === "string")
 }
 
 // ── Custom prop forwarding ───────────────────────────────────────────
@@ -668,10 +747,28 @@ const DIV_ALIASES = new Set([
   "var",
   "label",
   "form",
+  "hr",
+  "dl",
+  "dt",
+  "dd",
+  "search",
+])
+
+// Table elements keep their names in the retained tree for accessibility and
+// web parity. Native GPUI layout still treats each one as an ordinary host box.
+const TABLE_ELEMENTS = new Set([
+  "table",
+  "caption",
+  "thead",
+  "tbody",
+  "tfoot",
+  "tr",
+  "th",
+  "td",
 ])
 
 // Built-in element types that don't use custom props.
-const BUILT_IN_TYPES = new Set(["div", "text", ...DIV_ALIASES])
+const BUILT_IN_TYPES = new Set(["div", "text", ...DIV_ALIASES, ...TABLE_ELEMENTS])
 const CUSTOM_STYLE_TRANSITION_TYPES = new Set<ElementType>([
   "img",
   "canvas",
@@ -831,7 +928,31 @@ function styleForRenderer(instance: Instance, container: Container, props: Props
 
 function authoredStyle(instance: Instance, container: Container, props: Props): StyleDesc | undefined {
   const { style } = props
-  if (style == null || isPlainStyleObject(style)) return style
+  if (style == null || isPlainStyleObject(style)) {
+    const fromClassName = classNameStyle(props)
+    if (fromClassName === undefined) return style
+    // `style` outranks the class, as an author rule outranks a stylesheet.
+    if (style == null) return fromClassName
+
+    const authoredStyleValues = definedStyleValues(style)
+    const merged = { ...fromClassName, ...authoredStyleValues } as StyleDesc &
+      Record<string, unknown>
+    const classStates = fromClassName as StyleDesc & Record<string, unknown>
+    const authoredStates = style as StyleDesc & Record<string, unknown>
+    const authoredProperties = new Set(Object.keys(authoredStyleValues))
+    for (const key of NATIVE_STATE_STYLE_KEYS) {
+      const classState = classStates[key] as Record<string, unknown> | undefined
+      if (classState === undefined) continue
+
+      const state = { ...classState }
+      for (const property of authoredProperties) {
+        delete state[property]
+      }
+      Object.assign(state, definedStyleValues((authoredStates[key] as object | undefined) ?? {}))
+      ;(merged as Record<string, unknown>)[key] = state
+    }
+    return merged
+  }
 
   const message =
     `[gpuix] ${elementSubject(instance, props)} received an invalid style prop. ` +
@@ -846,19 +967,79 @@ function authoredStyle(instance: Instance, container: Container, props: Props): 
   return {}
 }
 
+function definedStyleValues<T extends object>(style: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(style).filter(([, value]) => value !== undefined),
+  ) as Partial<T>
+}
+
+const NATIVE_STATE_STYLE_KEYS = [
+  "hover",
+  "hoverWithin",
+  "active",
+  "activeWithin",
+  "focus",
+  "focusVisible",
+  "focusWithin",
+  "groupFocus",
+  "groupFocusVisible",
+  "groupFocusWithin",
+  "dragOver",
+] as const satisfies readonly (
+  | NativeStateStyleKey
+  | "groupFocus"
+  | "groupFocusVisible"
+  | "groupFocusWithin"
+)[]
+
+/**
+ * Styles a GPUIX build put in `className`.
+ *
+ * `@gpuix/plugins/css` compiles a `.module.css` import to the native styles it
+ * describes, so what a web build spells as a class name arrives here as a
+ * style object. Anything else in the prop is reported instead: the native
+ * renderer resolves no CSS classes.
+ */
+function classNameStyle(props: Props): StyleDesc | undefined {
+  const { className } = props as Props & { className?: unknown }
+  return isCompiledStyle(className) ? className : undefined
+}
+
+/** Class names in `className` that no build resolved into native styles. */
+function unresolvedClassNamesOf(props: Props): string[] | undefined {
+  const { className } = props as Props & { className?: unknown }
+  // `className=""` and `className={null}` apply no CSS classes on the web
+  // either, so nothing is lost by ignoring them here.
+  if (className === undefined || className === null || className === "") return undefined
+  if (typeof className === "string") return [className]
+  if (isCompiledStyle(className)) return unresolvedClassNames(className)
+  return [String(className)]
+}
+
 function diagnoseUnsupportedClassNameProp(
   instance: Instance,
   container: Container,
   props: Props
 ): void {
-  const className = (props as Props & { className?: unknown }).className
-  // `className=""` and `className={null}` apply no CSS classes on the web
-  // either, so nothing is lost by ignoring them here.
-  if (className === undefined || className === null || className === "") return
+  const { className } = props as Props & { className?: unknown }
+  if (isPlainStyleObject(className) && !isCompiledStyle(className)) {
+    const message =
+      `[gpuix] ${elementSubject(instance, props)} received a className value that ` +
+      "was not compiled by @gpuix/plugins/css."
+    if (container.strictStyles) throw new UnsupportedClassNamePropError(message)
+    if (warnedUnsupportedClassNameProps.has(instance)) return
+    warnedUnsupportedClassNameProps.add(instance)
+    console.warn(message)
+    return
+  }
+
+  const unresolved = unresolvedClassNamesOf(props)
+  if (unresolved === undefined) return
 
   const message =
-    `[gpuix] ${elementSubject(instance, props)} does not support className. ` +
-    "CSS classes are not applied by the native renderer; use the style prop with a GPUIX style object instead."
+    `[gpuix] ${elementSubject(instance, props)} cannot apply the class names ` +
+    `${JSON.stringify(unresolved.join(" "))}. The native renderer resolves no CSS classes; ` +
+    "compile `.module.css` imports with @gpuix/plugins/css, or move the declarations into the style prop."
   if (container.strictStyles) throw new UnsupportedClassNamePropError(message)
   if (warnedUnsupportedClassNameProps.has(instance)) return
   warnedUnsupportedClassNameProps.add(instance)
@@ -1008,9 +1189,11 @@ const UNIVERSAL_PROPS = new Set([
   "ariaRequired",
   "ariaInvalid",
   "ariaExpanded",
+  "ariaControls",
   "ariaCurrent",
   "ariaLive",
   "ariaAtomic",
+  "ariaModal",
   "ariaSelected",
   "ariaValueText",
   "ariaValueMin",
@@ -1019,6 +1202,7 @@ const UNIVERSAL_PROPS = new Set([
   "ariaLevel",
   "ariaRowIndex",
   "ariaColIndex",
+  "ariaSort",
   "ariaRowCount",
   "ariaColCount",
   "ariaRowSpan",
@@ -1045,6 +1229,15 @@ function serializeCustomProp(
   value: object | string | number | boolean | null | undefined
 ): string | object | number | boolean | null {
   if (value === undefined || typeof value === "function") return null
+  // React libraries can use the renderer's numeric host ids for generated
+  // relationships (Base UI does this for checkbox groups). ARIA reference
+  // lists are strings at the native boundary, so preserve those ids as text.
+  if (
+    typeof value === "number" &&
+    (key === "ariaLabelledBy" || key === "ariaDescribedBy")
+  ) {
+    return String(value)
+  }
   if (
     key === "motion" &&
     typeof value === "object" &&
@@ -1070,6 +1263,7 @@ function serializeCustomProp(
       "ariaLevel",
       "ariaRowIndex",
       "ariaColIndex",
+      "ariaSort",
       "ariaRowCount",
       "ariaColCount",
       "ariaRowSpan",
@@ -1134,7 +1328,7 @@ function nativeActivationKind(_type: string, props: Props): "anchor" | undefined
  * role (`p`, `span`, `strong`, `em`, `kbd`) or need their surroundings to
  * resolve, and are handled in `nativeRole`.
  */
-type NativeImplicitRole = NonNullable<Props["role"]> | "abbr"
+type NativeImplicitRole = NonNullable<Props["role"]> | "abbr" | "descriptionlist"
 
 const IMPLICIT_ROLES: Readonly<Record<string, NativeImplicitRole>> = {
   a: "link",
@@ -1146,6 +1340,9 @@ const IMPLICIT_ROLES: Readonly<Record<string, NativeImplicitRole>> = {
   button: "button",
   del: "deletion",
   dfn: "term",
+  dd: "definition",
+  dl: "descriptionlist",
+  dt: "term",
   figcaption: "caption",
   figure: "figure",
   h1: "heading",
@@ -1154,6 +1351,7 @@ const IMPLICIT_ROLES: Readonly<Record<string, NativeImplicitRole>> = {
   h4: "heading",
   h5: "heading",
   h6: "heading",
+  hr: "separator",
   li: "listitem",
   main: "main",
   mark: "mark",
@@ -1161,6 +1359,7 @@ const IMPLICIT_ROLES: Readonly<Record<string, NativeImplicitRole>> = {
   nav: "navigation",
   ol: "list",
   s: "deletion",
+  search: "search",
   // SVG-AAM gives a bare `<svg>` the graphics-document role.
   svg: "graphics-document",
   time: "time",
@@ -1208,7 +1407,10 @@ function hasAuthoredName(props: Props): boolean {
   // ids resolve is decided in Rust, which holds the tree; an authored reference
   // is the most this side can see.
   const labelledBy = props.ariaLabelledBy ?? props["aria-labelledby"]
-  return typeof labelledBy === "string" && labelledBy.trim() !== ""
+  return (
+    (typeof labelledBy === "string" && labelledBy.trim() !== "") ||
+    (typeof labelledBy === "number" && Number.isFinite(labelledBy))
+  )
 }
 
 /**
@@ -1386,6 +1588,14 @@ function customPropEntries(
   if (activationKind) entries.push(["activationKind", activationKind])
   const role = nativeRole(type, props, instance)
   if (role !== undefined) entries.push(["role", role])
+  if (
+    type === "hr" &&
+    role === "separator" &&
+    props.ariaOrientation === undefined &&
+    props["aria-orientation"] === undefined
+  ) {
+    entries.push(["ariaOrientation", "horizontal"])
+  }
   // `role` above is the *resolved* role the accessibility projection needs, so
   // an `<img>` carries one with nothing declared. The DOM has no attribute for
   // that, so the authored role is retained beside it, and it is the one a query
@@ -1419,7 +1629,12 @@ function syncCustomProps(
   const builtIn = BUILT_IN_TYPES.has(type)
   for (const [key, value] of customPropEntries(instance, props)) {
     if (isReservedProp(key)) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key) && !isAuthorVisibleProp(key)) continue
+    if (
+      builtIn &&
+      !UNIVERSAL_PROPS.has(key) &&
+      !isAuthorVisibleProp(key) &&
+      !isTableSpecificProp(type, key)
+    ) continue
     renderer.setCustomProp(id, key, serializeCustomProp(type, key, value))
   }
 }
@@ -1439,7 +1654,12 @@ function diffCustomProps(
   // Updated or added props
   for (const [key, value] of newEntries) {
     if (isReservedProp(key)) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key) && !isAuthorVisibleProp(key)) continue
+    if (
+      builtIn &&
+      !UNIVERSAL_PROPS.has(key) &&
+      !isAuthorVisibleProp(key) &&
+      !isTableSpecificProp(type, key)
+    ) continue
     const oldValue = oldEntries.find(([oldKey]) => oldKey === key)?.[1]
     if (oldValue !== value) {
       renderer.setCustomProp(id, key, serializeCustomProp(type, key, value))
@@ -1448,11 +1668,20 @@ function diffCustomProps(
   // Removed props
   for (const [key] of oldEntries) {
     if (isReservedProp(key)) continue
-    if (builtIn && !UNIVERSAL_PROPS.has(key) && !isAuthorVisibleProp(key)) continue
+    if (
+      builtIn &&
+      !UNIVERSAL_PROPS.has(key) &&
+      !isAuthorVisibleProp(key) &&
+      !isTableSpecificProp(type, key)
+    ) continue
     if (!newKeys.includes(key)) {
       renderer.setCustomProp(id, key, null)
     }
   }
+}
+
+function isTableSpecificProp(type: string, key: string): boolean {
+  return TABLE_ELEMENTS.has(type) && ["scope", "colSpan", "rowSpan", "headers"].includes(key)
 }
 
 /**
@@ -1532,15 +1761,17 @@ class HostElement implements Instance {
     return parentElement(this)
   }
 
+  get isConnected(): boolean {
+    return stateFor(this).mounted
+  }
+
   get ownerDocument() {
     return ownerDocument()
   }
 
   focus(options?: FocusOptions): void {
     // A disabled form control cannot take focus, as in the DOM.
-    const formControl = this.type === "input" || this.type === "textarea" || this.type === "button"
-    const { disabled } = this.props
-    if (formControl && (disabled === true || typeof disabled === "string")) return
+    if (isDisabledFormControl(this)) return
     this.#container.native.focusElement?.(this.id, options?.preventScroll === true)
   }
 
@@ -1645,13 +1876,18 @@ class HostElement implements Instance {
       normalized !== ":focus" &&
       normalized !== ":focus-visible" &&
       normalized !== ":hover" &&
-      normalized !== ":active"
+      normalized !== ":active" &&
+      normalized !== ":disabled" &&
+      normalized !== ":enabled"
     ) {
       throw new SyntaxError(
         `Failed to execute 'matches' on 'Element': '${selector}' is not a supported selector. ` +
-          "Supported: :focus, :focus-visible, :hover, :active."
+          "Supported: :focus, :focus-visible, :hover, :active, :disabled, :enabled."
       )
     }
+
+    if (normalized === ":disabled") return isDisabledFormControl(this)
+    if (normalized === ":enabled") return isFormControl(this) && !isDisabledFormControl(this)
 
     const state = this.#container.native.getElementInteractionState?.(this.id)
     if (!state) return false
@@ -1722,6 +1958,39 @@ class HostElement implements Instance {
  * element kind, so they live on a subclass rather than every host instance.
  */
 class CanvasHostElement extends HostElement {
+  #width: number
+  #height: number
+
+  constructor(id: number, type: ElementType, props: Props, container: Container) {
+    super(id, type, props, container)
+    this.#width = canvasBitmapSize((props as Props & { width?: unknown }).width, 300)
+    this.#height = canvasBitmapSize((props as Props & { height?: unknown }).height, 150)
+  }
+
+  get width(): number {
+    return this.#width
+  }
+
+  set width(value: unknown) {
+    this.#width = canvasBitmapSize(value, 300)
+    resetCanvasBitmap(this)
+  }
+
+  get height(): number {
+    return this.#height
+  }
+
+  set height(value: unknown) {
+    this.#height = canvasBitmapSize(value, 150)
+    resetCanvasBitmap(this)
+  }
+
+  setBitmapDimensions(width: unknown, height: unknown): void {
+    this.#width = canvasBitmapSize(width, 300)
+    this.#height = canvasBitmapSize(height, 150)
+    resetCanvasBitmap(this)
+  }
+
   #diagnosticTarget() {
     return {
       describeElement: () => describeCanvas(this),
@@ -1753,8 +2022,8 @@ class CanvasHostElement extends HostElement {
     if (contextId === "webgpu") {
       if (recordingContext2D(this)) return null
       return getOrCreateWebGpuContext(this, containerOf(this).native, this.id, () => ({
-        width: Number((this.props as Props & { width?: number }).width ?? 300),
-        height: Number((this.props as Props & { height?: number }).height ?? 150),
+        width: this.width,
+        height: this.height,
       }))
     }
     return null
@@ -1766,6 +2035,19 @@ class CanvasHostElement extends HostElement {
     diagnoseUnsupportedCanvasElementMember(this, this.#diagnosticTarget(), "toDataURL")
     return undefined
   }
+}
+
+function resetCanvasBitmap(canvas: CanvasHostElement): void {
+  resetRecordingContext2D(canvas)
+  const container = containerFor(canvas)
+  container.native.resetCanvas?.(canvas.id)
+  webGpuContext(canvas)?.resize()
+}
+
+function canvasBitmapSize(value: unknown, fallback: number): number {
+  const number = Number(value)
+  if (!Number.isFinite(number) || number < 0) return fallback
+  return Math.min(Math.floor(number), 0xffff_ffff)
 }
 
 /**
@@ -1999,11 +2281,141 @@ function materialize(node: HostNode): HostNodeState {
   }
   state.mounted = true
 
+  if ("type" in node && node.type === "virtual-list") {
+    let lists = virtualListsByContainer.get(state.container)
+    if (!lists) {
+      lists = new Set()
+      virtualListsByContainer.set(state.container, lists)
+    }
+    lists.add(node)
+  }
+
   for (const child of state.children) {
     materialize(child)
     renderer.appendChild(node.id, child.id)
   }
   return state
+}
+
+function nativeType(instance: Instance): ElementType {
+  return DIV_ALIASES.has(instance.type) ? "div" : instance.type
+}
+
+function clearAnnouncer(container: Container, destroyRegions: boolean): void {
+  if (destroyRegions) {
+    const regions = new Set<number>()
+    for (const pair of Object.values(container.announcer)) {
+      if (!pair) continue
+      for (const id of pair.regionIds) regions.add(id)
+    }
+    for (const id of regions) container.renderer.destroyElement(id)
+  }
+  container.announcer.polite = null
+  container.announcer.assertive = null
+}
+
+function clearContainerRoot(container: Container): void {
+  const root = container.bodyElement
+  if (root) {
+    markUnmounted(root)
+    const destroyed = container.renderer.destroyElement(root.id)
+    for (const id of destroyed) {
+      unregisterEventHandlers(container.eventHandlers, id)
+      container.eventTargets.delete(id)
+      container.preventedKeyboardActivations.delete(id)
+      if (container.preventedDragOvers.has(id)) container.preventedDragOvers.clear()
+    }
+  }
+  clearAnnouncer(container, false)
+  container.bodyElement = null
+  container.implicitRoot = null
+  container.rootElementId = null
+  container.rootElementType = null
+}
+
+function createImplicitRoot(container: Container): Instance {
+  const root = instantiateHostElement(nextId(container), "div", {}, container)
+  hostNodeStates.set(root, {
+    container,
+    children: [],
+    mounted: true,
+    parent: null,
+  })
+  publicInstanceContainers.set(root, container)
+  container.renderer.createElement(root.id, "div")
+  container.bodyElement = root
+  container.implicitRoot = root
+  container.rootElementId = root.id
+  container.rootElementType = "div"
+  return root
+}
+
+function setDirectContainerRoot(container: Container, child: Instance): void {
+  child.parentId = null
+  stateFor(child).parent = null
+  materialize(child)
+  container.renderer.setRoot(child.id)
+  container.bodyElement = child
+  container.implicitRoot = null
+  container.rootElementId = child.id
+  container.rootElementType = nativeType(child)
+}
+
+function placeInImplicitRoot(
+  container: Container,
+  root: Instance,
+  child: Instance,
+  beforeChild: Instance | null
+): void {
+  const state = stateFor(root)
+  if (beforeChild) {
+    insertTrackedChild(root, state, child, beforeChild)
+  } else {
+    appendTrackedChild(root, state, child)
+  }
+  materialize(child)
+  if (beforeChild) {
+    container.renderer.insertBefore(root.id, child.id, beforeChild.id)
+  } else {
+    container.renderer.appendChild(root.id, child.id)
+  }
+}
+
+function promoteContainerRoot(
+  container: Container,
+  child: Instance,
+  beforeChild: Instance | null
+): void {
+  const previousRoot = container.bodyElement
+  if (!previousRoot) {
+    setDirectContainerRoot(container, child)
+    return
+  }
+
+  // Native ordered roots should replace this temporary wrapper:
+  // https://github.com/Ernxst/gpuix/issues/619
+  const root = createImplicitRoot(container)
+  // A direct root owns any existing live regions. Move their current values
+  // before reparenting that application root, so no stale pair remains below
+  // it and the next alternating write keeps its existing cadence.
+  moveAnnouncerRegionsToRoot(container, root.id)
+  placeInImplicitRoot(container, root, previousRoot, null)
+  placeInImplicitRoot(container, root, child, beforeChild)
+  container.renderer.setRoot(root.id)
+}
+
+function placeInContainer(container: Container, child: Instance, beforeChild: Instance | null): void {
+  const root = container.bodyElement
+  if (!root) {
+    setDirectContainerRoot(container, child)
+    return
+  }
+  if (container.implicitRoot) {
+    placeInImplicitRoot(container, container.implicitRoot, child, beforeChild)
+    return
+  }
+  if (root === child) return
+  promoteContainerRoot(container, child, beforeChild)
 }
 
 // ── Host config ──────────────────────────────────────────────────────
@@ -2022,6 +2434,9 @@ export const hostConfig = {
     rootContainerInstance: Container,
     hostContext: HostContext
   ): Instance {
+    if ((type === "hr" || type === "input") && props.children != null) {
+      throw new Error(`[gpuix] <${type}> is a void element and cannot contain children.`)
+    }
     if (hostContext?.isInsideText && type !== "text") {
       throw new InlineTextChildError(
         `GPUIX <text> can contain only strings and nested <text> elements; received <${type}>. ` +
@@ -2046,6 +2461,7 @@ export const hostConfig = {
   },
 
   appendChild(parent: Instance, child: Instance | TextInstance): void {
+    assertCanHaveChildren(parent, child)
     const parentState = materialize(parent)
     // Attach before materializing. Materializing sends the child's props, and a
     // context-dependent implicit role reads the ancestors this call installs;
@@ -2092,20 +2508,21 @@ export const hostConfig = {
   },
 
   insertInContainerBefore(
-    _parent: Container,
-    _child: Instance,
-    _beforeChild: Instance
-  ): void {},
+    parent: Container,
+    child: Instance,
+    beforeChild: Instance
+  ): void {
+    placeInContainer(parent, child, beforeChild)
+  },
 
   removeChildFromContainer(parent: Container, child: Instance): void {
     disposeRecordingContext2D(child)
     disposeWebGpuContext(child)
-    // A fragment root can have several top-level children, so only the one
-    // `announce()` is actually attached under invalidates the id — an
-    // unrelated sibling leaving must not orphan `announce()`'s regions.
-    if (parent.rootElementId === child.id) {
-      parent.rootElementId = null
-      parent.rootElementType = null
+    const root = parent.bodyElement
+    if (!root) return
+
+    if (parent.implicitRoot) {
+      removeTrackedChild(stateFor(parent.implicitRoot), child)
     }
     markUnmounted(child)
     const destroyed = parent.renderer.destroyElement(child.id)
@@ -2116,6 +2533,23 @@ export const hostConfig = {
       if (parent.preventedDragOvers.has(id)) {
         parent.preventedDragOvers.clear()
       }
+    }
+    if (parent.implicitRoot) {
+      if (stateFor(parent.implicitRoot).children.length !== 0) return
+      markUnmounted(parent.implicitRoot)
+      parent.renderer.destroyElement(parent.implicitRoot.id)
+      clearAnnouncer(parent, false)
+      parent.bodyElement = null
+      parent.implicitRoot = null
+      parent.rootElementId = null
+      parent.rootElementType = null
+      return
+    }
+    if (root === child) {
+      clearAnnouncer(parent, false)
+      parent.bodyElement = null
+      parent.rootElementId = null
+      parent.rootElementType = null
     }
   },
 
@@ -2135,6 +2569,13 @@ export const hostConfig = {
       return
     }
     containerInfo.renderer.flushMutations()
+    try {
+      diagnoseZeroHeightVirtualLists(containerInfo)
+    } catch (error) {
+      // The commit is already applied. Match the existing strict virtual-list
+      // contract by surfacing the error through React's commit error channel.
+      console.error(error)
+    }
   },
 
   getRootHostContext(_rootContainerInstance: Container): HostContext {
@@ -2208,10 +2649,6 @@ export const hostConfig = {
     const container = containerFor(instance)
     const oldCanvasProps = oldProps as Props & { width?: number; height?: number }
     const newCanvasProps = newProps as Props & { width?: number; height?: number }
-    if (instance.type === "canvas" && (oldCanvasProps.width !== newCanvasProps.width || oldCanvasProps.height !== newCanvasProps.height)) {
-      resetRecordingContext2D(instance)
-      container.native.resetCanvas?.(instance.id)
-    }
     diagnoseUnsupportedStyleTransition(instance, container, newProps)
     diagnoseUnsupportedClassNameProp(instance, container, newProps)
     diagnoseUnsupportedAccessibilityRoleProp(instance, container, newProps)
@@ -2219,7 +2656,9 @@ export const hostConfig = {
     diagnoseVisuallyHiddenProp(instance, container, newProps)
     // Always resend style — per-element JSON is small, and this avoids
     // bugs from same-reference mutations or style removal.
-    container.renderer.setStyle(instance.id, styleForRenderer(instance, container, newProps) ?? {})
+    const resolvedStyle = styleForRenderer(instance, container, newProps)
+    container.renderer.setStyle(instance.id, resolvedStyle ?? {})
+    setResolvedStyle(instance, resolvedStyle)
     if (
       hasAnyEventListener(oldProps) ||
       hasAnyEventListener(newProps) ||
@@ -2230,6 +2669,12 @@ export const hostConfig = {
     }
     // Custom prop diff (for non-div/text elements)
     instance.props = newProps
+    if (instance.type === "canvas") {
+      const canvas = instance as CanvasHostElement
+      if (oldCanvasProps.width !== newCanvasProps.width || oldCanvasProps.height !== newCanvasProps.height) {
+        canvas.setBitmapDimensions(newCanvasProps.width, newCanvasProps.height)
+      }
+    }
     diffCustomProps(container.renderer, instance, oldProps, newProps)
     updateChoice(container, instance, oldProps, commitWriter(container))
     updateRange(instance, commitWriter(container))
@@ -2254,19 +2699,11 @@ export const hostConfig = {
   },
 
   appendChildToContainer(container: Container, child: Instance): void {
-    child.parentId = null
-    stateFor(child).parent = null
-    materialize(child)
-    container.renderer.setRoot(child.id)
-    // `announce()`'s regions hang off whichever element last became the root, so
-    // a remounted top-level instance invalidates them (see `announce.ts`). The
-    // *native* type — a `DIV_ALIASES` entry materializes as "div" — is what
-    // decides whether that element can host an appended child at all.
-    container.rootElementId = child.id
-    container.rootElementType = DIV_ALIASES.has(child.type) ? "div" : child.type
+    placeInContainer(container, child, null)
   },
 
   appendInitialChild(parent: Instance, child: Instance | TextInstance): void {
+    assertCanHaveChildren(parent, child)
     stateFor(parent).children.push(child)
     child.parentId = parent.id
     stateFor(child).parent = parent
@@ -2281,18 +2718,24 @@ export const hostConfig = {
     // style that sets `visibility` would otherwise paint an element React
     // asked to hide.
     const { hover: _hover, active: _active, ...base } =
-      withHiddenDisplay(instance.props.style, instance.props) ?? {}
-    rendererFor(instance).setStyle(instance.id, { ...base, visibility: "hidden" })
+      styleForRenderer(instance, containerFor(instance), instance.props) ?? {}
+    const hiddenStyle = { ...base, visibility: "hidden" as const }
+    rendererFor(instance).setStyle(instance.id, hiddenStyle)
+    setResolvedStyle(instance, hiddenStyle)
   },
 
   unhideInstance(instance: Instance, props: Props): void {
-    rendererFor(instance).setStyle(instance.id, withHiddenDisplay(props.style, props) ?? {})
+    const visibleStyle = styleForRenderer(instance, containerFor(instance), props)
+    rendererFor(instance).setStyle(instance.id, visibleStyle ?? {})
+    setResolvedStyle(instance, visibleStyle)
   },
 
   hideTextInstance(_textInstance: TextInstance): void {},
   unhideTextInstance(_textInstance: TextInstance, _text: string): void {},
 
-  clearContainer(_container: Container): void {},
+  clearContainer(container: Container): void {
+    clearContainerRoot(container)
+  },
 
   setCurrentUpdatePriority(newPriority: number): void {
     currentUpdatePriority = newPriority

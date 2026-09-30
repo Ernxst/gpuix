@@ -1,0 +1,24 @@
+{
+  "ctsRevision": "a2134bc7916dc6004781a137690b8741aef9aae1",
+  "runtime": "Bun 1.4.0 (34cbb9a40)",
+  "backend": "Metal",
+  "selectedCases": 15,
+  "selectors": [
+    "webgpu:api,operation,adapter,requestAdapter:requestAdapter_no_parameters:",
+    "webgpu:api,operation,adapter,requestDevice:default:",
+    "webgpu:api,operation,buffers,map:mappedAtCreation:*",
+    "webgpu:api,operation,command_buffer,clearBuffer:clear:",
+    "webgpu:api,operation,command_buffer,copyBufferToBuffer:*",
+    "webgpu:api,operation,command_buffer,copyTextureToTexture:color_textures,non_compressed,non_array:srcFormat=\"rgba8unorm\";dstFormat=\"rgba8unorm\";dimension=\"2d\"",
+    "webgpu:api,operation,shader_module,compilation_info:getCompilationInfo_returns:valid=true;name=\"ascii\"",
+    "webgpu:api,operation,shader_module,compilation_info:getCompilationInfo_returns:valid=false;name=\"ascii\"",
+    "webgpu:api,operation,rendering,basic:clear:",
+    "webgpu:api,operation,render_pipeline,sample_mask:fragment_output_mask:interpolated=false;sampleCount=1;rasterizationMask=0",
+    "webgpu:api,operation,render_pipeline,sample_mask:fragment_output_mask:interpolated=false;sampleCount=1;rasterizationMask=1"
+  ],
+  "providers": {
+    "node-webgpu": "webgpu@0.6.1",
+    "bun-webgpu": "bun-webgpu@0.1.7",
+    "wgpu-bun-dawn": "wgpu-bun@29.1.0 with @wgpu-bun/darwin-arm64-dawn@29.1.0"
+  }
+}

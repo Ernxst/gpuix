@@ -23,10 +23,28 @@ type Observation = {
   container: Container
   box: ResizeObserverBoxOptions
   lastReported: Size
+  eligibleTurn: number
 }
 
 const observationsByRenderer = new WeakMap<NativeRenderer, Set<ResizeObserver>>()
 const referenceCountsByRenderer = new WeakMap<NativeRenderer, Map<number, number>>()
+const pendingDeliveries = new WeakMap<
+  NativeRenderer,
+  Map<ResizeObserver, Map<number, NativeResizeEntry>>
+>()
+let deliveryTurn = 0
+let deliveryTurnDepth = 0
+
+export function beginResizeObserverDeliveryTurn(): () => void {
+  if (deliveryTurnDepth === 0) deliveryTurn += 1
+  deliveryTurnDepth += 1
+  let ended = false
+  return () => {
+    if (ended) return
+    ended = true
+    deliveryTurnDepth -= 1
+  }
+}
 
 function invalidTarget(): TypeError {
   return new TypeError("Failed to execute 'observe' on 'ResizeObserver': parameter 1 is not of type 'Element'.")
@@ -152,6 +170,7 @@ export class ResizeObserver {
       container,
       box,
       lastReported: { width: -1, height: -1 },
+      eligibleTurn: deliveryTurn + Number(deliveryTurnDepth > 0),
     }
     this.observations.set(target, observation)
     try {
@@ -188,6 +207,8 @@ export class ResizeObserver {
   }
 
   deliver(renderer: NativeRenderer, nativeEntries: readonly NativeResizeEntry[]): void {
+    const ownsTurn = deliveryTurnDepth === 0
+    const endTurn = ownsTurn ? beginResizeObserverDeliveryTurn() : undefined
     const byId = new Map(nativeEntries.map((entry) => [entry.elementId, entry]))
     const delivered: ResizeObserverEntry[] = []
     const unmounted: PublicInstance[] = []
@@ -197,6 +218,20 @@ export class ResizeObserver {
       if (observation.container.native !== renderer) continue
       const nativeEntry = byId.get(target.id)
       if (!nativeEntry) continue
+      if (observation.eligibleTurn > deliveryTurn) {
+        let observers = pendingDeliveries.get(renderer)
+        if (!observers) {
+          observers = new Map()
+          pendingDeliveries.set(renderer, observers)
+        }
+        let entries = observers.get(this)
+        if (!entries) {
+          entries = new Map()
+          observers.set(this, entries)
+        }
+        entries.set(target.id, nativeEntry)
+        continue
+      }
       const size = selectedSize(nativeEntry, observation.box)
       const isUnmounted = !observation.container.eventTargets.has(target.id)
       if (isUnmounted || !sameSize(size, observation.lastReported)) {
@@ -220,8 +255,24 @@ export class ResizeObserver {
       for (const target of unmounted) {
         if (this.observations.has(target)) this.unobserve(target)
       }
+      endTurn?.()
     }
   }
+}
+
+export function flushPendingResizeObservations(renderer: NativeRenderer): boolean {
+  const pending = pendingDeliveries.get(renderer)
+  if (!pending) return false
+  let delivered = false
+  for (const [observer, entries] of pending) {
+    if (entries.size > 0) {
+      observer.deliver(renderer, [...entries.values()])
+      delivered = true
+    }
+    pending.delete(observer)
+  }
+  if (pending.size === 0) pendingDeliveries.delete(renderer)
+  return delivered
 }
 
 export function dispatchResizeObservation(

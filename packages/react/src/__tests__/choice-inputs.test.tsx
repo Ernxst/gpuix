@@ -20,8 +20,11 @@ import type { FormPublicInstance, InputPublicInstance, PublicInstance } from "..
 expect.extend(gpuixMatchers)
 
 declare module "vitest" {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-empty-object-type
-  interface Matchers<T = any> extends GpuixMatchers<T> {}
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  interface Matchers<
+    R extends void | Promise<void> = void | Promise<void>,
+    T = unknown,
+  > extends GpuixMatchers<R> {}
 }
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
@@ -347,7 +350,6 @@ describeNative("native checkbox inputs", () => {
     expect(screen.getByRole("textbox", { name: "Morph" })).toBeTruthy()
   })
 })
-
 describeNative("native radio inputs", () => {
   let screen: TestRoot
 
@@ -1304,4 +1306,3 @@ describeNative("Base UI-shaped dispatched clicks", () => {
     expect(changes).toEqual(["large", "small"])
   })
 })
-

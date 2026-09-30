@@ -1,6 +1,6 @@
 {
   "name": "@gpuix/react",
-  "version": "0.19.0-fork.1",
+  "version": "0.25.0-fork.19",
   "license": "Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
@@ -10,6 +10,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./cn": {
+      "types": "./dist/cn.d.ts",
+      "import": "./dist/cn.js",
+      "default": "./dist/cn.js"
     },
     "./jsx-runtime": {
       "types": "./jsx-runtime.d.ts",
@@ -40,6 +45,11 @@
       "types": "./dist/components/select.d.ts",
       "import": "./dist/components/select.js",
       "default": "./dist/components/select.js"
+    },
+    "./dialog": {
+      "types": "./dist/components/dialog.d.ts",
+      "import": "./dist/components/dialog.js",
+      "default": "./dist/components/dialog.js"
     },
     "./combobox": {
       "types": "./dist/components/combobox.d.ts",
@@ -89,8 +99,9 @@
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuix/react locally. CI is the only release path. See AGENTS.md.'); process.exit(1) }\"",
     "build": "tsc",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
-    "typecheck": "tsc --noEmit && bun run typecheck:test",
-    "typecheck:test": "tsc --project tsconfig.test.json",
+    "typecheck": "tsc --noEmit && bun run typecheck:test && bun run typecheck:webgpu",
+    "typecheck:test": "tsc --project tsconfig.test.json && tsc --project tsconfig.exact-optional.json",
+    "typecheck:webgpu": "tsc --project tsconfig.webgpu-globals.json && tsc --project tsconfig.webgpu-types.json && tsc --project type-tests/webgpu/tsconfig.json && tsc --project type-tests/webgpu/tsconfig.with-types.json",
     "dev": "tsc --watch",
     "test": "bun run build && bun run typecheck:test && vitest run --exclude src/__tests__/canvas-wpt.test.tsx",
     "canvas:wpt": "vitest run src/__tests__/canvas-wpt.test.tsx",
@@ -98,7 +109,8 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@gpuix/native": "0.19.0-fork.1",
+    "@gpuix/native": "0.25.0-fork.19",
+    "cn": "^0.4.0",
     "eventsource-parser": "^4.1.0",
     "zod": "^4.4.3"
   },
@@ -106,7 +118,7 @@
     "react": "^19.2.0",
     "react-reconciler": "^0.33.0",
     "scheduler": "^0.27.0",
-    "vitest": "^3.0.0 || ^4.0.0"
+    "vitest": "^5.0.0"
   },
   "peerDependenciesMeta": {
     "scheduler": {
@@ -117,15 +129,17 @@
     }
   },
   "devDependencies": {
+    "@base-ui/react": "1.8.0",
     "@tanstack/react-router": "1.170.32",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^25.3.3",
     "@types/react": "^19.2.0",
     "@types/react-reconciler": "^0.28.0",
+    "@webgpu/types": "^0.1.74",
     "react-reconciler": "^0.33.0",
-    "scheduler": "^0.27.0",
     "react-refresh": "^0.18.0",
+    "scheduler": "^0.27.0",
     "typescript": "^5.3.0",
-    "vitest": "^4.0.18"
+    "vitest": "^5.0.1"
   }
 }

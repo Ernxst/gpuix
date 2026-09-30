@@ -8,6 +8,7 @@ React/TypeScript renderers backed by GPUI, with native and browser targets. Matc
 - `packages/native/src/`: Rust renderer and napi bridge.
 - `zed/`: GPUI submodule; consult the relevant implementation when changing GPUI integration.
 - `README.md`: public API reference. Read the sections relevant to the task.
+- `skills/gpuix/`: the agent skill app authors install to build on GPU-IX. Its `SKILL.md` holds the rules and traps; `references/` maps the feature surface.
 - `examples/`: runnable usage examples. `scripts/`: build and release entry points.
 
 ## Build and verification
@@ -18,14 +19,19 @@ Use Bun and the checked-in lockfile. In a new checkout, install with `bun instal
 - React tests: `bun run test` in `packages/react`; target the affected tests when appropriate.
 - Native build: `bun run build:native` from the repository root. This produces the release binary with `test-support`. Restart the app after rebuilding; hot reload cannot replace a loaded native binary.
 - Browser build: `bun run web:wasm` from the repository root.
-- Target directory: don't set `CARGO_TARGET_DIR` or pass `--target-dir`, including for one-off review builds. Cargo runs through mbx, which already gives each checkout its own target directory and deletes it when unused; a custom target directory bypasses mbx and is never cleaned up.
+- Target directory: don't set `CARGO_TARGET_DIR` or pass `--target-dir`, including for one-off review builds. Cargo runs through mbx, which already gives each checkout its own target directory and deletes it when unused; a custom target directory bypasses mbx and is never cleaned up. Before the first native build in a new checkout, run `mkdir -p packages/native/target && mbx adopt packages/native`. Otherwise `napi build` creates `target/` as a plain directory before Cargo runs, and mbx stops the build in a terminal to ask whether to move it, which an unattended run cannot answer.
+
+CI is disabled by default to control costs. No checks run on pull requests or pushes, so the absence of checks is not a signal; verify changes locally. Enable CI manually for a one-off run only when another platform is genuinely needed, such as Windows or Linux. Do not re-enable the workflow or change `.github/workflows/ci.yml` to get checks.
 
 Verify the target changed: TypeScript checks do not compile Rust, and native checks do not validate the browser renderer. Consult the relevant package scripts or CI job for additional checks required by the change.
+
+The native renderer cannot start inside an agent sandbox: macOS denies it the window and system services it needs. React tests, native tests, the examples and anything else that loads it need an unsandboxed run, so request one on the first attempt instead of trying sandboxed first. In a bb thread that cannot request one, such as Codex, run the command in a bb terminal, which runs outside the sandbox. Start it, wait for it, read it and close it in one shell command, with a tool timeout that covers the wait, because each separate call re-sends the whole conversation: `id=$(bb terminal create --thread $BB_THREAD_ID --command "…" --json | jq -r .terminalId); bb terminal wait $id --exit --timeout 10m; bb terminal output $id | tail -n 40; bb terminal close $id`. The first line of the output gives the exit code.
 
 ## Repository constraints
 
 - `packages/native/index.js`, `index.d.ts` and `*.node` are generated. Change Rust declarations and rebuild instead of editing generated output by hand.
 - Update the relevant README API section for user-facing fixes or features.
+- Update `skills/gpuix/` in the same PR when a change alters user-facing behaviour: a supported element, prop, style, selector, event, export or DOM API, a known gap closing or opening, or a testing behaviour. `bun run test` in `packages/plugins` checks the listed CSS module properties and selectors against the source and compiler, and the listed entry points against package exports. It does not find newly supported selectors omitted from the lists, so review the selector surface for those changes.
 - This fork ships package tarballs attached to GitHub releases, stamped and packed by hand. It does not publish the upstream package names to npm. Do not publish locally.
 - Preserve attribution headers and `THIRD_PARTY_NOTICES.md` when changing ported code.
 

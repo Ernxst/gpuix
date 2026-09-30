@@ -144,6 +144,99 @@ pub enum DimensionValue {
     Auto,
 }
 
+/// A pixel or percentage length used by spacing, offsets, and flex basis.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LengthValue {
+    Pixels(f64),
+    Percentage(f64), // 0.0 to 1.0
+}
+
+impl Default for LengthValue {
+    fn default() -> Self {
+        Self::Pixels(0.0)
+    }
+}
+
+impl LengthValue {
+    pub(crate) fn resolve(self, basis: f64) -> f64 {
+        match self {
+            Self::Pixels(value) => value,
+            Self::Percentage(value) => value * basis,
+        }
+    }
+
+    pub(crate) fn is_negative(self) -> bool {
+        match self {
+            Self::Pixels(value) | Self::Percentage(value) => value < 0.0,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for LengthValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{self, Visitor};
+
+        struct LengthVisitor;
+
+        impl Visitor<'_> for LengthVisitor {
+            type Value = LengthValue;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a number, px length, or percentage")
+            }
+
+            fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LengthValue::Pixels(value))
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LengthValue::Pixels(value as f64))
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(LengthValue::Pixels(value as f64))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                match parse_dimension(value).map_err(de::Error::custom)? {
+                    DimensionValue::Pixels(value) => Ok(LengthValue::Pixels(value)),
+                    DimensionValue::Percentage(value) => Ok(LengthValue::Percentage(value)),
+                    _ => Err(de::Error::custom("expected a px length or percentage")),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(LengthVisitor)
+    }
+}
+
+impl Serialize for LengthValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Pixels(value) => serializer.serialize_f64(*value),
+            Self::Percentage(value) => serializer.serialize_str(&format!("{}%", value * 100.0)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum TransitionProperty {
@@ -801,14 +894,14 @@ pub struct StyleDesc {
     pub flex_wrap: Option<String>,
     pub flex_grow: Option<f64>,
     pub flex_shrink: Option<f64>,
-    pub flex_basis: Option<f64>,
+    pub flex_basis: Option<LengthValue>,
     pub align_items: Option<String>,
     pub align_self: Option<String>,
     pub align_content: Option<String>,
     pub justify_content: Option<String>,
-    pub gap: Option<f64>,
-    pub row_gap: Option<f64>,
-    pub column_gap: Option<f64>,
+    pub gap: Option<LengthValue>,
+    pub row_gap: Option<LengthValue>,
+    pub column_gap: Option<LengthValue>,
     pub grid_template_columns: Option<Vec<GridTrackValue>>,
     pub grid_template_rows: Option<Vec<GridTrackValue>>,
     pub grid_row_start: Option<GridLineValue>,
@@ -829,23 +922,24 @@ pub struct StyleDesc {
     pub max_height: Option<DimensionValue>,
     pub aspect_ratio: Option<f64>,
 
-    pub padding: Option<f64>,
-    pub padding_top: Option<f64>,
-    pub padding_right: Option<f64>,
-    pub padding_bottom: Option<f64>,
-    pub padding_left: Option<f64>,
+    pub padding: Option<LengthValue>,
+    pub padding_top: Option<LengthValue>,
+    pub padding_right: Option<LengthValue>,
+    pub padding_bottom: Option<LengthValue>,
+    pub padding_left: Option<LengthValue>,
 
-    pub margin: Option<f64>,
-    pub margin_top: Option<f64>,
-    pub margin_right: Option<f64>,
-    pub margin_bottom: Option<f64>,
-    pub margin_left: Option<f64>,
+    pub margin: Option<LengthValue>,
+    pub margin_top: Option<LengthValue>,
+    pub margin_right: Option<LengthValue>,
+    pub margin_bottom: Option<LengthValue>,
+    pub margin_left: Option<LengthValue>,
 
     pub position: Option<String>,
-    pub top: Option<f64>,
-    pub right: Option<f64>,
-    pub bottom: Option<f64>,
-    pub left: Option<f64>,
+    pub z_index: Option<i32>,
+    pub top: Option<LengthValue>,
+    pub right: Option<LengthValue>,
+    pub bottom: Option<LengthValue>,
+    pub left: Option<LengthValue>,
 
     pub background: Option<BackgroundValue>,
     pub background_color: Option<String>,
@@ -891,6 +985,7 @@ pub struct StyleDesc {
     pub overflow: Option<String>,
     pub overflow_x: Option<String>,
     pub overflow_y: Option<String>,
+    pub scrollbar_width: Option<String>,
     pub clip_path: Option<gpui::ClipPath>,
 
     pub cursor: Option<String>,
@@ -906,17 +1001,48 @@ pub struct StyleDesc {
     #[serde(default, deserialize_with = "deserialize_transition_list")]
     pub transition: Option<Vec<StyleTransition>>,
     pub hover_group: Option<String>,
+    /// Name shared by the marked ancestors `hoverWithin` and `activeWithin`
+    /// follow. Unset matches every marked ancestor.
+    pub hover_within_group: Option<String>,
+    /// Name shared by the marked ancestor that `groupFocus*` styles follow.
+    pub focus_within_group: Option<String>,
+    /// CSS module group states in stylesheet source order. Internal metadata
+    /// used to resolve simultaneously active ancestor states before building
+    /// inherited text styles.
+    #[serde(default, skip_serializing)]
+    pub(crate) group_state_order: Vec<String>,
 
-    /// Nearest ancestor hover group, resolved by the renderer for this frame.
-    /// This is paint context rather than an authored declaration.
+    /// Per-element GPUI paint identity for this element's `hoverGroup`.
     #[serde(skip)]
-    pub(crate) hover_within_group: Option<gpui::SharedString>,
+    pub(crate) resolved_hover_group: Option<gpui::SharedString>,
+    /// The matching ancestor selected for GPUI's one hover refinement.
+    #[serde(skip)]
+    pub(crate) resolved_hover_within_group: Option<gpui::SharedString>,
+    /// The matching ancestor selected for GPUI's one active refinement.
+    #[serde(skip)]
+    pub(crate) resolved_active_within_group: Option<gpui::SharedString>,
+    /// The matching ancestor selected for GPUI's group focus refinements.
+    #[serde(skip)]
+    pub(crate) resolved_focus_within_group: Option<gpui::SharedString>,
 
     pub hover: Option<Box<StyleDesc>>,
     pub hover_within: Option<Box<StyleDesc>>,
     pub active: Option<Box<StyleDesc>>,
+    /// Applies while any matching `hoverGroup` ancestor is pressed.
+    pub active_within: Option<Box<StyleDesc>>,
     pub focus: Option<Box<StyleDesc>>,
     pub focus_visible: Option<Box<StyleDesc>>,
+    /// Applies while this element or a descendant has focus. Needs no
+    /// `hoverGroup`-style marker: the relationship comes from the focused
+    /// element's ancestry, which the renderer already walks.
+    pub focus_within: Option<Box<StyleDesc>>,
+    /// Group focus states are distinct from the element-local focus states.
+    pub group_focus: Option<Box<StyleDesc>>,
+    pub group_focus_visible: Option<Box<StyleDesc>>,
+    pub group_focus_within: Option<Box<StyleDesc>>,
+    /// Applies while OS files are dragged over this element. Desktop-only:
+    /// there is no web equivalent.
+    pub drag_over: Option<Box<StyleDesc>>,
 }
 
 /// One rejected field. The renderer adds element context when diagnostics are drained,
@@ -1538,7 +1664,15 @@ fn grid_track_sizing_has_fixed_component(track: &GridTrackValue) -> bool {
 fn grid_template_has_valid_auto_repetition(tracks: &[GridTrackValue]) -> bool {
     let auto_repetition_count = tracks
         .iter()
-        .filter(|track| matches!(track, GridTrackValue::Repeat { count: GridRepeatCount::Auto(_), .. }))
+        .filter(|track| {
+            matches!(
+                track,
+                GridTrackValue::Repeat {
+                    count: GridRepeatCount::Auto(_),
+                    ..
+                }
+            )
+        })
         .count();
 
     match auto_repetition_count {
@@ -2017,9 +2151,10 @@ fn parse_transition_shorthand(
         for token in tokens.iter().skip(1) {
             if token.ends_with("ms")
                 || token.ends_with('s')
-                || token.chars().next().is_some_and(|ch| {
-                    ch.is_ascii_digit() || ch == '.' || ch == '-' || ch == '+'
-                })
+                || token
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| ch.is_ascii_digit() || ch == '.' || ch == '-' || ch == '+')
             {
                 match parse_transition_time(token) {
                     Ok(value) if time_count == 0 => {
@@ -2392,6 +2527,15 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         };
     }
 
+    macro_rules! length_field {
+        ($key:expr, $value:expr, $name:literal, $field:ident) => {
+            if $key == $name {
+                parsed.style.$field = decode(&property!($name), $value, &mut parsed.problems);
+                continue;
+            }
+        };
+    }
+
     macro_rules! dimension_field {
         ($key:expr, $value:expr, $name:literal, $field:ident) => {
             if $key == $name {
@@ -2476,26 +2620,101 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             }
             continue;
         }
+        if key == "hoverWithinGroup" {
+            if prefix.is_empty() {
+                parsed.style.hover_within_group =
+                    decode::<String>(&property!("hoverWithinGroup"), value, &mut parsed.problems);
+            } else {
+                reject(
+                    &mut parsed.problems,
+                    property!("hoverWithinGroup"),
+                    value,
+                    "hoverWithinGroup marks the base element and cannot be nested in a state style",
+                );
+            }
+            continue;
+        }
+        if key == "focusWithinGroup" {
+            if prefix.is_empty() {
+                parsed.style.focus_within_group =
+                    decode::<String>(&property!("focusWithinGroup"), value, &mut parsed.problems);
+            } else {
+                reject(
+                    &mut parsed.problems,
+                    property!("focusWithinGroup"),
+                    value,
+                    "focusWithinGroup marks the base element and cannot be nested in a state style",
+                );
+            }
+            continue;
+        }
+        if key == "groupStateOrder" {
+            if prefix.is_empty() {
+                match serde_json::from_value::<Vec<String>>(value.clone()) {
+                    Ok(order)
+                        if order.iter().all(|state| {
+                            matches!(
+                                state.as_str(),
+                                "hoverWithin"
+                                    | "activeWithin"
+                                    | "groupFocus"
+                                    | "groupFocusVisible"
+                                    | "groupFocusWithin"
+                            )
+                        }) => {
+                        parsed.style.group_state_order = order
+                    }
+                    _ => reject(
+                        &mut parsed.problems,
+                        property!("groupStateOrder"),
+                        value,
+                        "groupStateOrder is internal CSS module metadata",
+                    ),
+                }
+            }
+            continue;
+        }
         if key == "display"
-            && matches!(prefix, "hover" | "active")
+            && matches!(prefix, "hover" | "active" | "dragOver")
             && value.as_str() == Some("none")
         {
             reject(
                 &mut parsed.problems,
                 property!("display"),
                 value,
-                "display: \"none\" cannot be set by hover or active: hiding the element removes the hit-test box that triggers the state; use visibility: \"hidden\" or hoverWithin on a descendant",
+                "display: \"none\" cannot be set by hover, active, or dragOver: hiding the element removes the hit-test box that triggers the state; use visibility: \"hidden\" or hoverWithin on a descendant",
             );
             continue;
         }
         enum_field!(key, value, "display", display, ["none", "flex", "grid"]);
         enum_field!(key, value, "visibility", visibility, ["visible", "hidden"]);
+        if key == "zIndex" {
+            if prefix.is_empty() {
+                parsed.style.z_index = value.as_i64().and_then(|value| i32::try_from(value).ok());
+                if parsed.style.z_index.is_none() {
+                    reject(
+                        &mut parsed.problems,
+                        property!("zIndex"),
+                        value,
+                        "expected a signed 32-bit integer",
+                    );
+                }
+            } else {
+                reject(
+                    &mut parsed.problems,
+                    property!("zIndex"),
+                    value,
+                    "zIndex is not supported in state styles",
+                );
+            }
+            continue;
+        }
         enum_field!(
             key,
             value,
             "flexDirection",
             flex_direction,
-            ["row", "column"]
+            ["row", "row-reverse", "column", "column-reverse"]
         );
         enum_field!(
             key,
@@ -2506,7 +2725,7 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         );
         number_field!(key, value, "flexGrow", flex_grow);
         number_field!(key, value, "flexShrink", flex_shrink);
-        number_field!(key, value, "flexBasis", flex_basis);
+        length_field!(key, value, "flexBasis", flex_basis);
         enum_field!(
             key,
             value,
@@ -2614,9 +2833,9 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
                 "space-evenly"
             ]
         );
-        number_field!(key, value, "gap", gap);
-        number_field!(key, value, "rowGap", row_gap);
-        number_field!(key, value, "columnGap", column_gap);
+        length_field!(key, value, "gap", gap);
+        length_field!(key, value, "rowGap", row_gap);
+        length_field!(key, value, "columnGap", column_gap);
         if key == "gridColumn" || key == "gridRow" {
             let property = property!(key);
             match parse_grid_line_list(value, 1, 2, "expected 1 or 2 grid lines separated by \"/\"")
@@ -2738,16 +2957,16 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             continue;
         }
 
-        number_field!(key, value, "padding", padding);
-        number_field!(key, value, "paddingTop", padding_top);
-        number_field!(key, value, "paddingRight", padding_right);
-        number_field!(key, value, "paddingBottom", padding_bottom);
-        number_field!(key, value, "paddingLeft", padding_left);
-        number_field!(key, value, "margin", margin);
-        number_field!(key, value, "marginTop", margin_top);
-        number_field!(key, value, "marginRight", margin_right);
-        number_field!(key, value, "marginBottom", margin_bottom);
-        number_field!(key, value, "marginLeft", margin_left);
+        length_field!(key, value, "padding", padding);
+        length_field!(key, value, "paddingTop", padding_top);
+        length_field!(key, value, "paddingRight", padding_right);
+        length_field!(key, value, "paddingBottom", padding_bottom);
+        length_field!(key, value, "paddingLeft", padding_left);
+        length_field!(key, value, "margin", margin);
+        length_field!(key, value, "marginTop", margin_top);
+        length_field!(key, value, "marginRight", margin_right);
+        length_field!(key, value, "marginBottom", margin_bottom);
+        length_field!(key, value, "marginLeft", margin_left);
 
         enum_field!(
             key,
@@ -2756,10 +2975,10 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             position,
             ["relative", "absolute", "fixed"]
         );
-        number_field!(key, value, "top", top);
-        number_field!(key, value, "right", right);
-        number_field!(key, value, "bottom", bottom);
-        number_field!(key, value, "left", left);
+        length_field!(key, value, "top", top);
+        length_field!(key, value, "right", right);
+        length_field!(key, value, "bottom", bottom);
+        length_field!(key, value, "left", left);
 
         if key == "background" {
             let property = property!("background");
@@ -3171,6 +3390,13 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             user_select,
             ["auto", "text", "none"]
         );
+        enum_field!(
+            key,
+            value,
+            "scrollbarWidth",
+            scrollbar_width,
+            ["auto", "none"]
+        );
         // Browsers use touch-action to decide which built-in gestures to
         // withhold. GPUI has no corresponding gesture handling, so shared
         // styles may declare it without affecting native rendering.
@@ -3187,14 +3413,30 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
 
         if matches!(
             key.as_str(),
-            "hover" | "hoverWithin" | "active" | "focus" | "focusVisible"
+            "hover"
+                | "hoverWithin"
+                | "active"
+                | "activeWithin"
+                | "focus"
+                | "focusVisible"
+                | "focusWithin"
+                | "groupFocus"
+                | "groupFocusVisible"
+                | "groupFocusWithin"
+                | "dragOver"
         ) {
             let property = match key.as_str() {
                 "hover" => property!("hover"),
                 "hoverWithin" => property!("hoverWithin"),
                 "active" => property!("active"),
+                "activeWithin" => property!("activeWithin"),
                 "focus" => property!("focus"),
                 "focusVisible" => property!("focusVisible"),
+                "focusWithin" => property!("focusWithin"),
+                "groupFocus" => property!("groupFocus"),
+                "groupFocusVisible" => property!("groupFocusVisible"),
+                "groupFocusWithin" => property!("groupFocusWithin"),
+                "dragOver" => property!("dragOver"),
                 _ => unreachable!(),
             };
             if !prefix.is_empty() {
@@ -3218,6 +3460,10 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
                         parsed.style.active =
                             parse_nested_style("active", value, &mut parsed.problems)
                     }
+                    "activeWithin" => {
+                        parsed.style.active_within =
+                            parse_nested_style("activeWithin", value, &mut parsed.problems)
+                    }
                     "focus" => {
                         parsed.style.focus =
                             parse_nested_style("focus", value, &mut parsed.problems)
@@ -3225,6 +3471,26 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
                     "focusVisible" => {
                         parsed.style.focus_visible =
                             parse_nested_style("focusVisible", value, &mut parsed.problems)
+                    }
+                    "focusWithin" => {
+                        parsed.style.focus_within =
+                            parse_nested_style("focusWithin", value, &mut parsed.problems)
+                    }
+                    "groupFocus" => {
+                        parsed.style.group_focus =
+                            parse_nested_style("groupFocus", value, &mut parsed.problems)
+                    }
+                    "groupFocusVisible" => {
+                        parsed.style.group_focus_visible =
+                            parse_nested_style("groupFocusVisible", value, &mut parsed.problems)
+                    }
+                    "groupFocusWithin" => {
+                        parsed.style.group_focus_within =
+                            parse_nested_style("groupFocusWithin", value, &mut parsed.problems)
+                    }
+                    "dragOver" => {
+                        parsed.style.drag_over =
+                            parse_nested_style("dragOver", value, &mut parsed.problems)
                     }
                     _ => unreachable!(),
                 }
@@ -3275,7 +3541,8 @@ fn validate_ranges(parsed: &mut ParsedStyle, prefix: &str) {
     macro_rules! reject_if {
         ($field:ident, $name:literal, $invalid:expr, $reason:literal) => {
             if parsed.style.$field.is_some_and($invalid) {
-                let value = serde_json::Value::from(parsed.style.$field.take().unwrap());
+                let value = serde_json::to_value(parsed.style.$field.take().unwrap())
+                    .expect("style values are JSON serializable");
                 let property = if prefix.is_empty() {
                     $name.to_string()
                 } else {
@@ -3342,15 +3609,12 @@ fn validate_ranges(parsed: &mut ParsedStyle, prefix: &str) {
             $(reject_if!($field, $name, |value| value < 0.0, "expected a non-negative number");)+
         };
     }
+    macro_rules! non_negative_length {
+        ($($field:ident => $name:literal),+ $(,)?) => {
+            $(reject_if!($field, $name, |value| value.is_negative(), "expected a non-negative length");)+
+        };
+    }
     non_negative!(
-        gap => "gap",
-        row_gap => "rowGap",
-        column_gap => "columnGap",
-        padding => "padding",
-        padding_top => "paddingTop",
-        padding_right => "paddingRight",
-        padding_bottom => "paddingBottom",
-        padding_left => "paddingLeft",
         border_width => "borderWidth",
         border_top_width => "borderTopWidth",
         border_right_width => "borderRightWidth",
@@ -3362,6 +3626,17 @@ fn validate_ranges(parsed: &mut ParsedStyle, prefix: &str) {
         border_bottom_left_radius => "borderBottomLeftRadius",
         border_bottom_right_radius => "borderBottomRightRadius",
         outline_width => "outlineWidth",
+    );
+    non_negative_length!(
+        flex_basis => "flexBasis",
+        gap => "gap",
+        row_gap => "rowGap",
+        column_gap => "columnGap",
+        padding => "padding",
+        padding_top => "paddingTop",
+        padding_right => "paddingRight",
+        padding_bottom => "paddingBottom",
+        padding_left => "paddingLeft",
     );
 }
 
@@ -3694,7 +3969,14 @@ mod tests {
         }));
 
         assert_eq!(parsed.style.width, Some(DimensionValue::Pixels(120.0)));
-        assert_eq!(parsed.style.hover.as_deref().and_then(|style| style.opacity), Some(0.5));
+        assert_eq!(
+            parsed
+                .style
+                .hover
+                .as_deref()
+                .and_then(|style| style.opacity),
+            Some(0.5)
+        );
         assert_eq!(parsed.problems.len(), 1);
         assert_eq!(parsed.problems[0].property, "notAStyleProperty");
         assert_eq!(parsed.problems[0].reason, "unsupported style property");
@@ -3758,14 +4040,26 @@ mod tests {
         assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
         let transitions = parsed.style.transition.expect("transition list");
         assert_eq!(transitions.len(), 2);
-        assert_eq!(transitions[0].properties, vec![TransitionProperty::BackgroundColor]);
+        assert_eq!(
+            transitions[0].properties,
+            vec![TransitionProperty::BackgroundColor]
+        );
         assert_eq!(transitions[0].duration_ms, 120.0);
         assert_eq!(transitions[0].delay_ms, 0.0);
-        assert_eq!(transitions[0].easing, TransitionEasing::Name("easeOut".into()));
-        assert_eq!(transitions[1].properties, vec![TransitionProperty::BorderRadius]);
+        assert_eq!(
+            transitions[0].easing,
+            TransitionEasing::Name("easeOut".into())
+        );
+        assert_eq!(
+            transitions[1].properties,
+            vec![TransitionProperty::BorderRadius]
+        );
         assert_eq!(transitions[1].duration_ms, 200.0);
         assert_eq!(transitions[1].delay_ms, 40.0);
-        assert_eq!(transitions[1].easing, TransitionEasing::Name("linear".into()));
+        assert_eq!(
+            transitions[1].easing,
+            TransitionEasing::Name("linear".into())
+        );
     }
 
     #[test]
@@ -3795,7 +4089,11 @@ mod tests {
             assert!(parsed.style.transition.is_none(), "{value:?}");
             assert_eq!(parsed.problems.len(), 1, "{value:?}: {:?}", parsed.problems);
             assert!(parsed.problems[0].property == "transition");
-            assert!(parsed.problems[0].reason.contains(reason), "{:?}", parsed.problems);
+            assert!(
+                parsed.problems[0].reason.contains(reason),
+                "{:?}",
+                parsed.problems
+            );
         }
     }
 
@@ -3851,7 +4149,10 @@ mod tests {
 
         let parsed = parse_style_value(&json!({ "lineHeight": "16px" }));
         assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
-        assert_eq!(parsed.style.line_height, Some(LineHeightValue::Pixels(16.0)));
+        assert_eq!(
+            parsed.style.line_height,
+            Some(LineHeightValue::Pixels(16.0))
+        );
     }
 
     #[test]
@@ -4133,12 +4434,52 @@ mod tests {
     }
 
     #[test]
+    fn hover_within_group_is_a_top_level_style_marker() {
+        let top_level = parse_style_value(&json!({ "hoverWithinGroup": "sidebar" }));
+        assert!(top_level.problems.is_empty());
+        assert_eq!(
+            top_level.style.hover_within_group.as_deref(),
+            Some("sidebar")
+        );
+
+        let nested = parse_style_value(&json!({
+            "hover": { "hoverWithinGroup": "sidebar" }
+        }));
+        assert_eq!(nested.problems.len(), 1);
+        assert_eq!(nested.problems[0].property, "hover.hoverWithinGroup");
+        assert_eq!(
+            nested.problems[0].reason,
+            "hoverWithinGroup marks the base element and cannot be nested in a state style"
+        );
+    }
+
+    #[test]
+    fn group_state_order_is_internal_css_module_metadata() {
+        let parsed = parse_style_value(&json!({
+            "hoverWithinGroup": "card",
+            "focusWithinGroup": "panel",
+            "groupStateOrder": ["groupFocusVisible", "hoverWithin"]
+        }));
+        assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+        assert_eq!(
+            parsed.style.group_state_order,
+            vec!["groupFocusVisible", "hoverWithin"]
+        );
+        assert!(!serde_json::to_value(parsed.style)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("groupStateOrder"));
+    }
+
+    #[test]
     fn rejects_display_none_in_hover_and_active_styles() {
-        let reason = "display: \"none\" cannot be set by hover or active: hiding the element removes the hit-test box that triggers the state; use visibility: \"hidden\" or hoverWithin on a descendant";
+        let reason = "display: \"none\" cannot be set by hover, active, or dragOver: hiding the element removes the hit-test box that triggers the state; use visibility: \"hidden\" or hoverWithin on a descendant";
 
         for (state, style) in [
             ("hover", json!({ "hover": { "display": "none" } })),
             ("active", json!({ "active": { "display": "none" } })),
+            ("dragOver", json!({ "dragOver": { "display": "none" } })),
         ] {
             let parsed = parse_style_value(&style);
             assert_eq!(parsed.problems.len(), 1, "{state}: {:?}", parsed.problems);
@@ -4150,7 +4491,16 @@ mod tests {
             "hover": { "display": "grid", "opacity": 0.5 }
         }));
         assert!(hover_grid.problems.is_empty(), "{:?}", hover_grid.problems);
-        assert_eq!(hover_grid.style.hover.as_deref().unwrap().display.as_deref(), Some("grid"));
+        assert_eq!(
+            hover_grid
+                .style
+                .hover
+                .as_deref()
+                .unwrap()
+                .display
+                .as_deref(),
+            Some("grid")
+        );
 
         let hover_within_none = parse_style_value(&json!({
             "hoverWithin": { "display": "none" }
@@ -4164,6 +4514,44 @@ mod tests {
             hover_within_none
                 .style
                 .hover_within
+                .as_deref()
+                .unwrap()
+                .display
+                .as_deref(),
+            Some("none")
+        );
+
+        let focus_within_none = parse_style_value(&json!({
+            "focusWithin": { "display": "none" }
+        }));
+        assert!(
+            focus_within_none.problems.is_empty(),
+            "{:?}",
+            focus_within_none.problems
+        );
+        assert_eq!(
+            focus_within_none
+                .style
+                .focus_within
+                .as_deref()
+                .unwrap()
+                .display
+                .as_deref(),
+            Some("none")
+        );
+
+        let active_within_none = parse_style_value(&json!({
+            "activeWithin": { "display": "none" }
+        }));
+        assert!(
+            active_within_none.problems.is_empty(),
+            "{:?}",
+            active_within_none.problems
+        );
+        assert_eq!(
+            active_within_none
+                .style
+                .active_within
                 .as_deref()
                 .unwrap()
                 .display
@@ -4385,7 +4773,11 @@ mod tests {
                 }]
             }));
 
-            assert!(parsed.problems.is_empty(), "{keyword}: {:?}", parsed.problems);
+            assert!(
+                parsed.problems.is_empty(),
+                "{keyword}: {:?}",
+                parsed.problems
+            );
             let expected = match keyword {
                 "auto-fill" => GridAutoRepeatKind::AutoFill,
                 _ => GridAutoRepeatKind::AutoFit,
@@ -4506,7 +4898,14 @@ mod tests {
 
     #[test]
     fn rejects_every_invalid_grid_repeat_count() {
-        for count in [json!(0), json!(2.5), json!(-1), json!(65), json!("auto"), json!("Auto-Fill")] {
+        for count in [
+            json!(0),
+            json!(2.5),
+            json!(-1),
+            json!(65),
+            json!("auto"),
+            json!("Auto-Fill"),
+        ] {
             let parsed = parse_style_value(&json!({
                 "gridTemplateColumns": [{
                     "type": "repeat",
@@ -4539,10 +4938,7 @@ mod tests {
         }));
         assert_eq!(fit_content_only.style.grid_template_columns, None);
         assert_eq!(fit_content_only.problems.len(), 1);
-        assert_eq!(
-            fit_content_only.problems[0].property,
-            "gridTemplateColumns"
-        );
+        assert_eq!(fit_content_only.problems[0].property, "gridTemplateColumns");
 
         // A `minmax()` with a fixed percentage lower bound does count, even
         // though its upper bound (`1fr`) does not.
@@ -5013,6 +5409,15 @@ mod tests {
     }
 
     #[test]
+    fn flex_direction_accepts_reverse_values() {
+        for value in ["row-reverse", "column-reverse"] {
+            let parsed = parse_style_value(&json!({ "flexDirection": value }));
+            assert!(parsed.problems.is_empty(), "{value}: {:?}", parsed.problems);
+            assert_eq!(parsed.style.flex_direction.as_deref(), Some(value));
+        }
+    }
+
+    #[test]
     fn every_declared_style_field_is_parsed_or_has_an_explicit_value_rejection() {
         let source: serde_json::Value = serde_json::from_str(
             r#"{
@@ -5075,6 +5480,7 @@ mod tests {
             "marginBottom": -1,
             "marginLeft": -1,
             "position": "absolute",
+            "zIndex": 3,
             "top": 1,
             "right": 1,
             "bottom": 1,
@@ -5121,6 +5527,7 @@ mod tests {
             "overflow": "visible",
             "overflowX": "hidden",
             "overflowY": "scroll",
+            "scrollbarWidth": "auto",
             "clipPath": "inset(50%)",
             "cursor": "pointer",
             "pointerEvents": "auto",
@@ -5134,11 +5541,19 @@ mod tests {
                 "easing": "ease"
             },
             "hoverGroup": "destination-row",
+            "hoverWithinGroup": "destination-row",
             "hover": { "color": "blue" },
             "hoverWithin": { "backgroundColor": "magenta" },
             "active": { "color": "green" },
+            "activeWithin": { "color": "orange" },
             "focus": { "borderColor": "yellow" },
-            "focusVisible": { "outlineColor": "cyan" }
+            "focusVisible": { "outlineColor": "cyan" },
+            "focusWithin": { "borderColor": "pink" },
+            "focusWithinGroup": "card",
+            "groupFocus": { "color": "purple" },
+            "groupFocusVisible": { "color": "navy" },
+            "groupFocusWithin": { "color": "maroon" },
+            "dragOver": { "backgroundColor": "teal" }
         }"#,
         )
         .unwrap();
@@ -5156,7 +5571,13 @@ mod tests {
             .unwrap()
             .keys()
             .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(declared_keys, covered_keys);
+        assert_eq!(
+            declared_keys,
+            covered_keys,
+            "missing source keys: {:?}; unexpected source keys: {:?}",
+            declared_keys.difference(&covered_keys).collect::<Vec<_>>(),
+            covered_keys.difference(&declared_keys).collect::<Vec<_>>()
+        );
 
         // This catches the original alignSelf failure mode: a field may parse
         // and serialize correctly while never reaching any renderer branch.
@@ -5180,6 +5601,76 @@ mod tests {
                 renderer.contains(&format!("style.{native_name}")),
                 "{key} is declared but has no renderer application path"
             );
+        }
+    }
+
+    #[test]
+    fn spacing_lengths_preserve_pixel_and_percentage_units() {
+        let properties = [
+            "flexBasis",
+            "gap",
+            "rowGap",
+            "columnGap",
+            "padding",
+            "paddingTop",
+            "paddingRight",
+            "paddingBottom",
+            "paddingLeft",
+            "margin",
+            "marginTop",
+            "marginRight",
+            "marginBottom",
+            "marginLeft",
+            "top",
+            "right",
+            "bottom",
+            "left",
+        ];
+
+        for property in properties {
+            let parsed = parse_style_value(&json!({ property: "10%" }));
+            assert!(parsed.problems.is_empty(), "{property}: {:?}", parsed.problems);
+            let serialized = serde_json::to_value(parsed.style).unwrap();
+            assert_eq!(serialized[property], "10%", "{property}");
+
+            let pixels = parse_style_value(&json!({ property: "12px" }));
+            assert!(pixels.problems.is_empty(), "{property}: {:?}", pixels.problems);
+            let serialized = serde_json::to_value(pixels.style).unwrap();
+            assert_eq!(serialized[property], 12.0, "{property}");
+        }
+
+        for property in ["margin", "marginTop", "marginRight", "marginBottom", "marginLeft"] {
+            let parsed = parse_style_value(&json!({ property: "-10%" }));
+            assert!(parsed.problems.is_empty(), "{property}: {:?}", parsed.problems);
+        }
+    }
+
+    #[test]
+    fn spacing_lengths_reject_auto_and_negative_non_margin_lengths() {
+        for property in [
+            "flexBasis",
+            "gap",
+            "rowGap",
+            "columnGap",
+            "padding",
+            "paddingTop",
+            "paddingRight",
+            "paddingBottom",
+            "paddingLeft",
+            "top",
+            "right",
+            "bottom",
+            "left",
+        ] {
+            let auto = parse_style_value(&json!({ property: "auto" }));
+            assert_eq!(auto.problems.len(), 1, "{property}");
+            assert_eq!(auto.problems[0].property, property);
+
+            if property != "top" && property != "right" && property != "bottom" && property != "left" {
+                let negative = parse_style_value(&json!({ property: "-10%" }));
+                assert_eq!(negative.problems.len(), 1, "{property}");
+                assert_eq!(negative.problems[0].property, property);
+            }
         }
     }
     fn with_fill(fill: &str) -> StyleDesc {
@@ -5659,7 +6150,10 @@ mod tests {
             },
         }));
         assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
-        assert!(matches!(parsed.style.box_shadow, Some(BoxShadowValue::One(_))));
+        assert!(matches!(
+            parsed.style.box_shadow,
+            Some(BoxShadowValue::One(_))
+        ));
 
         let round_tripped = serde_json::to_value(&parsed.style).unwrap();
         assert!(round_tripped["boxShadow"].is_object());
@@ -5683,7 +6177,10 @@ mod tests {
         }));
         assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
         let Some(BoxShadowValue::Many(layers)) = &parsed.style.box_shadow else {
-            panic!("expected an array of layers, got {:?}", parsed.style.box_shadow);
+            panic!(
+                "expected an array of layers, got {:?}",
+                parsed.style.box_shadow
+            );
         };
         assert_eq!(layers.len(), 2);
         assert!(!layers[0].inset);
@@ -5714,7 +6211,10 @@ mod tests {
                 { "offsetX": 0.0, "offsetY": 2.0, "blurRadius": 0.0, "spreadRadius": 0.0, "color": "not-a-color" },
             ],
         }));
-        assert_eq!(parsed.style.box_shadow, None, "an invalid layer rejects the whole list");
+        assert_eq!(
+            parsed.style.box_shadow, None,
+            "an invalid layer rejects the whole list"
+        );
         assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
         assert_eq!(parsed.problems[0].property, "boxShadow[1].color");
     }
@@ -5744,5 +6244,34 @@ mod tests {
         assert_eq!(parsed.style.box_shadow, None);
         assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
         assert_eq!(parsed.problems[0].property, "boxShadow.color");
+    }
+
+    #[test]
+    fn z_index_accepts_signed_integers() {
+        for (value, expected) in [(-10, -10), (0, 0), (12, 12)] {
+            let parsed = parse_style_value(&json!({ "zIndex": value }));
+            assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+            assert_eq!(parsed.style.z_index, Some(expected));
+        }
+    }
+
+    #[test]
+    fn z_index_rejects_values_that_are_not_signed_32_bit_integers() {
+        for value in [json!(1.5), json!("2"), json!(2147483648_i64), json!(-2147483649_i64)] {
+            let parsed = parse_style_value(&json!({ "zIndex": value }));
+            assert_eq!(parsed.style.z_index, None);
+            assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
+            assert_eq!(parsed.problems[0].property, "zIndex");
+        }
+    }
+
+    #[test]
+    fn z_index_is_rejected_in_state_styles() {
+        for state in ["hover", "active", "focus"] {
+            let parsed = parse_style_value(&json!({ state: { "zIndex": 1 } }));
+            assert_eq!(parsed.style.z_index, None);
+            assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
+            assert_eq!(parsed.problems[0].property, format!("{state}.zIndex"));
+        }
     }
 }

@@ -46,6 +46,9 @@ export type DimensionValue =
   | `calc(${CalcExpression})`
   | `clamp(${LengthAtom}, ${LengthAtom}, ${LengthAtom})`
 
+/** A pixel or percentage length for spacing, offsets, and flex basis. */
+export type LengthValue = number | `${number}px` | `${number}%`
+
 /**
  * A bare number or numeric string is a unitless multiplier of the resolved
  * font size, matching React DOM's `lineHeight`. A `${number}px` string is an
@@ -262,7 +265,7 @@ export type FontWeight =
 
 export type Display = "none" | "flex" | "grid"
 export type Visibility = "visible" | "hidden"
-export type FlexDirection = "row" | "column"
+export type FlexDirection = "row" | "row-reverse" | "column" | "column-reverse"
 export type FlexWrap = "nowrap" | "wrap" | "wrap-reverse"
 export type AlignItems = "start" | "flex-start" | "center" | "end" | "flex-end" | "baseline" | "stretch"
 export type AlignContent =
@@ -280,8 +283,9 @@ export type AlignContent =
   | "space-evenly"
   | "stretch"
 export type JustifyContent = Exclude<AlignContent, "normal" | "stretch">
-export type Position = "relative" | "absolute"
+export type Position = "relative" | "absolute" | "fixed"
 export type Overflow = "visible" | "hidden" | "scroll" | "auto"
+export type ScrollbarWidth = "auto" | "none"
 export type Cursor = "default" | "pointer"
 
 export interface MotionStyle {
@@ -329,6 +333,8 @@ export interface MotionTransition {
 export interface MotionProps {
   initial?: MotionStyle | false
   animate: MotionStyle
+  /** Target applied while this node is leaving `AnimatePresence`. */
+  exit?: MotionStyle
   transition?: MotionTransition
 }
 
@@ -508,13 +514,23 @@ export type NativeStateStyleKey =
   | "hover"
   | "hoverWithin"
   | "active"
+  | "activeWithin"
   | "focus"
   | "focusVisible"
+  | "focusWithin"
+  | "dragOver"
 
 /** Base declarations accepted inside a native interaction-state style. */
 export type NativeStateStyle = Omit<
   StyleDesc,
-  NativeStateStyleKey | "transition" | "hoverGroup"
+  | NativeStateStyleKey
+  | "groupFocus"
+  | "groupFocusVisible"
+  | "groupFocusWithin"
+  | "transition"
+  | "hoverGroup"
+  | "hoverWithinGroup"
+  | "focusWithinGroup"
 >
 
 /**
@@ -542,14 +558,14 @@ export interface StyleDesc {
   flexWrap?: FlexWrap
   flexGrow?: number
   flexShrink?: number
-  flexBasis?: number
+  flexBasis?: LengthValue
   alignItems?: AlignItems
   alignSelf?: AlignItems
   alignContent?: AlignContent
   justifyContent?: JustifyContent
-  gap?: number
-  rowGap?: number
-  columnGap?: number
+  gap?: LengthValue
+  rowGap?: LengthValue
+  columnGap?: LengthValue
   gridTemplateColumns?: GridTemplate
   gridTemplateRows?: GridTemplate
   gridColumn?: string | number
@@ -573,23 +589,25 @@ export interface StyleDesc {
   maxHeight?: DimensionValue
   aspectRatio?: number | string
 
-  padding?: number
-  paddingTop?: number
-  paddingRight?: number
-  paddingBottom?: number
-  paddingLeft?: number
+  padding?: LengthValue
+  paddingTop?: LengthValue
+  paddingRight?: LengthValue
+  paddingBottom?: LengthValue
+  paddingLeft?: LengthValue
 
-  margin?: number
-  marginTop?: number
-  marginRight?: number
-  marginBottom?: number
-  marginLeft?: number
+  margin?: LengthValue
+  marginTop?: LengthValue
+  marginRight?: LengthValue
+  marginBottom?: LengthValue
+  marginLeft?: LengthValue
 
   position?: Position
-  top?: number
-  right?: number
-  bottom?: number
-  left?: number
+  /** CSS stacking level for positioned elements and flex/grid items. */
+  zIndex?: number
+  top?: LengthValue
+  right?: LengthValue
+  bottom?: LengthValue
+  left?: LengthValue
 
   background?: BackgroundValue
   backgroundColor?: GpuixColor
@@ -683,6 +701,8 @@ export interface StyleDesc {
   overflow?: Overflow
   overflowX?: Overflow
   overflowY?: Overflow
+  /** Shared CSS values. Native GPUI has no CSS-equivalent width for `thin`. */
+  scrollbarWidth?: ScrollbarWidth
   /** CSS `clip-path`, limited to `inset()` with non-negative px, %, or zero insets. */
   clipPath?: string
 
@@ -716,15 +736,41 @@ export interface StyleDesc {
 
   /** Marks this element as the ancestor for descendant `hoverWithin` styles. */
   hoverGroup?: string
+  /** Binds `hoverWithin` to the nearest ancestor whose `hoverGroup` equals
+   *  this name, instead of the outermost marked ancestor. Matches Tailwind's
+   *  `group-hover/name`. A name with no matching ancestor is a style
+   *  diagnostic. */
+  hoverWithinGroup?: string
+  /** Binds group focus styles to the named ancestor marked by `hoverGroup`. */
+  focusWithinGroup?: string
 
   // Native state styles — applied by GPUI without a JS round trip.
   // Nesting is one level deep: a state style cannot contain another state style.
   hover?: NativeStateStyle
-  /** Applies while any ancestor with `hoverGroup` is hovered. */
+  /** Applies while any ancestor with `hoverGroup` is hovered, or — with
+   *  `hoverWithinGroup` set — while that specific named ancestor is hovered. */
   hoverWithin?: NativeStateStyle
   active?: NativeStateStyle
+  /** Applies while the nearest ancestor with `hoverGroup` is pressed. */
+  activeWithin?: NativeStateStyle
   focus?: NativeStateStyle
   focusVisible?: NativeStateStyle
+  /** Applies while this element or a descendant has focus, matching CSS
+   *  `:focus-within`. Unlike `hoverWithin`, this needs no `hoverGroup`
+   *  marker: the relationship comes from the focused element's ancestry.
+   *  Follows `focus` rather than `focusVisible` for modality, so it matches
+   *  for both pointer and keyboard focus. An element without `tabIndex`
+   *  still becomes focusable for this purpose, but not a tab stop. */
+  focusWithin?: NativeStateStyle
+  /** Applies while the matching named `hoverGroup` ancestor is focused. */
+  groupFocus?: NativeStateStyle
+  /** Applies while that ancestor has keyboard-visible focus. */
+  groupFocusVisible?: NativeStateStyle
+  /** Applies while that ancestor or any element in its subtree has focus. */
+  groupFocusWithin?: NativeStateStyle
+  /** Applies while OS files are dragged over this element. Desktop-only:
+   *  there is no web equivalent. */
+  dragOver?: NativeStateStyle
 }
 
 /**
@@ -739,13 +785,9 @@ export interface StyleDesc {
  * NativeStateStyleKey>`, or add the native state at the call site, to use
  * them alongside a `SharedStyle`.
  */
-export type SharedStyle = {
-  [Property in keyof CSSProperties & keyof StyleDesc]?: Exclude<
-    CSSProperties[Property],
-    undefined
-  > &
-    Exclude<StyleDesc[Property], undefined>
-}
+export type SharedStyle = CSSProperties &
+  Pick<StyleDesc, Extract<keyof CSSProperties, keyof StyleDesc>> &
+  Pick<StyleDesc, `--${string}`>
 
 // Element types supported by GPUIX
 export type ElementType =
@@ -798,6 +840,19 @@ export type ElementType =
   | "var"
   | "label"
   | "form"
+  | "hr"
+  | "dl"
+  | "dt"
+  | "dd"
+  | "search"
+  | "table"
+  | "caption"
+  | "thead"
+  | "tbody"
+  | "tfoot"
+  | "tr"
+  | "th"
+  | "td"
   | "img"
   | "svg"
   | "canvas"
@@ -985,6 +1040,9 @@ export type AriaCurrent =
   | "true"
   | "false"
 
+/** Sort order for a column or row header. */
+export type AriaSort = "ascending" | "descending" | "other" | "none"
+
 /** How urgently a screen reader announces a change inside a live region. */
 export type AriaLive = "off" | "polite" | "assertive"
 
@@ -1016,7 +1074,7 @@ export type AccessibilityAction = "increment" | "decrement" | "focus"
 /** Keep a semantic node in the accessibility tree while omitting its visual box. */
 export type VisuallyHidden = true
 
-export interface AccessibilityProps {
+interface AccessibilityPropsBase {
   // ── Accessibility ───────────────────────────────────────────────
   /** Explicit native accessibility role. `<button>` and `<a>` infer `button` and `link` when omitted. */
   role?: AccessibilityRole
@@ -1076,10 +1134,18 @@ export interface AccessibilityProps {
   ariaAtomic?: Booleanish
   /** DOM-compatible alias for ariaAtomic. */
   "aria-atomic"?: Booleanish
+  /** Whether a dialog makes the rest of the window inert to assistive technology. */
+  ariaModal?: Booleanish
+  /** DOM-compatible alias for ariaModal. */
+  "aria-modal"?: Booleanish
   /** Selected state for `option` and `tab` nodes. */
   ariaSelected?: Booleanish
   /** DOM-compatible alias for ariaSelected. */
   "aria-selected"?: Booleanish
+  /** Whether a listbox permits selecting more than one option. */
+  ariaMultiSelectable?: Booleanish
+  /** DOM-compatible alias for ariaMultiSelectable. */
+  "aria-multiselectable"?: Booleanish
   /** Human-readable value text for a value control. */
   ariaValueText?: string
   /** DOM-compatible semantic alias for ariaValueText. */
@@ -1108,6 +1174,10 @@ export interface AccessibilityProps {
   ariaColIndex?: number
   /** DOM-compatible alias for ariaColIndex. */
   "aria-colindex"?: number
+  /** Sort direction for a column or row header. */
+  ariaSort?: AriaSort
+  /** DOM-compatible alias for ariaSort. */
+  "aria-sort"?: AriaSort
   /** Total rows represented by a table, grid, or treegrid. */
   ariaRowCount?: number
   /** DOM-compatible alias for ariaRowCount. */
@@ -1134,11 +1204,7 @@ export interface AccessibilityProps {
   ariaHidden?: Booleanish
   /** DOM-compatible alias for ariaHidden. */
   "aria-hidden"?: Booleanish
-  /**
-   * Space-separated `id`s of the elements this one controls, such as a tab's
-   * panel. Retained for `getAttribute` and attribute matchers; AccessKit has
-   * no field for the relationship, so it is not projected.
-   */
+  /** Space-separated `id`s of the elements this one controls. */
   ariaControls?: string
   /** DOM-compatible alias for ariaControls. */
   "aria-controls"?: string
@@ -1157,11 +1223,7 @@ export interface AccessibilityProps {
   ariaRoleDescription?: string
   /** DOM-compatible alias for ariaRoleDescription. */
   "aria-roledescription"?: string
-  /**
-   * Which changes inside a live region are announced. Retained for
-   * `getAttribute` and attribute matchers; AccessKit has no field for it, so
-   * it is not projected and every change is announced.
-   */
+  /** Which changes inside a live region are announced. Every change is announced. */
   ariaRelevant?: AriaRelevant
   /** DOM-compatible alias for ariaRelevant. */
   "aria-relevant"?: AriaRelevant
@@ -1171,18 +1233,46 @@ export interface AccessibilityProps {
   onAccessibilityAction?: (event: GpuixElementEvent) => void
 }
 
+type AllowUndefinedForOptional<T> = {
+  [K in keyof T]: {} extends Pick<T, K> ? T[K] | undefined : T[K]
+}
+
+export interface AccessibilityProps extends AllowUndefinedForOptional<AccessibilityPropsBase> {}
+
 // Props passed to elements.
 // Element IDs are auto-generated numeric IDs (not user-settable).
 // Use React refs to get an element's ID: ref.current.id
-export interface Props extends AccessibilityProps {
+interface PropsBase extends AccessibilityProps {
   // `key` must live here, not in `JSX.IntrinsicAttributes`. TypeScript 5 ignores
   // that member for intrinsic elements, and React's DOM types work only because
   // `DetailedHTMLProps` already carries `key`. Without this field every
   // `<div key={...} />` inside a `.map()` fails to typecheck.
   key?: React.Key | null
   style?: StyleDesc
+  /**
+   * CSS-module compatibility, so one component can render on the web and on
+   * GPUIX. Typed as the class name a web build produces; a GPUIX build
+   * compiles `.module.css` imports to native styles with `@gpuix/plugins/css`
+   * and the renderer applies them as this element's style, with `style`
+   * winning where both set a property. A class name that reaches the renderer
+   * unresolved is reported: no CSS classes are resolved natively.
+   *
+   * `| undefined` is explicit, as React's own element types write it: a
+   * CSS-module class read under `noUncheckedIndexedAccess` is
+   * `string | undefined`, which `exactOptionalPropertyTypes` would otherwise
+   * reject at every call site.
+   */
+  className?: string | undefined
   children?: React.ReactNode
   ref?: React.Ref<PublicInstance>
+
+  /** HTML table header scope. GPUIX uses this to resolve the implicit `th` role. */
+  scope?: "row" | "col" | "rowgroup" | "colgroup"
+  /** HTML table cell span. Native accessibility exposes these as AX spans. */
+  colSpan?: number
+  rowSpan?: number
+  /** HTML table header ids associated with a cell; retained for parity, not projected natively. */
+  headers?: string
 
   /** Author-defined identity preserved for shared DOM/native JSX and native diagnostics. */
   id?: string
@@ -1281,6 +1371,8 @@ export interface Props extends AccessibilityProps {
   onVisibleRange?: (event: GpuixElementEvent) => void
   /** Match count changed for this element's `highlight`. See `matchCount`. */
   onHighlight?: (event: GpuixElementEvent) => void
+  /** A native `motion` track reached its current target. */
+  onMotionComplete?: (event: GpuixElementEvent) => void
 
   // ── Highlight ──────────────────────────────────────────────────
   /**
@@ -1304,6 +1396,8 @@ export interface Props extends AccessibilityProps {
   /** Internal native animation description used by motion components. */
   motion?: MotionProps
 }
+
+export interface Props extends AllowUndefinedForOptional<PropsBase> {}
 
 /**
  * The `<input>` types this renderer implements. `checkbox` and `radio` are
@@ -1396,14 +1490,15 @@ export interface FormProps extends Props {
 }
 
 /** A variable-height list that builds only rows near its viewport. */
-export interface VirtualListProps
+interface VirtualListPropsBase
   extends AccessibilityProps, Pick<Props, "key" | "id"> {
-  /** No `hover` or `active`: gpui's `List` has no interactive element identity,
-   *  so it cannot hold the pressed or hovered state those styles read. Put them
-   *  on a wrapping `<div>` instead. */
-  style?: Omit<StyleDesc, "hover" | "active">
+  /** No `hover`, `active`, or `dragOver`: gpui's `List` has no interactive
+   *  element identity, so it cannot hold the pressed, hovered, or drag-over
+   *  state those styles read. Put them on a wrapping `<div>` instead. */
+  style?: Omit<StyleDesc, "hover" | "active" | "dragOver">
   children?: React.ReactNode
   ref?: React.Ref<PublicInstance>
+  tabIndex?: number
   alignment?: "top" | "bottom"
   followTail?: boolean
   overdraw?: number
@@ -1415,6 +1510,11 @@ export interface VirtualListProps
   windowStart?: number
   onVisibleRange?: (event: GpuixElementEvent) => void
 }
+
+export interface VirtualListProps
+  extends AllowUndefinedForOptional<
+    VirtualListPropsBase & Pick<Props, "className" | `data-${string}`>
+  > {}
 
 export type ImageMimeType =
   | "image/png"
@@ -1533,6 +1633,8 @@ export interface AnchoredProps extends Props {
   deferred?: boolean
   priority?: number
   occlude?: boolean
+  /** Cover the viewport and follow resizes in the native renderer. */
+  fill?: "window"
 }
 
 /** Canvas bitmap coordinates. Layout can independently resize the element. */
@@ -1563,6 +1665,43 @@ export interface NativeRenderer {
   resetCanvas?(id: number): void
   /** Present one native WebGPU clear into a live canvas. */
   presentWebGpuClear?(id: number, width: number, height: number, rgba: number): void
+  /** Create one logical WebGPU device in this renderer's native resource registry. */
+  createWebGpuDevice?(): number
+  destroyWebGpuDevice?(deviceId: number): void
+  createWebGpuShaderModule?(deviceId: number, label: string | undefined, code: string): number
+  createWebGpuBuffer?(
+    deviceId: number,
+    label: string | undefined,
+    size: number,
+    usage: number,
+    initialData: Uint8Array
+  ): number
+  destroyWebGpuBuffer?(deviceId: number, bufferId: number): void
+  destroyWebGpuShaderModule?(deviceId: number, shaderModuleId: number): void
+  destroyWebGpuRenderPipeline?(deviceId: number, renderPipelineId: number): void
+  writeWebGpuBuffer?(
+    deviceId: number,
+    bufferId: number,
+    offset: number,
+    data: Uint8Array
+  ): void
+  createWebGpuRenderPipeline?(
+    deviceId: number,
+    label: string | undefined,
+    vertexModuleId: number,
+    vertexEntryPoint: string | undefined,
+    fragmentModuleId: number,
+    fragmentEntryPoint: string | undefined,
+    vertexBuffersJson: string,
+    sampleMask: number
+  ): number
+  /** Submit ordered WebGPU command buffers and install completed canvas frames atomically. */
+  submitWebGpuCommands?(
+    deviceId: number,
+    submissionJson: string,
+    ops: Uint32Array,
+    operands: Float64Array
+  ): void
   /** Decode one canvas image source through this renderer's native image store. */
   loadCanvasImage?(observerId: number, sourceJson: string): void
   getCanvasImageLoadState?(observerId: number): CanvasImageLoadState | null
@@ -1606,6 +1745,10 @@ export interface NativeRenderer {
   focusNext?(): void
   /** Move focus to the previous GPUI tab stop without changing Tab's default policy. */
   focusPrevious?(): void
+  /** Move focus to the next painted tab stop below an element, wrapping within it. */
+  focusNextWithin?(elementId: number): void
+  /** Move focus to the previous painted tab stop below an element, wrapping within it. */
+  focusPreviousWithin?(elementId: number): void
   /** @internal Complete Tab's default focus traversal after synthetic dispatch. */
   resolveTabKeyDown?(defaultPrevented: boolean): void
   /** @internal Complete a scroll key's default after synthetic dispatch. */
@@ -1833,6 +1976,8 @@ export type AnnouncePoliteness = "polite" | "assertive"
 export interface AnnouncerRegionPair {
   regionIds: readonly [number, number]
   textIds: readonly [number, number]
+  /** Current text in each alternating region, retained when a container promotes. */
+  values: [string, string]
   next: 0 | 1
   /** The root element these regions are attached under; stale once the root remounts. */
   attachedToRootId: number
@@ -1840,7 +1985,7 @@ export interface AnnouncerRegionPair {
 
 export type AnnouncerState = Record<AnnouncePoliteness, AnnouncerRegionPair | null>
 
-// One React root. Event handlers stay on this object so two live roots
+// One React root container. Event handlers stay on this object so two live roots
 // can both use id 1. Ids come from an allocator that lives with the
 // NativeRenderer, so a remount on the same renderer cannot reuse them.
 export interface Container {
@@ -1854,11 +1999,17 @@ export interface Container {
   /** The last hover target path reported by native hit testing. */
   hoverPath: Instance[]
   preventedKeyboardActivations: Map<number, string>
+  /** Whether unprevented Tab and Shift+Tab use the native focus order. */
+  tabNavigation?: boolean
   strictStyles: boolean
   /** The id last passed to `setRoot`. `announce()` attaches its regions beneath it. */
   rootElementId: number | null
   /** The native type `rootElementId` materialized as. Only `"div"` can host `announce()`'s regions. */
   rootElementType: ElementType | null
+  /** The public root view exposed by `document.body`; an internal div after container promotion. */
+  bodyElement?: Instance | null
+  /** The renderer-owned div that groups several React top-level children. */
+  implicitRoot?: Instance | null
   /** `announce()`'s lazily created regions, one alternating pair per politeness. */
   announcer: AnnouncerState
   onSelectionChange?: (event: EventPayload, renderer: NativeRenderer) => void
@@ -1945,6 +2096,8 @@ export interface PublicInstance {
   readonly localName: string
   /** The authored host name in uppercase, matching `Node.nodeName` for elements. */
   readonly nodeName: string
+  /** Whether this element is currently mounted in its root, matching `Node.isConnected`. */
+  readonly isConnected: boolean
   /**
    * The host element that currently holds this one in the retained tree,
    * matching `Node.parentElement`. Reads the live tree, so it follows appends,
@@ -2057,10 +2210,9 @@ export interface PublicInstance {
    * browser mirror runs this same implementation on gpuix instances too — so
    * this method is how a ref's tree position is compared here.
    *
-   * Two top-level siblings mounted directly into the same root are the one
-   * pair this cannot place relative to each other: it reports them as
-   * disconnected, since nothing here tracks an ordered list of a root's own
-   * top-level children.
+   * Several top-level siblings share the renderer-owned root after the
+   * container promotes to it, so their order is observable here like DOM
+   * siblings.
    *
    * Throws `TypeError` when `other` was not obtained from a ref or the render
    * tree.
@@ -2201,6 +2353,8 @@ export interface FormPublicInstance extends PublicInstance {
 
 export interface CanvasPublicInstance extends PublicInstance {
   type: "canvas"
+  width: number
+  height: number
   getContext(
     contextId: "2d",
     options?: CanvasRenderingContext2DSettings

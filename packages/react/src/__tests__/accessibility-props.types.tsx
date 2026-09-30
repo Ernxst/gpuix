@@ -22,6 +22,7 @@ const aliases = [
     aria-current="page"
     aria-live="polite"
     aria-atomic
+    aria-modal="true"
     aria-selected
     aria-valuetext="Medium"
     aria-valuemin={1}
@@ -30,6 +31,8 @@ const aliases = [
     aria-level={2}
     aria-rowindex={1}
     aria-colindex={2}
+    ariaSort="ascending"
+    aria-sort="descending"
     aria-rowcount={3}
     aria-colcount={4}
     aria-rowspan={1}
@@ -46,7 +49,15 @@ const aliases = [
   <img aria-label="Preview" aria-hidden />,
   <div role="row" aria-rowindex={2} />,
   <div role="consumer-web-only-role" />,
+  <dl><dt>Markup language</dt><dd>A language for documents.</dd></dl>,
+  <search>Find a part</search>,
+  <hr aria-orientation="horizontal" />,
   <text visuallyHidden role="heading" aria-level={1}>Production ledger</text>,
+  <table aria-label="Power ledger">
+    <caption>Power ledger</caption>
+    <thead><tr><th scope="col">Item</th><th scope="col">Rate</th></tr></thead>
+    <tbody><tr><th scope="row">Iron</th><td colSpan={2} rowSpan={1} headers="item" /></tr></tbody>
+  </table>,
 ]
 
 const aliasProps: Props = {
@@ -62,6 +73,7 @@ const aliasProps: Props = {
   "aria-current": "page",
   "aria-live": "polite",
   "aria-atomic": true,
+  ariaModal: false,
   "aria-selected": true,
   "aria-valuetext": "Medium",
   "aria-valuemin": 1,
@@ -70,6 +82,8 @@ const aliasProps: Props = {
   "aria-level": 2,
   "aria-rowindex": 1,
   "aria-colindex": 2,
+  ariaSort: "ascending",
+  "aria-sort": "descending",
   "aria-rowcount": 3,
   "aria-colcount": 4,
   "aria-rowspan": 1,
@@ -98,6 +112,16 @@ const pressedStates: Props[] = [
   { "aria-pressed": true },
   { "aria-pressed": false },
   { "aria-pressed": "mixed" },
+]
+const sortDirections: Props[] = [
+  { ariaSort: "ascending" },
+  { ariaSort: "descending" },
+  { ariaSort: "other" },
+  { ariaSort: "none" },
+  { "aria-sort": "ascending" },
+  { "aria-sort": "descending" },
+  { "aria-sort": "other" },
+  { "aria-sort": "none" }
 ]
 const remainingBaseUiStates: Props[] = [
   { ariaOrientation: "horizontal", ariaReadOnly: true, ariaRequired: "true", ariaInvalid: true },
@@ -153,6 +177,8 @@ const invalidOrientation: Props = { ariaOrientation: "diagonal" }
 const invalidInvalid: Props = { ariaInvalid: "format" }
 // @ts-expect-error ariaLive accepts only the ARIA live-region politeness tokens.
 const invalidLive: Props = { ariaLive: "rude" }
+// @ts-expect-error ariaModal accepts only Booleanish values.
+const invalidModal: Props = { ariaModal: "sometimes" }
 // @ts-expect-error disabled is an HTML boolean attribute, not an ARIA Booleanish attribute.
 const invalidDisabled: Props = { disabled: "false" }
 const popupTokens: Props[] = [
@@ -206,6 +232,7 @@ void aliases
 void aliasProps
 void currentTokens
 void pressedStates
+void sortDirections
 void remainingBaseUiStates
 void liveTokens
 void roleVocabulary

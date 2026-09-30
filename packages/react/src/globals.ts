@@ -2,14 +2,14 @@
  * Opt-in `globalThis` shims for code written against the browser DOM.
  *
  * `import "@gpuix/react/globals"` installs `requestAnimationFrame`,
- * `cancelAnimationFrame`, `window`, `scrollTo`, `ResizeObserver`, `Image`,
+ * `cancelAnimationFrame`, `window`, `self`, `scrollTo`, `ResizeObserver`, `Image`,
  * `navigator.clipboard`, `navigator.gpu`, `PointerEvent`, and the element
  * constructors `Node`, `Element`, `HTMLElement`, `HTMLDivElement`,
  * `HTMLButtonElement`, `HTMLInputElement`, and `HTMLTextAreaElement`, and
- * `document` as the single-window facade in `./document.js` — and nothing
- * else. Nobody is required to import this: the root `@gpuix/react` entry
- * installs no global, so a consumer who never touches the DOM never gets one
- * either.
+ * `document` as the single-window facade in `./document.js`, and the
+ * incremental native WebGPU API — and nothing else. Nobody is required to
+ * import this: the root `@gpuix/react` entry installs no global, so a consumer
+ * who never touches the DOM never gets one either.
  *
  * Each name is installed only if absent, so a real browser's globals (or an
  * earlier import of this module) always win. `requestAnimationFrame` and
@@ -22,9 +22,10 @@ import {
   cancelNativeAnimationFrame,
   requestNativeAnimationFrame,
 } from "./frame-clock.js"
-import { ResizeObserver } from "./resize-observer.js"
+import { ResizeObserver as GpuixResizeObserver } from "./resize-observer.js"
+import type { ResizeObserverOptions as GpuixResizeObserverOptions } from "./resize-observer.js"
 import {
-  Element,
+  Element as GpuixElement,
   HTMLButtonElement,
   HTMLDivElement,
   HTMLElement,
@@ -35,7 +36,88 @@ import {
 import { Image } from "./canvas/image.js"
 import { PointerEvent } from "./pointer-event.js"
 import { gpuixDocument } from "./document.js"
-import { installWebGpuGlobal } from "./canvas/webgpu.js"
+import {
+  installWebGpuGlobal,
+  type GPUAdapter as GpuixGPUAdapter,
+  type GPUError as GpuixGPUError,
+  type GPUInternalError as GpuixGPUInternalError,
+  type GPUOutOfMemoryError as GpuixGPUOutOfMemoryError,
+  type GPUValidationError as GpuixGPUValidationError,
+} from "./canvas/webgpu.js"
+import type { PublicInstance } from "./types/host.js"
+import { getResolvedStyle, type GpuixComputedStyle } from "./resolved-style.js"
+
+export type { GpuixComputedStyle } from "./resolved-style.js"
+
+declare global {
+  interface Navigator {
+    readonly gpu: GPU
+  }
+
+  interface GPU {
+    requestAdapter(): Promise<GpuixGPUAdapter>
+  }
+
+  interface GPUError {
+    readonly message: GpuixGPUError["message"]
+  }
+
+  interface GPUValidationError extends GPUError {
+    readonly name: GpuixGPUValidationError["name"]
+  }
+  interface GPUOutOfMemoryError extends GPUError {
+    readonly name: GpuixGPUOutOfMemoryError["name"]
+  }
+  interface GPUInternalError extends GPUError {
+    readonly name: GpuixGPUInternalError["name"]
+  }
+  interface GPUUncapturedErrorEvent extends Event {
+    readonly error: GPUError
+  }
+  interface GPUUncapturedErrorEventInit {
+    error: GPUError
+  }
+
+  interface GPUBufferUsage {
+    readonly MAP_READ: number
+    readonly MAP_WRITE: number
+    readonly COPY_SRC: number
+    readonly COPY_DST: number
+    readonly INDEX: number
+    readonly VERTEX: number
+    readonly UNIFORM: number
+    readonly STORAGE: number
+    readonly INDIRECT: number
+    readonly QUERY_RESOLVE: number
+  }
+
+  var GPUBufferUsage: GPUBufferUsage
+  var GPUValidationError: {
+    prototype: GPUValidationError
+    new(message: string): GPUValidationError
+  }
+  var GPUOutOfMemoryError: {
+    prototype: GPUOutOfMemoryError
+    new(message: string): GPUOutOfMemoryError
+  }
+  var GPUInternalError: {
+    prototype: GPUInternalError
+    new(message: string): GPUInternalError
+  }
+  var GPUUncapturedErrorEvent: {
+    prototype: GPUUncapturedErrorEvent
+    new(type: string, init: GPUUncapturedErrorEventInit): GPUUncapturedErrorEvent
+  }
+
+  interface ResizeObserver {
+    observe(target: Element | PublicInstance, options?: GpuixResizeObserverOptions): void
+  }
+
+  interface Window {
+    /** Returns only resolved `display` and `visibility`; see `GpuixComputedStyle`. */
+    getComputedStyle(element: Element | PublicInstance): GpuixComputedStyle
+  }
+}
 
 function defineGlobalIfAbsent(name: string, value: unknown): void {
   if (Reflect.has(globalThis, name)) return
@@ -49,11 +131,13 @@ function defineGlobalIfAbsent(name: string, value: unknown): void {
 defineGlobalIfAbsent("requestAnimationFrame", requestNativeAnimationFrame)
 defineGlobalIfAbsent("cancelAnimationFrame", cancelNativeAnimationFrame)
 defineGlobalIfAbsent("window", globalThis)
+defineGlobalIfAbsent("getComputedStyle", (element: PublicInstance) => getResolvedStyle(element))
+defineGlobalIfAbsent("self", globalThis)
 defineGlobalIfAbsent("scrollTo", () => undefined)
-defineGlobalIfAbsent("ResizeObserver", ResizeObserver)
+defineGlobalIfAbsent("ResizeObserver", GpuixResizeObserver)
 defineGlobalIfAbsent("Image", Image)
 defineGlobalIfAbsent("Node", Node)
-defineGlobalIfAbsent("Element", Element)
+defineGlobalIfAbsent("Element", GpuixElement)
 defineGlobalIfAbsent("HTMLElement", HTMLElement)
 defineGlobalIfAbsent("HTMLDivElement", HTMLDivElement)
 defineGlobalIfAbsent("HTMLButtonElement", HTMLButtonElement)
@@ -89,6 +173,6 @@ if (Reflect.has(globalThis, "navigator")) {
   defineGlobalIfAbsent("navigator", { clipboard })
 }
 
-// A browser's navigator.gpu always wins. Desktop installs only the narrow
-// clear-and-present proof API.
+// A browser's navigator.gpu always wins. Desktop installs the experimental
+// native WebGPU subset; it does not manufacture a document.
 installWebGpuGlobal()

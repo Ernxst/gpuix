@@ -967,7 +967,13 @@ pub(crate) fn decode(
     strings: &[String],
     canvas_size: CanvasSize,
 ) -> Result<DecodedDisplayList, DecodeError> {
-    decode_from(ops, operands, strings, canvas_size, ReplayContext::default())
+    decode_from(
+        ops,
+        operands,
+        strings,
+        canvas_size,
+        ReplayContext::default(),
+    )
 }
 
 fn decode_from(
@@ -1804,7 +1810,11 @@ pub(crate) fn install_decoded_display_list(
         ignored_empty_restore,
         replay: _,
     } = decoded;
-    display_lists.replay_states.lock().unwrap().remove(&element_id);
+    display_lists
+        .replay_states
+        .lock()
+        .unwrap()
+        .remove(&element_id);
     if !invalidates {
         return CanvasApplyOutcome {
             diagnostics,
@@ -1865,15 +1875,31 @@ pub(crate) fn install_decoded_delta(
     element_id: u64,
     decoded: DecodedDisplayList,
 ) -> CanvasApplyOutcome {
-    let DecodedDisplayList { items, diagnostics, invalidates, ignored_empty_restore: _, replay } = decoded;
-    display_lists.replay_states.lock().unwrap().insert(element_id, replay);
+    let DecodedDisplayList {
+        items,
+        diagnostics,
+        invalidates,
+        ignored_empty_restore: _,
+        replay,
+    } = decoded;
+    display_lists
+        .replay_states
+        .lock()
+        .unwrap()
+        .insert(element_id, replay);
     if !invalidates {
-        return CanvasApplyOutcome { diagnostics, invalidates: false };
+        return CanvasApplyOutcome {
+            diagnostics,
+            invalidates: false,
+        };
     }
     let mut lists = display_lists.lock().unwrap();
     if items.is_empty() {
         let removed = lists.remove(&element_id).is_some();
-        return CanvasApplyOutcome { diagnostics, invalidates: removed };
+        return CanvasApplyOutcome {
+            diagnostics,
+            invalidates: removed,
+        };
     }
     let revision = {
         let mut revisions = display_lists.last_revisions.lock().unwrap();
@@ -1882,11 +1908,18 @@ pub(crate) fn install_decoded_delta(
         *revision
     };
     lists.insert(element_id, Arc::new(DisplayList { revision, items }));
-    CanvasApplyOutcome { diagnostics, invalidates: true }
+    CanvasApplyOutcome {
+        diagnostics,
+        invalidates: true,
+    }
 }
 
 pub(crate) fn reset_canvas(display_lists: &SharedDisplayLists, element_id: u64) -> bool {
-    display_lists.replay_states.lock().unwrap().remove(&element_id);
+    display_lists
+        .replay_states
+        .lock()
+        .unwrap()
+        .remove(&element_id);
     display_lists
         .preparation_diagnostics
         .lock()
@@ -1990,17 +2023,104 @@ mod tests {
         (ops, operands)
     }
 
-    fn apply_delta(store: &SharedDisplayLists,id:u64,commands:&[(u32,&[f64])],strings:&[String])->Result<CanvasApplyOutcome,DecodeError>{let(ops,operands)=stream(commands);let decoded=decode_delta(store,id,&ops,&operands,strings,CanvasSize{width:100.0,height:80.0})?;Ok(install_decoded_delta(store,id,decoded))}
+    fn apply_delta(
+        store: &SharedDisplayLists,
+        id: u64,
+        commands: &[(u32, &[f64])],
+        strings: &[String],
+    ) -> Result<CanvasApplyOutcome, DecodeError> {
+        let (ops, operands) = stream(commands);
+        let decoded = decode_delta(
+            store,
+            id,
+            &ops,
+            &operands,
+            strings,
+            CanvasSize {
+                width: 100.0,
+                height: 80.0,
+            },
+        )?;
+        Ok(install_decoded_delta(store, id, decoded))
+    }
 
     #[test]
     fn deltas_preserve_state_stack_path_and_support_atomic_reset() {
-        let store=SharedDisplayLists::default();
-        apply_delta(&store,7,&[(opcodes::FILL_STYLE,&[0.0]),(opcodes::SAVE,&[]),(opcodes::TRANSLATE,&[10.0,20.0]),(opcodes::BEGIN_PATH,&[]),(opcodes::MOVE_TO,&[1.0,2.0])],&["#2563eb".into()]).unwrap();
-        apply_delta(&store,7,&[(opcodes::LINE_TO,&[3.0,4.0]),(opcodes::STROKE,&[]),(opcodes::RESTORE,&[]),(opcodes::FILL_RECT,&[0.0,0.0,2.0,2.0])],&[]).unwrap();
-        let list=store.lock().unwrap().get(&7).unwrap().clone(); let DisplayItem::StrokePath(path)=&list.items[0] else{panic!("path")}; assert_point(match path.commands[0]{PathCommand::MoveTo(p)=>p,_=>panic!()},(11.0,22.0)); assert_point(fill_rect(&list.items[1]).points[0],(0.0,0.0));
-        let (ops,operands)=stream(&[(opcodes::FILL_STYLE,&[0.0])]); let rejected=decode_delta(&store,7,&ops,&operands,&["not-a-color".into()],CanvasSize{width:100.0,height:80.0}).unwrap(); assert!(!rejected.diagnostics.is_empty());
-        store.report_preparation_diagnostics(7, &[CanvasDiagnostic { op_index: 0, op_name: "fill".into(), reason: "stale preparation failure".into() }]);
-        assert!(reset_canvas(&store,7)); apply_delta(&store,7,&[(opcodes::FILL_RECT,&[0.0,0.0,1.0,1.0])],&[]).unwrap(); let list=store.lock().unwrap().get(&7).unwrap().clone(); assert_eq!(u32::from(fill_rect(&list.items[0]).color),u32::from(crate::color::parse_color_rgba("#000000").unwrap())); remove_display_lists(&store,&[7]); assert!(!store.replay_states.lock().unwrap().contains_key(&7));
+        let store = SharedDisplayLists::default();
+        apply_delta(
+            &store,
+            7,
+            &[
+                (opcodes::FILL_STYLE, &[0.0]),
+                (opcodes::SAVE, &[]),
+                (opcodes::TRANSLATE, &[10.0, 20.0]),
+                (opcodes::BEGIN_PATH, &[]),
+                (opcodes::MOVE_TO, &[1.0, 2.0]),
+            ],
+            &["#2563eb".into()],
+        )
+        .unwrap();
+        apply_delta(
+            &store,
+            7,
+            &[
+                (opcodes::LINE_TO, &[3.0, 4.0]),
+                (opcodes::STROKE, &[]),
+                (opcodes::RESTORE, &[]),
+                (opcodes::FILL_RECT, &[0.0, 0.0, 2.0, 2.0]),
+            ],
+            &[],
+        )
+        .unwrap();
+        let list = store.lock().unwrap().get(&7).unwrap().clone();
+        let DisplayItem::StrokePath(path) = &list.items[0] else {
+            panic!("path")
+        };
+        assert_point(
+            match path.commands[0] {
+                PathCommand::MoveTo(p) => p,
+                _ => panic!(),
+            },
+            (11.0, 22.0),
+        );
+        assert_point(fill_rect(&list.items[1]).points[0], (0.0, 0.0));
+        let (ops, operands) = stream(&[(opcodes::FILL_STYLE, &[0.0])]);
+        let rejected = decode_delta(
+            &store,
+            7,
+            &ops,
+            &operands,
+            &["not-a-color".into()],
+            CanvasSize {
+                width: 100.0,
+                height: 80.0,
+            },
+        )
+        .unwrap();
+        assert!(!rejected.diagnostics.is_empty());
+        store.report_preparation_diagnostics(
+            7,
+            &[CanvasDiagnostic {
+                op_index: 0,
+                op_name: "fill".into(),
+                reason: "stale preparation failure".into(),
+            }],
+        );
+        assert!(reset_canvas(&store, 7));
+        apply_delta(
+            &store,
+            7,
+            &[(opcodes::FILL_RECT, &[0.0, 0.0, 1.0, 1.0])],
+            &[],
+        )
+        .unwrap();
+        let list = store.lock().unwrap().get(&7).unwrap().clone();
+        assert_eq!(
+            u32::from(fill_rect(&list.items[0]).color),
+            u32::from(crate::color::parse_color_rgba("#000000").unwrap())
+        );
+        remove_display_lists(&store, &[7]);
+        assert!(!store.replay_states.lock().unwrap().contains_key(&7));
         assert!(store.take_preparation_diagnostics().is_empty());
     }
 

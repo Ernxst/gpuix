@@ -6,7 +6,7 @@
 import fs from "fs"
 import path from "path"
 import React, { useState } from "react"
-import { beforeEach, describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   createTestRoot,
   isNativeTestRendererAvailable,
@@ -67,6 +67,197 @@ describeNative("accessibility", () => {
 
     const tree = testRoot.renderer.getAccessibilityTree()
     expect(withRole(tree, "GenericContainer")).toEqual([])
+  })
+
+  it("maps description and search elements to their implicit roles", () => {
+    testRoot.render(
+      <div>
+        <dl>
+          <dt>Markup language</dt>
+          <dd>A language for describing documents.</dd>
+        </dl>
+        <search>Find a part</search>
+        <hr />
+      </div>,
+    )
+
+    const tree = testRoot.renderer.getAccessibilityTree()
+    expect(withRole(tree, "DescriptionList")).toHaveLength(1)
+    expect(testRoot.getByRole("descriptionlist")).toBeDefined()
+    expect(testRoot.getByRole("term", { name: "Markup language" })).toBeDefined()
+    expect(testRoot.getByRole("definition")).toBeDefined()
+    expect(testRoot.getByRole("search")).toBeDefined()
+    expect(testRoot.getByText("A language for describing documents.")).toBeDefined()
+    expect(testRoot.getByText("Find a part")).toBeDefined()
+    expect(testRoot.getByRole("separator")).toBeDefined()
+    expect(withRole(tree, "Splitter")[0]?.orientation).toBe("Horizontal")
+  })
+
+  it("lets an explicit role override an alias implicit role", () => {
+    testRoot.render(<search role="complementary">Find a part</search>)
+
+    const tree = testRoot.renderer.getAccessibilityTree()
+    expect(withRole(tree, "Complementary")).toHaveLength(1)
+    expect(withRole(tree, "Search")).toHaveLength(0)
+  })
+
+  it("rejects children on void elements", () => {
+    const expectVoidError = (render: () => void) => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {})
+      try {
+        render()
+        expect(error).toHaveBeenCalledWith(
+          expect.objectContaining({ message: expect.stringMatching(/void element/i) }),
+          expect.anything(),
+          expect.stringMatching(/void element/i),
+        )
+      } finally {
+        error.mockRestore()
+      }
+    }
+
+    expectVoidError(() => testRoot.render(<hr>Not allowed</hr>))
+    const inputRoot = createTestRoot()
+    expectVoidError(() => inputRoot.render(<input>Not allowed</input>))
+  })
+
+  it("maps native table elements and uses the caption as the table name", () => {
+    testRoot.render(
+      <table>
+        <caption>Power ledger</caption>
+        <thead>
+          <tr>
+            <th scope="col">Item</th>
+            <th>Rate</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>Iron</th>
+            <td rowSpan={2}>60 / min</td>
+          </tr>
+          <tr>
+            <th scope="row">Copper</th>
+            <td colSpan={2}>30 / min</td>
+          </tr>
+        </tbody>
+      </table>,
+    )
+
+    const tree = testRoot.renderer.getAccessibilityTree()
+    expect(withRole(tree, "Table")).toEqual([
+      expect.objectContaining({ role: "Table", label: "Power ledger" }),
+    ])
+    expect(withRole(tree, "Caption")).toEqual([
+      expect.objectContaining({ role: "Caption", label: "Power ledger" }),
+    ])
+    expect(withRole(tree, "RowGroup")).toHaveLength(2)
+    expect(withRole(tree, "Row")).toHaveLength(3)
+    expect(withRole(tree, "ColumnHeader")).toHaveLength(2)
+    expect(withRole(tree, "RowHeader")).toHaveLength(2)
+    expect(withRole(tree, "Cell")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "Cell", label: "60 / min", row_span: 2 }),
+        expect.objectContaining({ role: "Cell", label: "30 / min", column_span: 2 }),
+      ]),
+    )
+  })
+
+  it("names native table rows from their cells without naming the table", () => {
+    testRoot.render(
+      <div style={{ width: 300, height: 200 }}>
+        <table aria-label="Parts">
+          <tbody>
+            <tr>
+              <td>Part 1</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>,
+    )
+
+    expect(testRoot.getByRole("row", { name: "Part 1" })).toBeDefined()
+    expect(testRoot.getByRole("table", { name: "Parts" })).toBeDefined()
+  })
+
+  it("resolves header positions when rows are direct table children", () => {
+    testRoot.render(
+      <table>
+        <tr>
+          <th>Item</th>
+          <th>Rate</th>
+        </tr>
+        <tr>
+          <th>Iron</th>
+          <td>60 / min</td>
+        </tr>
+      </table>,
+    )
+
+    const tree = testRoot.renderer.getAccessibilityTree()
+    expect(withRole(tree, "ColumnHeader")).toHaveLength(2)
+    expect(withRole(tree, "RowHeader")).toEqual([
+      expect.objectContaining({ role: "RowHeader", label: "Iron" }),
+    ])
+  })
+
+  it("treats unscoped headers in every thead row as column headers", () => {
+    testRoot.render(
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Production</th>
+          </tr>
+          <tr>
+            <th>Machine input</th>
+            <th>Per minute</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th>Iron ore</th>
+            <td>60 / min</td>
+          </tr>
+        </tbody>
+      </table>,
+    )
+
+    const tree = testRoot.renderer.getAccessibilityTree()
+    expect(withRole(tree, "ColumnHeader")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "ColumnHeader", label: "Item" }),
+        expect.objectContaining({ role: "ColumnHeader", label: "Production" }),
+        expect.objectContaining({ role: "ColumnHeader", label: "Machine input" }),
+        expect.objectContaining({ role: "ColumnHeader", label: "Per minute" }),
+      ]),
+    )
+    expect(withRole(tree, "RowHeader")).toEqual([
+      expect.objectContaining({ role: "RowHeader", label: "Iron ore" }),
+    ])
+  })
+
+  it("lets authored roles and labels override table defaults", () => {
+    testRoot.render(
+      <table role="grid" aria-label="Custom ledger">
+        <caption>Ignored caption name</caption>
+        <tbody>
+          <tr>
+            <td role="button" aria-label="Run calculation">Run</td>
+          </tr>
+        </tbody>
+      </table>,
+    )
+
+    const tree = testRoot.renderer.getAccessibilityTree()
+    expect(withRole(tree, "Grid")).toEqual([
+      expect.objectContaining({ role: "Grid", label: "Custom ledger" }),
+    ])
+    expect(withRole(tree, "Table")).toHaveLength(0)
+    expect(withRole(tree, "Button")).toEqual([
+      expect.objectContaining({ role: "Button", label: "Run calculation" }),
+    ])
+    expect(withRole(tree, "Cell")).toHaveLength(0)
   })
 
   it("projects a named role-less div as a generic container", () => {

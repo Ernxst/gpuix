@@ -9,7 +9,7 @@ export {
 } from "./components/floating.js"
 export type {
   FloatingAlign,
-  FloatingContentProps,
+  FloatingPopupProps,
   FloatingSide,
   StateStyle,
 } from "./components/floating.js"

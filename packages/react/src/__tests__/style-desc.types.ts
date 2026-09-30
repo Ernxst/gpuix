@@ -22,13 +22,23 @@ const validStyle = {
   textTransform: "uppercase",
   textWrap: "wrap",
   interpolateSize: "allow-keywords",
+  scrollbarWidth: "none",
   hoverGroup: "destination-row",
   hoverWithin: {
     borderColor: "#7c86ff",
   },
+  activeWithin: {
+    borderColor: "#5b63cc",
+  },
   focusVisible: {
     outlineColor: "rgba(124, 134, 255, 0.9)",
     outlineWidth: 2,
+  },
+  focusWithin: {
+    borderColor: "#7c86ff",
+  },
+  dragOver: {
+    borderColor: "#22c55e",
   },
   transition: {
     properties: ["opacity", "backgroundColor", "borderRadius"],
@@ -46,6 +56,9 @@ const validNestedCustomProperty = {
 } satisfies StyleDesc
 
 void validNestedCustomProperty
+
+const sharedScrollbarStyle: SharedStyle = { scrollbarWidth: "none" }
+void sharedScrollbarStyle
 
 const numericAspectRatio = { aspectRatio: 1 } satisfies StyleDesc
 void numericAspectRatio
@@ -305,13 +318,9 @@ void invalidImage
 
 // `SharedStyle` is exactly the mapped type consumers used to be told to write
 // by hand: mutually assignable in both directions.
-type HandWrittenSharedStyle = {
-  [Property in keyof CSSProperties & keyof StyleDesc]?: Exclude<
-    CSSProperties[Property],
-    undefined
-  > &
-    Exclude<StyleDesc[Property], undefined>
-}
+type HandWrittenSharedStyle = CSSProperties &
+  Pick<StyleDesc, Extract<keyof CSSProperties, keyof StyleDesc>> &
+  Pick<StyleDesc, `--${string}`>
 
 declare const exportedShared: SharedStyle
 declare const handWrittenShared: HandWrittenSharedStyle

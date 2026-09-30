@@ -35,6 +35,8 @@ import type { CanvasPublicInstance, PublicInstance } from "../types/host.js"
 import { SHOTS_DIR } from "./test-utils.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
+// Test GPU canvas presentation exists only in the macOS test-support build.
+const itMacOS = process.platform === "darwin" ? it : it.skip
 const canvasImageFixture = fileURLToPath(
   new URL("../../canvas-goldens/__fixtures__/canvas-image-source.png", import.meta.url)
 )
@@ -187,7 +189,7 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
     } finally { actual.unmount(); expected.unmount() }
   })
 
-  it("clears successive native WebGPU canvas frames and locks the context type", async () => {
+  itMacOS("clears successive native WebGPU canvas frames and locks the context type", async () => {
     const testRoot = createTestRoot({ width: 120, height: 80 })
     const canvasRef = createRef<CanvasPublicInstance>()
     try {
@@ -219,6 +221,65 @@ describeNative("retained canvas element", { timeout: 14_000 }, () => {
       expect(readFileSync(screenshot).byteLength).toBeGreaterThan(0)
       flushSync(() => testRoot.render(<div />))
       expect(testRoot.renderer.getTestGpuCanvasState().installed).toBe(0)
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  itMacOS("uses imperative canvas bitmap dimensions and expires the prior WebGPU texture", async () => {
+    const testRoot = createTestRoot({ width: 160, height: 120 })
+    const canvasRef = createRef<CanvasPublicInstance>()
+    const canvas2dRef = createRef<CanvasPublicInstance>()
+    try {
+      testRoot.render(
+        <div>
+          <canvas ref={canvasRef} width={64} height={48} />
+          <canvas ref={canvas2dRef} width={64} height={48} />
+        </div>
+      )
+      const canvas = canvasRef.current!
+      const context = canvas.getContext("webgpu")!
+      const canvas2d = canvas2dRef.current!
+      const context2d = canvas2d.getContext("2d")!
+      await import("../globals.js")
+      const adapter = await (
+        globalThis.navigator as Navigator & {
+          gpu: { requestAdapter(): Promise<GPUAdapter> }
+        }
+      ).gpu.requestAdapter()
+      const device = await adapter.requestDevice()
+      context.configure({ device, format: "bgra8unorm" })
+      const previousTexture = context.getCurrentTexture()
+
+      canvas.width = 128
+      canvas.height = 96
+      context2d.fillStyle = "#ef4444"
+      context2d.translate(12, 8)
+      canvas2d.width = 128
+
+      expect({ width: canvas.width, height: canvas.height }).toEqual({ width: 128, height: 96 })
+      expect(() => previousTexture.createView()).toThrow(/stale/)
+      expect(context2d.fillStyle).toBe("#000000")
+      expect(context2d.getTransform().isIdentity).toBe(true)
+      const encoder = device.createCommandEncoder()
+      encoder
+        .beginRenderPass({
+          colorAttachments: [
+            { view: context.getCurrentTexture().createView(), clearValue: [0, 1, 0, 1] },
+          ],
+        })
+        .end()
+      device.queue.submit([encoder.finish()])
+
+      flushSync(() =>
+        testRoot.render(
+          <div>
+            <canvas ref={canvasRef} width={80} height={60} />
+            <canvas ref={canvas2dRef} width={128} height={48} />
+          </div>
+        )
+      )
+      expect({ width: canvas.width, height: canvas.height }).toEqual({ width: 80, height: 60 })
     } finally {
       testRoot.unmount()
     }

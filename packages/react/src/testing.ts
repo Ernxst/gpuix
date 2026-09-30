@@ -17,6 +17,10 @@ import { fileURLToPath } from "node:url"
 import React, { act as reactAct, createElement, createRef, type ReactNode } from "react"
 import type { EventPayload, MenuSpec, PromptForPathsOptions } from "@gpuix/native"
 import {
+  beginResizeObserverDeliveryTurn,
+  flushPendingResizeObservations,
+} from "./resize-observer.js"
+import {
   getDefaultNormalizer,
   matches as matchesMatcher,
   resolveTestId,
@@ -62,10 +66,12 @@ import {
   getOrCreateRecordingContext2D,
 } from "./canvas/context-2d.js"
 import { Image } from "./canvas/image.js"
+import { invalidateWebGpuTransport, retireWebGpuTransportObjects } from "./canvas/webgpu.js"
 import {
   attachAnimationFrameSource,
   detachAnimationFrameSource,
   flushFrameRequests,
+  resetAnimationFrameSource,
 } from "./frame-clock.js"
 import {
   CANVAS_GOLDEN_DPR,
@@ -114,7 +120,9 @@ export interface AccessKitNodeSnapshot {
     live?: "Off" | "Polite" | "Assertive"
     /** AccessKit models atomicity as a flag, so `false` is reported as absent. */
     live_atomic?: true
+    modal?: true
     expanded?: boolean
+    controls?: string[]
     toggled?: "False" | "True" | "Mixed"
     orientation?: "Horizontal" | "Vertical"
     read_only?: true
@@ -127,6 +135,7 @@ export interface AccessKitNodeSnapshot {
     level?: number
     row_index?: number
     column_index?: number
+    sort_direction?: "Ascending" | "Descending" | "Other"
     row_count?: number
     column_count?: number
     row_span?: number
@@ -166,6 +175,15 @@ interface NativeTestRendererApi extends Omit<NativeRenderer, "requestFrame"> {
   installTestGpuCanvas(id: number, width: number, height: number, rgba: number): void
   advanceTestGpuCanvas(id: number, rgba: number): void
   getTestGpuCanvasState(): { installed: number; presentations: number; released: number }
+  captureScreenshotRaw(): ScreenshotImageData
+  captureScreenshotClipRaw(x: number, y: number, width: number, height: number): ScreenshotImageData
+  compareImagePixels(
+    referencePath: string,
+    actualPixels: Buffer,
+    width: number,
+    height: number,
+    tolerance: number
+  ): ScreenshotComparisonResult
   loadCanvasImage(observerId: number, sourceJson: string): void
   getCanvasImageLoadState(observerId: number): CanvasImageLoadState | null
   releaseCanvasImage(observerId: number): void
@@ -191,6 +209,8 @@ interface NativeTestRendererApi extends Omit<NativeRenderer, "requestFrame"> {
   blur(): void
   focusNext(): void
   focusPrevious(): void
+  focusNextWithin(elementId: number): void
+  focusPreviousWithin(elementId: number): void
   resolveTabKeyDown(defaultPrevented: boolean): void
   resolveScrollKeyDown(defaultPrevented: boolean): void
   resolveEditorKeyDown(elementId: number, defaultPrevented: boolean): void
@@ -279,6 +299,7 @@ interface NativeTestRendererApi extends Omit<NativeRenderer, "requestFrame"> {
   cycleDebugFrameOverlay(): string
   resetDebugFrameOverlayStats(): void
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
+  resetWindowState(): void
   dragSelect(x1: number, y1: number, x2: number, y2: number): void
   getSelectedText(): string | null
   getPaintedText(): string[]
@@ -295,8 +316,28 @@ interface NativeTestRendererApi extends Omit<NativeRenderer, "requestFrame"> {
   drainStyleDiagnostics(): StyleDiagnostic[]
   takeStyleDiagnosticsForReporting(): StyleDiagnostic[]
   captureScreenshot(path: string): void
+  captureScreenshotClip(
+    path: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number
+  ): { captureMs: number; cropMs: number; encodeMs: number; writeMs: number }
   compareImages(goldenPath: string, actualPath: string, tolerance: number): ImageComparisonResult
   simulateResize(width: number, height: number): void
+}
+
+interface ScreenshotImageData {
+  pixels: Buffer
+  width: number
+  height: number
+  captureMs: number
+  cropMs: number
+}
+
+interface ScreenshotComparisonResult {
+  differingPixelRatio: number
+  maxChannelDelta: number
 }
 
 interface NativeTestRendererConstructor {
@@ -358,10 +399,9 @@ export function configureTestWindow(options: TestWindowOptions): void {
   // the first `TestRenderer`. One opened at geometry these defaults resolve to
   // still can — a call that restores what was already configured keeps it.
   releaseProbeWindowUnlessOpenedAt(resolveTestWindowOptions())
-  // The shared window is unconditional: `render()` records the geometry it was
-  // built with, so without this a `configureTestWindow` after the first
-  // `render()` in a file would be a silent no-op for every later one.
-  if (activeRenderRoot !== null) disposeSharedRoot(activeRenderRoot)
+  // The shared window needs nothing here: `render()` compares the geometry it
+  // would build at, these defaults applied, with the geometry the live window
+  // was built at, and opens a new window when they differ.
 }
 
 /** What `configureTestWindow` was last given, for a caller that wants to
@@ -808,6 +848,7 @@ export class TestRenderer implements NativeRenderer {
   dispose(): void {
     if (this.disposed) return
     detachAnimationFrameSource(this)
+    invalidateWebGpuTransport(this)
     this.native.dispose()
     this.disposed = true
     // Native disposal clears the retained tree; a cached snapshot would keep
@@ -864,6 +905,86 @@ export class TestRenderer implements NativeRenderer {
       this.native.installTestGpuCanvas(id, width, height, rgba)
       this.webGpuCanvasIds.add(id)
     }
+  }
+
+  createWebGpuDevice(): number {
+    return this.native.createWebGpuDevice!()
+  }
+
+  destroyWebGpuDevice(deviceId: number): void {
+    this.native.destroyWebGpuDevice!(deviceId)
+  }
+
+  createWebGpuShaderModule(
+    deviceId: number,
+    label: string | undefined,
+    code: string
+  ): number {
+    return this.native.createWebGpuShaderModule!(deviceId, label, code)
+  }
+
+  createWebGpuBuffer(
+    deviceId: number,
+    label: string | undefined,
+    size: number,
+    usage: number,
+    initialData: Uint8Array
+  ): number {
+    return this.native.createWebGpuBuffer!(deviceId, label, size, usage, initialData)
+  }
+
+  destroyWebGpuBuffer(deviceId: number, bufferId: number): void {
+    this.native.destroyWebGpuBuffer!(deviceId, bufferId)
+  }
+
+  destroyWebGpuShaderModule(deviceId: number, shaderModuleId: number): void {
+    this.native.destroyWebGpuShaderModule!(deviceId, shaderModuleId)
+  }
+
+  destroyWebGpuRenderPipeline(deviceId: number, renderPipelineId: number): void {
+    this.native.destroyWebGpuRenderPipeline!(deviceId, renderPipelineId)
+  }
+
+  writeWebGpuBuffer(
+    deviceId: number,
+    bufferId: number,
+    offset: number,
+    data: Uint8Array
+  ): void {
+    this.native.writeWebGpuBuffer!(deviceId, bufferId, offset, data)
+  }
+
+  createWebGpuRenderPipeline(
+    deviceId: number,
+    label: string | undefined,
+    vertexModuleId: number,
+    vertexEntryPoint: string | undefined,
+    fragmentModuleId: number,
+    fragmentEntryPoint: string | undefined,
+    vertexBuffersJson: string,
+    sampleMask: number
+  ): number {
+    return this.native.createWebGpuRenderPipeline!(
+      deviceId,
+      label,
+      vertexModuleId,
+      vertexEntryPoint,
+      fragmentModuleId,
+      fragmentEntryPoint,
+      vertexBuffersJson,
+      sampleMask
+    )
+  }
+
+  submitWebGpuCommands(
+    deviceId: number,
+    submissionJson: string,
+    ops: Uint32Array,
+    operands: Float64Array
+  ): void {
+    this.native.submitWebGpuCommands!(deviceId, submissionJson, ops, operands)
+    const submission = JSON.parse(submissionJson) as { frames: Array<{ id: number }> }
+    for (const frame of submission.frames) this.webGpuCanvasIds.add(frame.id)
   }
 
   getTestGpuCanvasState(): { installed: number; presentations: number; released: number } {
@@ -999,10 +1120,8 @@ export class TestRenderer implements NativeRenderer {
       }
     }
 
-    // `test_renderer.rs`'s `advance_async_clock` calls `simulate_next_frame` once
-    // per advance, sampling one `now()` for every `on_next_frame` closure it
-    // fires — every timestamp drained here belongs to that single sampling, so
-    // they must all agree.
+    // `test_renderer.rs` stamps every pending frame request from one clock
+    // sample per advance, so every timestamp drained here must agree.
     const drained = this.native.drainFrameTimestamps()
     if (drained.length > 0) {
       const [timestamp] = drained
@@ -1096,13 +1215,41 @@ export class TestRenderer implements NativeRenderer {
    *  surface a further frame's worth of events — in a loop until nothing is
    *  left. */
   dispatchNativeEvents(): boolean {
+    const endResizeObserverDeliveryTurn = beginResizeObserverDeliveryTurn()
+    try {
     const report = (error: unknown): void => reportUncaughtErrorToRenderer(this, error)
     let delivered = false
+    let hadPendingResizeObservations = false
+    actSync(report, () => {
+      hadPendingResizeObservations = flushPendingResizeObservations(this)
+    })
+    if (hadPendingResizeObservations) {
+      delivered = true
+    }
     for (;;) {
       const events = this.native.drainEvents()
       if (events.length === 0) break
       delivered = true
+      const resizeEvents = events.filter(
+        (event): event is EventPayload & { entries: NonNullable<EventPayload["entries"]> } =>
+          event.eventType === "resizeObservation" && Array.isArray(event.entries)
+      )
+      const resizeEntries = new Map<number, NonNullable<EventPayload["entries"]>[number]>()
+      for (const event of resizeEvents) {
+        for (const entry of event.entries) resizeEntries.set(entry.elementId, entry)
+      }
+      let resizeBatchDelivered = false
       for (const event of events) {
+        if (event.eventType === "resizeObservation") {
+          if (!resizeBatchDelivered && resizeEvents[0]) {
+            resizeBatchDelivered = true
+            const batch = { ...resizeEvents[0], entries: [...resizeEntries.values()] }
+            actSync(report, () => {
+              handleGpuixEvent(batch, this)
+            })
+          }
+          continue
+        }
         if (event.eventType === "windowResize" || event.eventType === "windowActivation") {
           actSync(report, () => {
             this.windowEventHandler?.(event)
@@ -1119,6 +1266,9 @@ export class TestRenderer implements NativeRenderer {
       }
     }
     return delivered
+    } finally {
+      endResizeObserverDeliveryTurn()
+    }
   }
 
   /** End-to-end: focus element → simulate keystrokes through GPUI →
@@ -1131,15 +1281,17 @@ export class TestRenderer implements NativeRenderer {
    *  Unlike `nativeSimulateKeystrokes`, this focuses nothing first, which is
    *  the only way to test that `autoFocus` (or a click) actually moved focus. */
   simulateKeystrokes(keystrokes: string): void {
-    this.native.flush()
+    // Draw only what changed. A clean window's last frame is already current,
+    // and a redraw rebuilds and lays out the whole tree.
+    this.native.drawPendingFrame()
     for (const keystroke of keystrokes.split(/\s+/).filter(Boolean)) {
       this.native.simulateKeystrokes(keystroke)
       // A Tab keydown now resolves its focus default through React. Drain each
       // physical keypress before sending the next one so `tab a` delivers `a`
       // to the newly focused element, as a real platform event stream does.
-      this.native.flush()
+      this.native.drawPendingFrame()
       this.dispatchNativeEvents()
-      this.native.flush()
+      this.native.drawPendingFrame()
     }
   }
 
@@ -1588,6 +1740,11 @@ export class TestRenderer implements NativeRenderer {
     return JSON.parse(this.native.getAccessibilityTree())
   }
 
+  /** Read the title GPUI last exposed in its drawn accessibility tree. */
+  getWindowTitle(): string | null {
+    return this.getAccessibilityTree().frame?.window_title ?? null
+  }
+
   /** Every element the native tree holds, reachable or not. `toJSON()` walks
    *  from the root, so only this can see a node that was detached and leaked. */
   getRetainedElementCount(): number {
@@ -1703,6 +1860,25 @@ export class TestRenderer implements NativeRenderer {
     this.clipboardText = text
   }
 
+  /** Put the window-level state that outlives a React tree back to what a
+   *  newly opened window has: the keymap and application menus, the debug
+   *  frame overlay's mode and statistics, a held or captured pointer, an OS
+   *  file drag, pending animation frames, WebGPU devices and their resources,
+   *  the in-memory clipboard, and scripted picker results. The
+   *  native events this queues, such as a held pointer's cancellation, are left
+   *  for the caller to drain or dispatch. */
+  resetWindowState(): void {
+    this.native.resetWindowState()
+    resetAnimationFrameSource(this)
+    this.animationFrameCallbacks = []
+    this.animationFrameRequestCount = 0
+    retireWebGpuTransportObjects(this)
+    this.webGpuCanvasIds.clear()
+    this.clipboardText = null
+    this.pickerResults = []
+    this.pickerRequestLog = []
+  }
+
   blur(): void {
     this.native.blur()
     this.native.flush()
@@ -1723,17 +1899,33 @@ export class TestRenderer implements NativeRenderer {
     this.dispatchNativeEvents()
   }
 
+  focusNextWithin(elementId: number): void {
+    this.native.flush()
+    this.native.focusNextWithin(elementId)
+    this.native.flush()
+    this.dispatchNativeEvents()
+  }
+
+  focusPreviousWithin(elementId: number): void {
+    this.native.flush()
+    this.native.focusPreviousWithin(elementId)
+    this.native.flush()
+    this.dispatchNativeEvents()
+  }
+
   resolveTabKeyDown(defaultPrevented: boolean): void {
     this.native.resolveTabKeyDown(defaultPrevented)
     // Production reports the resulting focus transition on a later frame.
-    // Draw it now so the enclosing drain loop observes blur/focus in order.
-    this.native.flush()
+    // Draw it now so the enclosing drain loop observes blur/focus in order:
+    // the draw is what fires GPUI's focus listeners, and moving focus is what
+    // dirties the window.
+    this.native.drawPendingFrame()
   }
 
   resolveScrollKeyDown(defaultPrevented: boolean): void {
     this.native.resolveScrollKeyDown(defaultPrevented)
     // The native scroll default invalidates the same frame as production.
-    this.native.flush()
+    this.native.drawPendingFrame()
   }
 
   /** Complete an editor's deferred keydown default after synthetic dispatch. */
@@ -1896,8 +2088,45 @@ export class TestRenderer implements NativeRenderer {
 
   /** Capture the current Metal or DirectX frame and save it as a PNG. */
   captureScreenshot(path: string): void {
-    if (this.asyncTaskMode === "eager") this.native.flush()
+    this.prepareScreenshotCapture()
     this.native.captureScreenshot(path)
+  }
+
+  /** @internal Bring eager-mode geometry up to date before reading a clip rect. */
+  prepareScreenshotCapture(): void {
+    if (this.asyncTaskMode === "eager") this.native.flush()
+  }
+
+  /** @internal Capture a device-pixel rectangle directly from the native frame. */
+  captureScreenshotClip(
+    path: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number
+  ): { captureMs: number; cropMs: number; encodeMs: number; writeMs: number } {
+    return this.native.captureScreenshotClip(path, x, y, width, height)
+  }
+
+  /** @internal Capture RGBA pixels without encoding a PNG or writing a file. */
+  captureScreenshotRaw(): ScreenshotImageData {
+    return this.native.captureScreenshotRaw()
+  }
+
+  /** @internal Capture a device-pixel rectangle as RGBA pixels. */
+  captureScreenshotClipRaw(x: number, y: number, width: number, height: number): ScreenshotImageData {
+    return this.native.captureScreenshotClipRaw(x, y, width, height)
+  }
+
+  /** @internal Compare RGBA screenshot pixels with a reference PNG. */
+  compareImagePixels(
+    referencePath: string,
+    actualPixels: Buffer,
+    width: number,
+    height: number,
+    tolerance: number
+  ): ScreenshotComparisonResult {
+    return this.native.compareImagePixels(referencePath, actualPixels, width, height, tolerance)
   }
 
   /** Decode two PNGs natively and compare their RGBA pixels. */
@@ -3125,6 +3354,7 @@ export interface TestRootOptions extends TestRendererOptions {
   strictStyles?: boolean
   /** Window-level text selection. Fires when the selected ranges change. */
   onSelectionChange?: (event: EventPayload, renderer: NativeRenderer) => void
+  tabNavigation?: boolean
 }
 
 /**
@@ -3150,6 +3380,7 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
   const root = createRoot(renderer, {
     strictStyles: options.strictStyles,
     onSelectionChange: options.onSelectionChange,
+    tabNavigation: options.tabNavigation,
   })
   const queries = getQueries(renderer, () => renderer.getRoot(), true)
   let unmounted = false
@@ -3321,13 +3552,17 @@ interface ActiveRenderRoot {
   /** Window size at creation, restored after a test calls `simulateResize`. */
   windowSize: { width: number; height: number }
   result: RenderResult
+  /** Set by `resetSharedWindowForNextFile` and cleared by the next `render()`,
+   *  which has nothing to unmount or reset: another cleanup would draw frames
+   *  that a newly opened window's statistics would not count. */
+  resetForNextFile: boolean
 }
 
 /** The one offscreen window `render()` shares, per module instance — which
  *  vitest gives each test file its own copy of under `isolate: true` (the
  *  default). Under `isolate: false`, a worker keeps one module instance for
- *  every file it runs, so this persists across files unless something closes
- *  it — see `disposeSharedWindow`. */
+ *  every file it runs, so this persists across files, reset between them by
+ *  `resetSharedWindowForNextFile`. */
 let activeRenderRoot: ActiveRenderRoot | null = null
 
 /** Every field of `TestRootOptions` is fixed when the window is constructed,
@@ -3339,14 +3574,17 @@ function sameTestRootOptions(a: TestRootOptions, b: TestRootOptions): boolean {
     a.scaleFactor === b.scaleFactor &&
     a.asyncTaskMode === b.asyncTaskMode &&
     a.allowPrivateNetworkImages === b.allowPrivateNetworkImages &&
-    a.strictStyles === b.strictStyles
+    a.strictStyles === b.strictStyles &&
+    a.onSelectionChange === b.onSelectionChange
   )
 }
 
 /** Return the shared window to the state a freshly created one is in, for the
- *  knobs a test can move without going through the React tree. Everything else
- *  set through `renderer` — menus, the debug frame overlay, CPU throttling —
- *  persists for the rest of the file. */
+ *  knobs a test can move without going through the React tree. The rest of
+ *  what a test sets through `renderer` — menus, the debug frame overlay, a held
+ *  pointer — persists for the rest of the file; `resetSharedWindowForNextFile`
+ *  resets it at the file boundary. CPU throttling is process-wide and neither
+ *  resets it. */
 function resetSharedWindow(active: ActiveRenderRoot): void {
   const { renderer } = active.root
   const size = renderer.getWindowSize()
@@ -3381,17 +3619,53 @@ function disposeSharedRoot(active: ActiveRenderRoot): void {
 }
 
 /**
- * Drop the shared window if one is open, otherwise do nothing.
+ * Drop the shared window if one is open, otherwise do nothing. The next
+ * `render()` opens a new one.
  *
- * `@gpuix/react/testing/vitest` calls this from the cleanup its `beforeAll`
- * returns, which vitest runs after every `afterAll` in the file whatever
- * `sequence.hooks` says, so menus, the debug frame overlay, held pointer buttons, and
- * every other window-level knob `resetSharedWindow` deliberately leaves alone
- * do not leak into the next file. Call it yourself from your own runner's
- * suite-level teardown when you import `@gpuix/react/testing` directly.
+ * `resetSharedWindowForNextFile` is the cheaper way to keep one file's window
+ * state from reaching the next; this closes the window outright.
  */
 export function disposeSharedWindow(): void {
   if (activeRenderRoot !== null) disposeSharedRoot(activeRenderRoot)
+}
+
+/**
+ * Unmount the tree `render()` mounted and return the shared window to the
+ * state a newly opened one is in, keeping it open for the next test file.
+ *
+ * `cleanup()` resets what a test in the same file should not inherit; this
+ * also resets what a file should not inherit, which `cleanup()` leaves for the
+ * rest of the file on purpose: application menus and their key equivalents,
+ * the debug frame overlay's mode and statistics, a held or captured pointer,
+ * an OS file drag, pending animation frames, WebGPU devices and their
+ * resources, the in-memory clipboard, and scripted picker results. The next
+ * file's `render()` reuses the window when it asks for the same options,
+ * and opens a new one when it does not. A root that died on an uncaught render
+ * error is closed, as by `cleanup()`.
+ *
+ * `@gpuix/react/testing/vitest` calls this from the cleanup its `beforeAll`
+ * returns, which vitest runs after every `afterAll` in the file whatever
+ * `sequence.hooks` says. Call it yourself from your own runner's suite-level
+ * teardown when you import `@gpuix/react/testing` directly, or call
+ * `disposeSharedWindow()` to close the window instead.
+ */
+export function resetSharedWindowForNextFile(): void {
+  const active = activeRenderRoot
+  if (active === null) return
+  cleanup()
+  if (activeRenderRoot !== active) return
+
+  const { renderer } = active.root
+  try {
+    renderer.resetWindowState()
+  } catch (error) {
+    disposeSharedRoot(active)
+    throw error
+  }
+  // The reset's own events, such as a held pointer's cancellation, belong to
+  // the file that left the pointer held, not to the next file's tree.
+  renderer.drainEvents()
+  active.resetForNextFile = true
 }
 
 /**
@@ -3449,21 +3723,23 @@ export function cleanup(): void {
  * therefore a `getBy*` away, not a `findBy*`; the async queries remain for work
  * that is genuinely asynchronous.
  *
- * **One window per test file.** Opening an offscreen GPUI window costs about a
- * second, so the window created by the first `render()` is reused by every
- * later one in the same file — vitest isolates module state per file under
- * `isolate: true` (the default), so nothing is shared between files. Under
- * `isolate: false`, a worker keeps this module for every file it runs, so
- * something has to close the window between files itself: see
- * `disposeSharedWindow`, which `@gpuix/react/testing/vitest` calls for you.
+ * **One window per test file, or per worker.** Opening an offscreen GPUI
+ * window is expensive, so the window created by the first `render()` is reused
+ * by every later one in the same file — vitest isolates module state per file
+ * under `isolate: true` (the default), so nothing is shared between files.
+ * Under `isolate: false`, a worker keeps this module for every file it runs, so
+ * the window carries on into the next file after a reset that leaves it as a
+ * newly opened one would be: see `resetSharedWindowForNextFile`, which
+ * `@gpuix/react/testing/vitest` calls for you.
  * Each `render()` unmounts the previous tree and starts from a reset window
  * (see `cleanup`), so a reused window is never a reused tree; it **replaces**
  * the previous tree rather than mounting a second one beside it, since a
- * desktop window has one root, not a `document.body` that can hold many
- * containers.
+ * desktop window has one renderer-owned React container, not a `document.body`
+ * that can hold many containers.
  *
  * **Options decide reuse.** `options` are the `createTestRoot()` options, all
- * of which are fixed when the window is constructed. A call whose options match
+ * of which are fixed when the window is constructed; `onSelectionChange` is
+ * compared by identity. A call whose options match
  * the live window's reuses it; a call whose options differ — compared field by
  * field, so an omitted option differs from one passed at its default value —
  * tears that window down and opens a fresh one. So does a root that died on an
@@ -3486,7 +3762,7 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
     disposeSharedRoot(live)
   }
 
-  if (activeRenderRoot !== null) {
+  if (activeRenderRoot !== null && !activeRenderRoot.resetForNextFile) {
     // Unmount before resetting — rendering the new node straight into the
     // live root would reconcile against the old tree, and an unmount effect
     // running after the reset could re-dirty the window that was just
@@ -3516,8 +3792,10 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
         asyncTaskMode: request.asyncTaskMode,
         allowPrivateNetworkImages: request.allowPrivateNetworkImages,
         strictStyles: request.strictStyles,
+        onSelectionChange: request.onSelectionChange,
       },
       windowSize: { width: size.width, height: size.height },
+      resetForNextFile: false,
       result: renderResult(root, {
         ...root,
         render: renderWrapped,
@@ -3547,6 +3825,7 @@ export function render(node: ReactNode, options: TestRootOptions = {}): RenderRe
     activeRenderRoot = active
   }
 
+  active.resetForNextFile = false
   active.root.render(wrapForRender(node))
   // Prime both handles while the tree is up. They remember the last element
   // they resolved so that they can answer after a `cleanup()`, and a cache

@@ -8,6 +8,7 @@
 import React from "react"
 import { describe, expect, it } from "vitest"
 import { createTestRoot } from "../testing.js"
+import type { PublicInstance } from "../types/host.js"
 
 describe("text selection", () => {
   it("selects text inside one element", () => {
@@ -64,6 +65,41 @@ describe("text selection", () => {
     // which is how a drag into the gutter behaves in any text editor.
     const selected = renderer.dragSelect(21, 30, 900, 300)
     expect(selected).toBe("first line\nsecond line\nthird line")
+  })
+
+  it("keeps selected text in tree order when zIndex reverses paint order", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ position: "relative", width: 400, height: 100 }}>
+        <text style={{ position: "absolute", left: 20, top: 20, fontSize: 20, zIndex: 2 }}>
+          first line
+        </text>
+        <text style={{ position: "absolute", left: 20, top: 50, fontSize: 20, zIndex: 1 }}>
+          second line
+        </text>
+      </div>
+    )
+
+    expect(renderer.dragSelect(21, 22, 900, 80)).toBe("first line\nsecond line")
+  })
+
+  it("starts selection on the visually topmost text when text bounds overlap", () => {
+    const { render, renderer } = createTestRoot()
+    const covered = React.createRef<PublicInstance>()
+    const overlay = React.createRef<PublicInstance>()
+    render(
+      <div style={{ position: "relative", width: 400, height: 100 }}>
+        <text ref={covered} style={{ position: "absolute", left: 20, top: 20, fontSize: 20, zIndex: 1 }}>
+          covered text
+        </text>
+        <text ref={overlay} style={{ position: "absolute", left: 20, top: 20, fontSize: 20, zIndex: 2 }}>
+          overlay text
+        </text>
+      </div>
+    )
+
+    expect(covered.current!.getBounds()!.y).toBe(overlay.current!.getBounds()!.y)
+    expect(renderer.dragSelect(25, 30, 120, 30)).toMatch(/^overlay/)
   })
 
   it("takes a partial span from the anchor element and whole spans below", () => {

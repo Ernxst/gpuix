@@ -1,3 +1,7 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import os from "node:os"
+import path from "node:path"
+
 import React, { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
@@ -5,16 +9,198 @@ import {
   isNativeTestRendererAvailable,
   TestRenderer,
 } from "../testing.js"
+import { cn } from "../cn.js"
 import { wrapWithBatching } from "../reconciler/batch-renderer.js"
-import type { StyleDesc } from "../types/host.js"
+import { gpuixMatchers, type GpuixMatchers } from "../testing-expect.js"
+import { decodePng } from "../testing-png.js"
+import type { NativeStateStyleKey, StyleDesc } from "../types/host.js"
+
+expect.extend(gpuixMatchers)
+
+declare module "vitest" {
+  interface Matchers<
+    R extends void | Promise<void> = void | Promise<void>,
+    T = unknown,
+  > extends GpuixMatchers<R> {}
+}
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
+const COMPILED_STYLE = Symbol.for("gpuix.compiledStyle")
+
+function VirtualRows({ count = 30 }: { count?: number }) {
+  return Array.from({ length: count }, (_, index) => (
+    <div key={index} style={{ height: 40 }}>
+      <text>{`row ${index}`}</text>
+    </div>
+  ))
+}
 
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
 describeNative("style diagnostics", { timeout: 12_000 }, () => {
+  it("accepts percentages for spacing, insets, and flex basis in strict style mode", () => {
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    try {
+      testRoot.render(
+        <div
+          data-testid="percentage-lengths"
+          style={{
+            flexBasis: "10%",
+            gap: "10%",
+            rowGap: "10%",
+            columnGap: "10%",
+            padding: "10%",
+            paddingTop: "10%",
+            paddingRight: "10%",
+            paddingBottom: "10%",
+            paddingLeft: "10%",
+            margin: "10%",
+            marginTop: "10%",
+            marginRight: "10%",
+            marginBottom: "10%",
+            marginLeft: "10%",
+            top: "10%",
+            right: "10%",
+            bottom: "10%",
+            left: "10%",
+          }}
+        />,
+      )
+
+      expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("accepts shared scrollbar-width keywords and rejects browser-only thin", () => {
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    testRoot.render(
+      <>
+        <div data-testid="scrollbar-auto" style={{ scrollbarWidth: "auto" }} />
+        <div data-testid="scrollbar-none" style={{ scrollbarWidth: "none" }} />
+        <div data-testid="scrollbar-thin" style={{ scrollbarWidth: "thin" } as StyleDesc} />
+      </>,
+    )
+
+    expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([
+      expect.objectContaining({
+        elementType: "div",
+        message: expect.stringContaining('property "scrollbarWidth" rejected value "thin"'),
+      }),
+    ])
+    expect(testRoot.renderer.getResolvedStyle(
+      testRoot.renderer.findByTestId("scrollbar-auto")!.id,
+    )).toMatchObject({ scrollbarWidth: "auto" })
+    expect(testRoot.renderer.getResolvedStyle(
+      testRoot.renderer.findByTestId("scrollbar-none")!.id,
+    )).toMatchObject({ scrollbarWidth: "none" })
+  })
+
+  it("diagnoses a populated virtual-list with no bounded height", () => {
+    const testRoot = createTestRoot({ strictStyles: false })
+
+    testRoot.render(
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <virtual-list
+          estimatedItemHeight={40}
+          style={{ flexGrow: 1, minHeight: 0 }}
+        >
+          <VirtualRows />
+        </virtual-list>
+      </div>,
+    )
+
+    const list = testRoot.renderer.findByType("virtual-list")[0]!
+    expect(list.getBoundingClientRect().height).toBe(0)
+    expect(testRoot.renderer.drainStyleDiagnostics()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          elementType: "virtual-list",
+          message: expect.stringContaining("bounded height"),
+        }),
+      ]),
+    )
+  })
+
+  it("keeps bounded, empty, and hidden virtual-lists quiet", () => {
+    const bounded = createTestRoot({ strictStyles: false })
+    bounded.render(
+      <div style={{ height: 200, display: "flex", flexDirection: "column" }}>
+        <virtual-list estimatedItemHeight={40} style={{ flexGrow: 1, minHeight: 0 }}>
+          <VirtualRows />
+        </virtual-list>
+      </div>,
+    )
+    expect(bounded.renderer.findByType("virtual-list")[0]!.getBoundingClientRect().height).toBe(200)
+    expect(bounded.renderer.drainStyleDiagnostics()).toEqual([])
+
+    const empty = createTestRoot({ strictStyles: false })
+    empty.render(
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <virtual-list estimatedItemHeight={40} style={{ flexGrow: 1, minHeight: 0 }} />
+      </div>,
+    )
+    expect(empty.renderer.drainStyleDiagnostics()).toEqual([])
+
+    const displayNone = createTestRoot({ strictStyles: false })
+    displayNone.render(
+      <virtual-list estimatedItemHeight={40} style={{ display: "none" }}>
+        <VirtualRows />
+      </virtual-list>,
+    )
+    expect(displayNone.renderer.drainStyleDiagnostics()).toEqual([])
+
+    const hiddenAncestor = createTestRoot({ strictStyles: false })
+    hiddenAncestor.render(
+      <div hidden>
+        <virtual-list estimatedItemHeight={40} style={{ flexGrow: 1, minHeight: 0 }}>
+          <VirtualRows />
+        </virtual-list>
+      </div>,
+    )
+    expect(hiddenAncestor.renderer.drainStyleDiagnostics()).toEqual([])
+  })
+
+  it("throws for a zero-height virtual-list in strict mode", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    testRoot.render(
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <virtual-list estimatedItemHeight={40} style={{ flexGrow: 1, minHeight: 0 }}>
+          <VirtualRows />
+        </virtual-list>
+      </div>,
+    )
+
+    expect(error.mock.calls.flat().join(" ")).toContain("<virtual-list>")
+    expect(error.mock.calls.flat().join(" ")).toContain("bounded height")
+  })
+
+  it("warns once per virtual-list element about zero height", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: false })
+    const tree = (
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <virtual-list estimatedItemHeight={40} style={{ flexGrow: 1, minHeight: 0 }}>
+          <VirtualRows />
+        </virtual-list>
+      </div>
+    )
+
+    testRoot.render(tree)
+    testRoot.render(tree)
+    testRoot.renderer.flush()
+
+    expect(warn.mock.calls.flat().join(" ")).toContain("bounded height")
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
   it("accepts touchAction as a silent native no-op", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const testRoot = createTestRoot({ strictStyles: true })
@@ -421,6 +607,32 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     } finally {
       testRoot.unmount()
     }
+  })
+
+  it("reports malformed ariaSort values", () => {
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    testRoot.render(
+      <text
+        role="columnheader"
+        ariaLabel="Malformed sort"
+        ariaSort={"sideways" as unknown as "ascending"}
+      />
+    )
+
+    expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([
+      expect.objectContaining({
+        property: "ariaSort",
+        message: expect.stringContaining(
+          'expected one of "ascending", "descending", "other", or "none"'
+        )
+      })
+    ])
+    expect(
+      Object.values(testRoot.renderer.getAccessibilityTree().nodes).find(
+        (node) => node.aria.label === "Malformed sort"
+      )?.aria
+    ).not.toHaveProperty("sort_direction")
   })
 
   it("omits every well-formed state that its role does not support", () => {
@@ -1299,30 +1511,20 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     compatibility.unmount()
   })
 
-  it("diagnoses className on mount and update and points to the style prop", () => {
+  it("diagnoses an unresolved className on mount and update", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {})
     const strictCreate = createTestRoot({ strictStyles: true })
-    strictCreate.render(
-      <div
-        data-testid="strict-class-name"
-        {...({ className: "rounded-lg" } as Record<string, string>)}
-      />
-    )
+    strictCreate.render(<div data-testid="strict-class-name" className="rounded-lg" />)
 
     const strictUpdate = createTestRoot({ strictStyles: true })
     strictUpdate.render(<div data-testid="strict-class-name-update" />)
-    strictUpdate.render(
-      <div
-        data-testid="strict-class-name-update"
-        {...({ className: "text-sm" } as Record<string, string>)}
-      />
-    )
+    strictUpdate.render(<div data-testid="strict-class-name-update" className="text-sm" />)
 
     expect(error.mock.calls.flat()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           name: "UnsupportedClassNamePropError",
-          message: expect.stringMatching(/className.*style prop/),
+          message: expect.stringMatching(/cannot apply the class names "rounded-lg"/),
         }),
       ])
     )
@@ -1333,26 +1535,339 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const compatibility = createTestRoot({ strictStyles: false })
     compatibility.render(<div data-testid="compat-class-name" />)
-    compatibility.render(
-      <div
-        data-testid="compat-class-name"
-        {...({ className: "bg-slate-900" } as Record<string, string>)}
-      />
-    )
-    compatibility.render(
-      <div
-        data-testid="compat-class-name"
-        {...({ className: "bg-slate-800" } as Record<string, string>)}
-      />
-    )
+    compatibility.render(<div data-testid="compat-class-name" className="bg-slate-900" />)
+    compatibility.render(<div data-testid="compat-class-name" className="bg-slate-800" />)
 
     expect(warn).toHaveBeenCalledTimes(1)
     expect(warn).toHaveBeenCalledWith(
       expect.stringMatching(
-        /<div data-testid="compat-class-name">.*does not support className.*style prop/
+        /<div data-testid="compat-class-name">.*cannot apply the class names "bg-slate-900".*@gpuix\/plugins\/css/
       )
     )
     compatibility.unmount()
+  })
+
+  it("applies a className compiled from a CSS module as the element style", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    // What `@gpuix/plugins/css` puts in the prop: the styles the class
+    // describes, typed as the class name a web build would produce.
+    const button = { backgroundColor: "red", padding: 4 } as StyleDesc
+    Object.defineProperty(button, COMPILED_STYLE, { value: true })
+    const styles = { button }
+
+    testRoot.render(
+      <div data-testid="compiled-class-name" className={styles.button as unknown as string} />
+    )
+
+    expect(testRoot.renderer.findByTestId("compiled-class-name")?.style).toMatchObject({
+      backgroundColor: "red",
+      padding: 4,
+    })
+    expect(warn).not.toHaveBeenCalled()
+    testRoot.unmount()
+  })
+
+  it("accepts reverse flex directions from style props and CSS modules in strict mode", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    const source = new URL("../../../plugins/src/css-modules.ts", import.meta.url).href
+    const { transformGpuixCssModule } = await import(source)
+    const styles = await transformGpuixCssModule(
+      ".reverse { display: flex; flex-direction: column-reverse; }",
+      "/fixture/reverse.module.css",
+    )
+    for (const style of Object.values(styles)) {
+      Object.defineProperty(style, COMPILED_STYLE, { value: true })
+    }
+
+    const testRoot = createTestRoot({ strictStyles: true })
+    testRoot.render(
+      <>
+        <div style={{ display: "flex", flexDirection: "row-reverse" }} />
+        <div className={styles.reverse as unknown as string} />
+      </>,
+    )
+
+    expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+    expect(error).not.toHaveBeenCalled()
+    testRoot.unmount()
+    error.mockRestore()
+  })
+
+  it("accepts z-index from a CSS module in strict mode", async () => {
+    const source = new URL("../../../plugins/src/css-modules.ts", import.meta.url).href
+    const { transformGpuixCssModule } = await import(source)
+    const styles = await transformGpuixCssModule(
+      ".stacked { position: relative; z-index: 3; }",
+      "/fixture/stacked.module.css",
+    )
+    for (const style of Object.values(styles)) {
+      Object.defineProperty(style, COMPILED_STYLE, { value: true })
+    }
+
+    const testRoot = createTestRoot({ strictStyles: true })
+    testRoot.render(<div className={styles.stacked as unknown as string} />)
+
+    expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+    testRoot.unmount()
+  })
+
+  it("lets the style prop outrank a compiled className", () => {
+    const testRoot = createTestRoot({ strictStyles: true })
+    const card = {
+      backgroundColor: "red",
+      padding: 4,
+      width: 100,
+      height: 40,
+      hover: { backgroundColor: "green" },
+    } as StyleDesc
+    Object.defineProperty(card, COMPILED_STYLE, { value: true })
+    const styles = { card }
+
+    testRoot.render(
+      <div
+        data-testid="class-name-and-style"
+        className={styles.card as unknown as string}
+        style={{ backgroundColor: "blue" }}
+      />
+    )
+
+    const target = testRoot.renderer.findByTestId("class-name-and-style")!
+    expect(target.style).toMatchObject({
+      backgroundColor: "blue",
+      padding: 4,
+    })
+    expect(target.style.hover?.backgroundColor).toBeNull()
+    expect(testRoot.renderer.getResolvedStyle(target.id)).toMatchObject({
+      backgroundColor: "blue",
+    })
+
+    const bounds = testRoot.renderer.getElementBounds(target.id)!
+    testRoot.renderer.nativeSimulateMouseMove(
+      bounds.x + bounds.width / 2,
+      bounds.y + bounds.height / 2,
+    )
+    testRoot.renderer.dispatchNativeEvents()
+    testRoot.renderer.flush()
+    expect(testRoot.renderer.getResolvedStyle(target.id)).toMatchObject({
+      backgroundColor: "blue",
+    })
+    testRoot.unmount()
+  })
+
+  it("keeps compiled class styles when corresponding style prop values are undefined", () => {
+    const directory = mkdtempSync(path.join(os.tmpdir(), "gpuix-style-precedence-"))
+    const testRoot = createTestRoot({ width: 120, height: 80, scaleFactor: 1 })
+
+    const pixelAt = (screenshot: string, x: number, y: number) => {
+      const image = decodePng(readFileSync(screenshot), screenshot)
+      const offset = (y * image.width + x) * 4
+      return [...image.data.subarray(offset, offset + 4)]
+    }
+
+    try {
+      const card = {
+        width: 100,
+        height: 60,
+        backgroundColor: "#ff0000",
+        hover: { backgroundColor: "#00ff00" },
+      } as StyleDesc
+      Object.defineProperty(card, COMPILED_STYLE, { value: true })
+
+      testRoot.render(
+        <div
+          data-testid="class-name-and-undefined-style"
+          className={card as unknown as string}
+          style={{ backgroundColor: undefined, hover: { backgroundColor: undefined } }}
+        />
+      )
+
+      const target = testRoot.renderer.findByTestId("class-name-and-undefined-style")!
+      const bounds = testRoot.renderer.getElementBounds(target.id)!
+      testRoot.renderer.nativeSimulateMouseMove(110, 70)
+      testRoot.renderer.dispatchNativeEvents()
+      testRoot.renderer.flush()
+      const baseScreenshot = path.join(directory, "base.png")
+      testRoot.renderer.captureScreenshot(baseScreenshot)
+
+      expect(pixelAt(baseScreenshot, 50, 30)).toEqual([255, 0, 0, 255])
+      expect(testRoot.renderer.getResolvedStyle(target.id)).toMatchObject({
+        backgroundColor: "#ff0000",
+      })
+
+      testRoot.renderer.nativeSimulateMouseMove(
+        bounds.x + bounds.width / 2,
+        bounds.y + bounds.height / 2,
+      )
+      testRoot.renderer.dispatchNativeEvents()
+      testRoot.renderer.flush()
+      const hoverScreenshot = path.join(directory, "hover.png")
+      testRoot.renderer.captureScreenshot(hoverScreenshot)
+
+      expect(testRoot.renderer.getResolvedStyle(target.id)).toMatchObject({
+        backgroundColor: "#00ff00",
+      })
+      expect(pixelAt(hoverScreenshot, 50, 30)).toEqual([0, 255, 0, 255])
+    } finally {
+      testRoot.unmount()
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it("treats own undefined style keys like absent keys for a compiled className", () => {
+    const testRoot = createTestRoot({ width: 120, height: 80, scaleFactor: 1 })
+    const card = {
+      width: 100,
+      height: 60,
+      backgroundColor: "#ff0000",
+      hover: { backgroundColor: "#00ff00" },
+    } as StyleDesc
+    Object.defineProperty(card, COMPILED_STYLE, { value: true })
+
+    const render = (style: StyleDesc) => {
+      testRoot.render(
+        <div
+          data-testid="class-name-style-undefined-equivalence"
+          className={card as unknown as string}
+          style={style}
+        />
+      )
+      return testRoot.renderer.findByTestId("class-name-style-undefined-equivalence")!
+    }
+
+    try {
+      const withoutKeys = render({})
+      const withoutKeysStyle = structuredClone(withoutKeys.style)
+      const withoutKeysBounds = testRoot.renderer.getElementBounds(withoutKeys.id)!
+      testRoot.renderer.nativeSimulateMouseMove(110, 70)
+      testRoot.renderer.dispatchNativeEvents()
+      testRoot.renderer.flush()
+      const withoutKeysRest = structuredClone(testRoot.renderer.getResolvedStyle(withoutKeys.id))
+
+      testRoot.renderer.nativeSimulateMouseMove(
+        withoutKeysBounds.x + withoutKeysBounds.width / 2,
+        withoutKeysBounds.y + withoutKeysBounds.height / 2,
+      )
+      testRoot.renderer.dispatchNativeEvents()
+      testRoot.renderer.flush()
+      const withoutKeysHover = structuredClone(testRoot.renderer.getResolvedStyle(withoutKeys.id))
+
+      const explicitUndefined = {
+        backgroundColor: undefined,
+        hover: { backgroundColor: undefined },
+      } as StyleDesc
+      expect(Object.hasOwn(explicitUndefined, "backgroundColor")).toBe(true)
+      expect(Object.hasOwn(explicitUndefined.hover!, "backgroundColor")).toBe(true)
+
+      const withUndefinedKeys = render(explicitUndefined)
+      expect(withUndefinedKeys.style).toEqual(withoutKeysStyle)
+
+      const withUndefinedBounds = testRoot.renderer.getElementBounds(withUndefinedKeys.id)!
+      testRoot.renderer.nativeSimulateMouseMove(110, 70)
+      testRoot.renderer.dispatchNativeEvents()
+      testRoot.renderer.flush()
+      expect(testRoot.renderer.getResolvedStyle(withUndefinedKeys.id)).toEqual(withoutKeysRest)
+
+      testRoot.renderer.nativeSimulateMouseMove(
+        withUndefinedBounds.x + withUndefinedBounds.width / 2,
+        withUndefinedBounds.y + withUndefinedBounds.height / 2,
+      )
+      testRoot.renderer.dispatchNativeEvents()
+      testRoot.renderer.flush()
+      expect(testRoot.renderer.getResolvedStyle(withUndefinedKeys.id)).toEqual(withoutKeysHover)
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
+  it("lets state styles in the style prop outrank compiled className state styles per property", () => {
+    const testRoot = createTestRoot({ strictStyles: true })
+    const card = {
+      backgroundColor: "red",
+      hover: { backgroundColor: "green" },
+    } as StyleDesc
+    Object.defineProperty(card, COMPILED_STYLE, { value: true })
+    const styles = { card }
+
+    testRoot.render(
+      <div
+        data-testid="class-name-and-state-style"
+        className={styles.card as unknown as string}
+        style={{ backgroundColor: "blue", hover: { padding: 2 } }}
+      />
+    )
+
+    expect(testRoot.renderer.findByTestId("class-name-and-state-style")?.style).toMatchObject({
+      backgroundColor: "blue",
+      hover: { padding: 2 },
+    })
+    expect(
+      testRoot.renderer.findByTestId("class-name-and-state-style")?.style.hover?.backgroundColor,
+    ).toBeNull()
+    testRoot.unmount()
+  })
+
+  it("applies style prop precedence to every native state style", () => {
+    const testRoot = createTestRoot({ strictStyles: true })
+    const stateKeys = [
+      "hover",
+      "hoverWithin",
+      "active",
+      "activeWithin",
+      "focus",
+      "focusVisible",
+      "focusWithin",
+      "dragOver",
+    ] as const satisfies readonly NativeStateStyleKey[]
+    const card: StyleDesc = { opacity: 0.5 }
+    for (const key of stateKeys) card[key] = { opacity: 0.1 }
+    Object.defineProperty(card, COMPILED_STYLE, { value: true })
+
+    testRoot.render(
+      <div
+        data-testid="class-name-and-all-state-styles"
+        className={card as unknown as string}
+        style={{ opacity: 0.8 }}
+      />
+    )
+
+    const style = testRoot.renderer.findByTestId("class-name-and-all-state-styles")?.style
+    for (const key of stateKeys) expect(style?.[key]?.opacity).toBeNull()
+    testRoot.unmount()
+  })
+
+  it("applies compiled styles and still reports the class names cn() could not compile", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: false })
+    const compiled = { backgroundColor: "red" }
+    Object.defineProperty(compiled, COMPILED_STYLE, { value: true })
+    const merged = cn(...([compiled, "rounded-lg"] as unknown as string[]))
+
+    testRoot.render(<div data-testid="partly-compiled" className={merged} />)
+
+    expect(testRoot.renderer.findByTestId("partly-compiled")?.style).toMatchObject({
+      backgroundColor: "red",
+    })
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/<div data-testid="partly-compiled">.*"rounded-lg"/)
+    )
+    testRoot.unmount()
+  })
+
+  it("reports and ignores an uncompiled object in className", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: false })
+
+    testRoot.render(
+      <div data-testid="uncompiled-class-name" className={{ backgroundColor: "red" } as unknown as string} />,
+    )
+
+    expect(testRoot.renderer.findByTestId("uncompiled-class-name")?.style).toEqual({})
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringMatching(/className value that was not compiled by @gpuix\/plugins\/css/),
+    )
+    testRoot.unmount()
   })
 
   it("stays quiet for a className that applies no classes", () => {
@@ -1362,14 +1877,9 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     // `className=""` and `className={null}` apply no CSS classes on the web
     // either, so there is nothing for the native renderer to lose.
     const strict = createTestRoot({ strictStyles: true })
+    strict.render(<div data-testid="empty-class-name" className="" />)
     strict.render(
-      <div data-testid="empty-class-name" {...({ className: "" } as Record<string, string>)} />
-    )
-    strict.render(
-      <div
-        data-testid="empty-class-name"
-        {...({ className: null } as unknown as Record<string, string>)}
-      />
+      <div data-testid="empty-class-name" className={null as unknown as string} />
     )
 
     expect(warn).not.toHaveBeenCalled()
@@ -1428,7 +1938,7 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const testRoot = createTestRoot({ strictStyles: true })
     const reason =
-      'display: "none" cannot be set by hover or active: hiding the element removes the hit-test box that triggers the state; use visibility: "hidden" or hoverWithin on a descendant'
+      'display: "none" cannot be set by hover, active, or dragOver: hiding the element removes the hit-test box that triggers the state; use visibility: "hidden" or hoverWithin on a descendant'
 
     testRoot.render(
       <div>
@@ -1437,18 +1947,25 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
           style={{ hover: { display: "none", opacity: 0.5 } }}
         />
         <div data-testid="active-hidden" style={{ active: { display: "none" } }} />
+        <div data-testid="drag-over-hidden" style={{ dragOver: { display: "none" } }} />
         <div
           data-testid="allowed-state-display"
-          style={{ hoverWithin: { display: "none" }, hover: { display: "grid" } }}
+          style={{
+            hoverWithin: { display: "none" },
+            focusWithin: { display: "none" },
+            activeWithin: { display: "none" },
+            hover: { display: "grid" },
+          }}
         />
       </div>,
     )
 
     const diagnostics = testRoot.renderer.drainStyleDiagnostics()
-    expect(diagnostics).toHaveLength(2)
+    expect(diagnostics).toHaveLength(3)
     for (const [testId, property] of [
       ["hover-hidden", "hover.display"],
       ["active-hidden", "active.display"],
+      ["drag-over-hidden", "dragOver.display"],
     ] as const) {
       const element = testRoot.renderer.findByTestId(testId)!
       expect(diagnostics.find((diagnostic) => diagnostic.dataTestId === testId)).toMatchObject({
@@ -1462,5 +1979,98 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     }
     expect(diagnostics.find((diagnostic) => diagnostic.dataTestId === "allowed-state-display")).toBeUndefined()
     expect(warn).toHaveBeenCalled()
+  })
+
+  it("reports a hoverWithinGroup naming no ancestor hoverGroup", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: true })
+
+    testRoot.render(
+      <div style={{ hoverGroup: "outer" }}>
+        <span
+          data-testid="orphaned-hover-within"
+          style={{
+            hoverWithinGroup: "sidebar",
+            hoverWithin: { backgroundColor: "#7c86ff" },
+          }}
+        />
+      </div>,
+    )
+
+    const element = testRoot.renderer.findByTestId("orphaned-hover-within")!
+    const diagnostics = testRoot.renderer.drainStyleDiagnostics()
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]).toMatchObject({
+      elementId: element.id,
+      elementType: "div",
+      dataTestId: "orphaned-hover-within",
+      property: "hoverWithinGroup",
+      value: '"sidebar"',
+    })
+    expect(diagnostics[0].message).toContain('no ancestor hoverGroup named "sidebar" was found')
+    expect(warn).toHaveBeenCalled()
+  })
+
+  it("keeps an unmatched CSS-module group silent but diagnoses a handwritten group", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const testRoot = createTestRoot({ strictStyles: true })
+    const generatedGroup =
+      "gpuix-css-module:hover-group:/fixture/dock.module.css:tileBase"
+    const compiled = (style: StyleDesc) => {
+      Object.defineProperty(style, COMPILED_STYLE, { value: true })
+      return style as unknown as string
+    }
+
+    testRoot.render(
+      <div>
+        <span className={compiled({ hoverGroup: generatedGroup } as StyleDesc)}>
+          <span>
+            <img
+              alt=""
+              className={compiled({
+                hoverWithinGroup: generatedGroup,
+                hoverWithin: { width: 22 },
+              } as StyleDesc)}
+            />
+          </span>
+        </span>
+        <span>
+          <span>
+            <img
+              alt=""
+              data-testid="unmatched-css-module-group"
+              className={compiled({
+                hoverWithinGroup: generatedGroup,
+                hoverWithin: { width: 22 },
+              } as StyleDesc)}
+            />
+          </span>
+        </span>
+        <span>
+          <span>
+            <img
+              alt=""
+              data-testid="unmatched-handwritten-group"
+              style={{ hoverWithinGroup: "handwritten", hoverWithin: { width: 22 } }}
+            />
+          </span>
+        </span>
+      </div>,
+    )
+
+    const diagnostics = testRoot.renderer.drainStyleDiagnostics()
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]).toMatchObject({
+      elementType: "img",
+      dataTestId: "unmatched-handwritten-group",
+      property: "hoverWithinGroup",
+      value: '"handwritten"',
+    })
+    expect(diagnostics[0]?.message).toContain(
+      'no ancestor hoverGroup named "handwritten" was found',
+    )
+    expect(diagnostics.find((diagnostic) => diagnostic.dataTestId === "unmatched-css-module-group"))
+      .toBeUndefined()
+    expect(warn).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,0 +1,63 @@
+{
+  "provider": "wgpu-bun@29.1.0 / v20260807.193620 / shim",
+  "runtime": "Bun 1.4.0",
+  "workload": {
+    "target": "256x256 bgra8unorm",
+    "warmupFrames": 50,
+    "measuredFrames": 300,
+    "draws": [
+      1000,
+      5000,
+      10000
+    ],
+    "commands": "setPipeline once; setVertexBuffer + setIndexBuffer + drawIndexed repeated",
+    "gpuCompleteTiming": "submit invocation until queue.onSubmittedWorkDone() resolves; one frame is completed before the next"
+  },
+  "measurements": [
+    {
+      "draws": 1000,
+      "encode": {
+        "medianNs": 233458,
+        "p95Ns": 397750
+      },
+      "finishSubmit": {
+        "medianNs": 156333,
+        "p95Ns": 271792
+      },
+      "gpuComplete": {
+        "medianNs": 2500584,
+        "p95Ns": 2696792
+      }
+    },
+    {
+      "draws": 5000,
+      "encode": {
+        "medianNs": 803166,
+        "p95Ns": 1385125
+      },
+      "finishSubmit": {
+        "medianNs": 469750,
+        "p95Ns": 819375
+      },
+      "gpuComplete": {
+        "medianNs": 2850375,
+        "p95Ns": 4071666
+      }
+    },
+    {
+      "draws": 10000,
+      "encode": {
+        "medianNs": 1322042,
+        "p95Ns": 1935667
+      },
+      "finishSubmit": {
+        "medianNs": 837708,
+        "p95Ns": 1101333
+      },
+      "gpuComplete": {
+        "medianNs": 4294083,
+        "p95Ns": 4606167
+      }
+    }
+  ]
+}

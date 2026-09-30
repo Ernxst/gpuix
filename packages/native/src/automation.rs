@@ -79,10 +79,10 @@ pub struct ElementBounds {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BoxInsets {
-    pub padding_left: f64,
-    pub padding_top: f64,
-    pub padding_right: f64,
-    pub padding_bottom: f64,
+    pub padding_left: crate::style::LengthValue,
+    pub padding_top: crate::style::LengthValue,
+    pub padding_right: crate::style::LengthValue,
+    pub padding_bottom: crate::style::LengthValue,
     pub border_left: f64,
     pub border_top: f64,
     pub border_right: f64,
@@ -226,7 +226,9 @@ enum ClockMode {
         wall_origin: Instant,
         logical_origin: Instant,
     },
-    Frozen { now: Instant },
+    Frozen {
+        now: Instant,
+    },
 }
 
 struct ClockInner {

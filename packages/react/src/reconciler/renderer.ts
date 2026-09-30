@@ -4,6 +4,7 @@ import type { EventPayload, MenuSpec, WindowOptions } from "@gpuix/native"
 import { createRoot, flushSync, strictStylesDefault, type Root } from "./reconciler.js"
 import type { DebugFrameOverlayMode, NativeRenderer } from "../types/host.js"
 import { handleGpuixEvent } from "./event-registry.js"
+import { invalidateWebGpuTransport } from "../canvas/webgpu.js"
 import { hasBrowserDocument } from "../document.js"
 import {
   attachAnimationFrameSource,
@@ -186,7 +187,10 @@ export function startFrameLoop(
   }
 
   if (nativeFrameSource) {
-    scheduleTimer(() => drive("idle"), frameMs)
+    // Pump AppKit immediately rather than waiting `frameMs`: the first idle
+    // tick is what runs the post-show occlusion pump, and delaying it here
+    // only adds to the time before the window is reported visible.
+    drive("idle")
   } else {
     drive("timer")
   }
@@ -267,6 +271,8 @@ function renderSlot(): RenderSlot {
 }
 
 export interface RenderOptions extends WindowOptions {
+  /** Whether unprevented Tab and Shift+Tab move focus through tab stops. Defaults to true. */
+  tabNavigation?: boolean
   onEvent?: (event: EventPayload) => void
   /** Window-level text selection. Fires when the selected ranges change. */
   onSelectionChange?: (event: EventPayload, renderer: NativeRenderer) => void
@@ -299,6 +305,7 @@ export function resetRender(): void {
   if (slot?.renderer) detachAnimationFrameSource(slot.renderer)
   slot?.renderer?.setApplicationEventHandler?.(null)
   slot?.root?.unmount()
+  if (slot?.renderer) invalidateWebGpuTransport(slot.renderer)
   const automation = Reflect.get(globalThis, BROWSER_AUTOMATION_KEY)
   void automation?.close()
   Reflect.deleteProperty(globalThis, BROWSER_AUTOMATION_KEY)
@@ -351,6 +358,7 @@ function terminateRenderSlot(
       console.error("[gpuix] React unmount failed during termination", error)
     }
   }
+  if (slot.renderer) invalidateWebGpuTransport(slot.renderer)
 
   if (options.quit) {
     try {
@@ -668,6 +676,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     debugFrameOverlay,
     menus,
     strictStyles,
+    tabNavigation,
     errorOverlay,
     ...windowOptions
   } = options
@@ -745,6 +754,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
   let root!: Root
   root = createRoot(host, {
     strictStyles,
+    tabNavigation,
     onSelectionChange,
     onUncaughtError: ({ error, componentStack }) => {
       // Injected renderers are embedder-owned lifecycles: the failed root and

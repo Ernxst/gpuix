@@ -8,6 +8,7 @@ import {
   cleanup,
   isNativeTestRendererAvailable,
   render,
+  resetSharedWindowForNextFile,
   textContent,
   type TestRenderer,
 } from "../testing.js"
@@ -18,8 +19,10 @@ import { withNewGoldenWrites } from "./test-utils.js"
 expect.extend(gpuixMatchers)
 
 declare module "vitest" {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  interface Matchers<T = any> extends GpuixMatchers<T> {}
+  interface Matchers<
+    R extends void | Promise<void> = void | Promise<void>,
+    T = unknown,
+  > extends GpuixMatchers<R> {}
 }
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
@@ -161,6 +164,11 @@ describeNative("render", () => {
     expect(textContent(screen.renderer, screen.getByTestId("count"))).toBe("count 0")
     await screen.userEvent.click(screen.getByRole("button", { name: "Bump" }))
     expect(textContent(screen.renderer, screen.getByTestId("count"))).toBe("count 1")
+  })
+
+  it("exposes the window title from its last accessibility frame", () => {
+    const screen = render(<text>Title reader</text>)
+    expect(screen.renderer.getWindowTitle()).toBe("GPUIX Test")
   })
 
   it("flushes passive effects before render, rerender and unmount return", () => {
@@ -328,6 +336,43 @@ describeNative("render", () => {
     )
   })
 
+  it("does not reuse a shared window across onSelectionChange handlers", () => {
+    const first = render(<text>first</text>, { onSelectionChange: () => {} })
+    const second = render(<text>second</text>, { onSelectionChange: () => {} })
+
+    expect(second.renderer).not.toBe(first.renderer)
+  })
+
+  it("keeps the window for the next file when it asks for the same options", () => {
+    const first = render(<text>first</text>, { width: 640, height: 480 })
+    resetSharedWindowForNextFile()
+
+    const same = render(<text data-testid="same">same</text>, { width: 640, height: 480 })
+    expect(same.renderer).toBe(first.renderer)
+    expect(textContent(same.renderer, same.getByTestId("same"))).toBe("same")
+    resetSharedWindowForNextFile()
+
+    const different = render(<text>different</text>, { width: 800, height: 480 })
+    expect(different.renderer).not.toBe(first.renderer)
+    expect(different.renderer.getWindowSize().width).toBe(800)
+  })
+
+  it("closes a window whose root died on an uncaught render error at the file boundary", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      render(<text>before</text>)
+      const dead = render(<Boom />)
+      expect(dead.root.getStatus().status).toBe("failed")
+      resetSharedWindowForNextFile()
+
+      const live = render(<text data-testid="ok">ok</text>)
+      expect(live.renderer).not.toBe(dead.renderer)
+      expect(live.root.getStatus().status).toBe("active")
+    } finally {
+      consoleError.mockRestore()
+    }
+  })
+
   it("cleanup() unmounts the tree and keeps the window", () => {
     const screen = render(<text data-testid="kept">kept</text>)
     const renderer = screen.renderer
@@ -449,8 +494,7 @@ describeNative("render", () => {
     })
 
     it("mounts every child of a top-level fragment", () => {
-      // The window has one root, so before there was a container to append
-      // into each top-level child overwrote the last and only one survived.
+      // render() provides a container, so every fragment child mounts in order.
       const screen = render(
         <>
           <text data-testid="first">first</text>

@@ -1,8 +1,8 @@
 /**
  * Repeatable benchmark harness for GPUIX apps.
  *
- * Measures bundle size, cold startup, idle memory, build/rebuild time, and
- * hot-reload latency for the fixtures in `examples/bench/`, against a plain
+ * Measures bundle size, cold startup, idle memory, and build/rebuild time for
+ * the fixtures in `examples/bench/`, against a plain
  * GPUI baseline built from the same GPUI checkout. See
  * `examples/bench/README.md` for what each metric means and why it is
  * measured the way it is.
@@ -17,14 +17,13 @@
  *   bun install --frozen-lockfile
  *   bun run build:native   # produces packages/native/*.node
  *   bun run build:react    # produces packages/react/dist
- *   bun run build:vite     # produces packages/vite/dist, used by the Vite
- *                          # hot-reload measurement
  * and, once, the GPUI baseline binary:
  *   cd packages/native && cargo build --release --example hello_bench
  */
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -38,7 +37,6 @@ const BIN_DIR = path.join(OUT_DIR, "bin")
 const MARKER_PREFIX = "GPUIX_BENCH "
 const READY_TIMEOUT_MS = 20_000
 const IDLE_BEFORE_MEMORY_MS = 2_000
-const HOT_RELOAD_TIMEOUT_MS = 20_000
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -58,6 +56,11 @@ function fail(message: string): never {
 
 function log(message: string): void {
   console.log(`[app-bench] ${message}`)
+}
+
+function hostLoad() {
+  const [load1, load5, load15] = os.loadavg()
+  return { at: new Date().toISOString(), load1, load5, load15, cpus: os.cpus().length }
 }
 
 // ---------------------------------------------------------------------------
@@ -128,7 +131,7 @@ function parseMarkerLine(line: string): BenchMarker | undefined {
  * Runs the app under `script` so its stdin is a terminal that stays open, as
  * when a person launches it. A non-TTY stdin turns on GPUIX automation
  * (`createRenderer`), which adds memory and startup cost a real launch does
- * not pay, and a stdin that ends makes Vite's dev server exit. `script` needs
+ * not pay. The launcher needs
  * a real pipe on its own stdin (Bun's `"pipe"` is a socket, which it rejects),
  * so `tail -f /dev/null` feeds it one that never closes.
  */
@@ -214,6 +217,14 @@ async function stop(app: RunningApp): Promise<void> {
 interface MemorySample {
   physFootprintMB?: number
   rssMB?: number
+  processes?: Array<{
+    pid: number
+    name: string
+    physFootprintMB?: number
+    rssMB?: number
+    footprintSharePercent?: number
+    rssSharePercent?: number
+  }>
 }
 
 function unitToMB(value: number, unit: string): number {
@@ -250,10 +261,53 @@ function readRssMB(pid: number): number | undefined {
   return Number.isFinite(kb) ? kb / 1024 : undefined
 }
 
+function processTreePids(rootPid: number): number[] {
+  const result = spawnSync("ps", ["-axo", "pid=,ppid="], { encoding: "utf8" })
+  if (result.status !== 0) return [rootPid]
+  const children = new Map<number, number[]>()
+  for (const line of result.stdout.split("\n")) {
+    const [pidText, ppidText] = line.trim().split(/\s+/)
+    const pid = Number(pidText)
+    const ppid = Number(ppidText)
+    if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue
+    const siblings = children.get(ppid) ?? []
+    siblings.push(pid)
+    children.set(ppid, siblings)
+  }
+
+  const pending = [rootPid]
+  const pids: number[] = []
+  while (pending.length > 0) {
+    const pid = pending.pop()!
+    pids.push(pid)
+    pending.push(...(children.get(pid) ?? []))
+  }
+  return pids
+}
+
 function sampleMemory(pid: number): MemorySample {
+  const processes = processTreePids(pid).map((processPid) => ({
+    pid: processPid,
+    name: processName(processPid),
+    physFootprintMB: readFootprintMB(processPid) ?? readVmmapPhysFootprintMB(processPid),
+    rssMB: readRssMB(processPid),
+  }))
+  const physFootprintMB = processes.reduce((sum, process) => sum + (process.physFootprintMB ?? 0), 0)
+  const rssMB = processes.reduce((sum, process) => sum + (process.rssMB ?? 0), 0)
   return {
-    physFootprintMB: readFootprintMB(pid) ?? readVmmapPhysFootprintMB(pid),
-    rssMB: readRssMB(pid),
+    physFootprintMB: processes.some((process) => process.physFootprintMB !== undefined)
+      ? physFootprintMB
+      : undefined,
+    rssMB: processes.some((process) => process.rssMB !== undefined) ? rssMB : undefined,
+    processes: processes.map((process) => ({
+      ...process,
+      footprintSharePercent: process.physFootprintMB === undefined || physFootprintMB === 0
+        ? undefined
+        : (process.physFootprintMB / physFootprintMB) * 100,
+      rssSharePercent: process.rssMB === undefined || rssMB === 0
+        ? undefined
+        : (process.rssMB / rssMB) * 100,
+    })),
   }
 }
 
@@ -300,14 +354,12 @@ interface Fixture {
   readyPredicate: (marker: BenchMarker) => boolean
   /** Present only for fixtures the harness also runs from source (skips a rebuild round-trip). */
   measuresBuild: boolean
-  measuresHotReload: boolean
 }
 
 const HELLO_GPUIX_ENTRY = path.join(BENCH_DIR, "hello-gpuix.tsx")
 const HELLO_GPUI_SRC = path.join(NATIVE_DIR, "examples", "hello_bench.rs")
 const HELLO_GPUI_BIN = path.join(NATIVE_DIR, "target", "release", "examples", "hello_bench")
 const CHAT_ENTRY = path.join(EXAMPLES_DIR, "chat.tsx")
-const HOT_RELOAD_ENTRY = path.join(BENCH_DIR, "hot-reload-fixture.tsx")
 
 function runCommand(
   command: string,
@@ -344,7 +396,6 @@ const gpuixHello: Fixture = {
   id: "gpuix-hello",
   label: "GPUIX hello-world",
   measuresBuild: true,
-  measuresHotReload: true,
   readyPredicate: (m) => m.event === "ready",
   build(kind) {
     const outfile = path.join(BIN_DIR, "hello-gpuix")
@@ -371,7 +422,6 @@ const gpuiHello: Fixture = {
   id: "gpui-hello",
   label: "GPUI hello-world (baseline)",
   measuresBuild: true,
-  measuresHotReload: false,
   readyPredicate: (m) => m.event === "ready",
   build(kind) {
     if (kind === "cold") {
@@ -400,7 +450,6 @@ const gpuixChat: Fixture = {
   id: "gpuix-chat",
   label: "GPUIX chat (realistic)",
   measuresBuild: false,
-  measuresHotReload: false,
   readyPredicate: (m) => m.event === "ready",
   build(kind) {
     if (kind === "rebuild") return { binary: path.join(BIN_DIR, "chat"), buildMs: 0 }
@@ -427,6 +476,7 @@ interface BuildResult {
   bundleMB?: number
   coldBuildS?: number
   rebuildS?: number
+  buildRunDetails?: Array<{ phase: string; seconds: number; loadStart: ReturnType<typeof hostLoad>; loadEnd: ReturnType<typeof hostLoad> }>
 }
 
 async function measureBuild(fixture: Fixture): Promise<BuildResult> {
@@ -434,12 +484,24 @@ async function measureBuild(fixture: Fixture): Promise<BuildResult> {
   // runs below, even one whose bundle/build numbers this harness doesn't
   // report (gpuix-chat — see examples/bench/README.md).
   log(`${fixture.id}: ${fixture.measuresBuild ? "cold build" : "build"}`)
+  const coldLoadStart = hostLoad()
   const cold = fixture.build("cold")
+  const coldLoadEnd = hostLoad()
   if (!fixture.measuresBuild) return {}
   const bundleMB = fs.statSync(cold.binary).size / (1024 * 1024)
   log(`${fixture.id}: rebuild`)
+  const rebuildLoadStart = hostLoad()
   const rebuild = fixture.build("rebuild")
-  return { bundleMB, coldBuildS: cold.buildMs / 1000, rebuildS: rebuild.buildMs / 1000 }
+  const rebuildLoadEnd = hostLoad()
+  return {
+    bundleMB,
+    coldBuildS: cold.buildMs / 1000,
+    rebuildS: rebuild.buildMs / 1000,
+    buildRunDetails: [
+      { phase: "cold", seconds: cold.buildMs / 1000, loadStart: coldLoadStart, loadEnd: coldLoadEnd },
+      { phase: "rebuild", seconds: rebuild.buildMs / 1000, loadStart: rebuildLoadStart, loadEnd: rebuildLoadEnd },
+    ],
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -450,86 +512,67 @@ interface StartupMemorySamples {
   startupMs: number[]
   physFootprintMB: number[]
   rssMB: number[]
+  runDetails: Array<{
+    runStartEpochMs?: number
+    runEndEpochMs?: number
+    startupMs?: number
+    physFootprintMB?: number
+    rssMB?: number
+    processes?: MemorySample["processes"]
+    jsHeapUsedMB?: number
+    jsHeapTotalMB?: number
+    phases?: unknown
+    hostLoadStart: ReturnType<typeof hostLoad>
+    hostLoadEnd: ReturnType<typeof hostLoad>
+  }>
 }
 
 async function measureStartupAndMemoryRun(fixture: Fixture): Promise<{
+  runStartEpochMs: number
+  runEndEpochMs: number
   startupMs?: number
   physFootprintMB?: number
   rssMB?: number
+  processes?: MemorySample["processes"]
+  jsHeapUsedMB?: number
+  jsHeapTotalMB?: number
+  phases?: unknown
+  hostLoadStart: ReturnType<typeof hostLoad>
+  hostLoadEnd: ReturnType<typeof hostLoad>
 }> {
+  const loadStart = hostLoad()
   const spawnEpochMs = Date.now()
   const app = fixture.spawnForRun()
   try {
     const marker = await waitForMarker(app, fixture.readyPredicate, READY_TIMEOUT_MS)
     if (!marker) {
       log(`${fixture.id}: no ready marker within ${READY_TIMEOUT_MS}ms, skipping this run`)
-      return {}
+      return {
+        runStartEpochMs: spawnEpochMs,
+        runEndEpochMs: Date.now(),
+        hostLoadStart: loadStart,
+        hostLoadEnd: hostLoad(),
+      }
     }
     const readyAtEpochMs = marker.readyAtEpochMs as number
     const startupMs = readyAtEpochMs - spawnEpochMs
     await sleep(IDLE_BEFORE_MEMORY_MS)
     const pid = appPid(app)
     const memory = pid ? sampleMemory(pid) : {}
-    return { startupMs, ...memory }
+    return {
+      runStartEpochMs: spawnEpochMs,
+      runEndEpochMs: Date.now(),
+      startupMs,
+      ...memory,
+      jsHeapUsedMB: typeof marker.jsHeapUsedMB === "number" ? marker.jsHeapUsedMB : undefined,
+      jsHeapTotalMB: typeof marker.jsHeapTotalMB === "number" ? marker.jsHeapTotalMB : undefined,
+      phases: marker.phases,
+      hostLoadStart: loadStart,
+      hostLoadEnd: hostLoad(),
+    }
   } finally {
     await stop(app)
   }
-}
-
-// ---------------------------------------------------------------------------
-// Hot reload
-// ---------------------------------------------------------------------------
-
-async function measureHotReload(
-  label: string,
-  command: string,
-  args: string[],
-  cwd: string,
-  runs: number,
-): Promise<number[]> {
-  const original = fs.readFileSync(HOT_RELOAD_ENTRY, "utf8")
-  const samples: number[] = []
-  const app = launch(command, args, { cwd })
-  try {
-    const initial = await waitForMarker(app, (m) => m.event === "mounted", READY_TIMEOUT_MS)
-    if (!initial) {
-      log(`hot reload (${label}): fixture never mounted within ${READY_TIMEOUT_MS}ms`)
-      return samples
-    }
-    let seen = app.markers.length
-    for (let i = 0; i < runs; i++) {
-      const version = `v1-bench-${i}-${Date.now()}`
-      const edited = original.replace("const VERSION = 'v1'", `const VERSION = '${version}'`)
-      const writeEpochMs = Date.now()
-      fs.writeFileSync(HOT_RELOAD_ENTRY, edited)
-      const marker = await waitForMarker(
-        app,
-        (m) => m.event === "mounted" && m.version === version,
-        HOT_RELOAD_TIMEOUT_MS,
-        seen,
-      )
-      seen = app.markers.length
-      fs.writeFileSync(HOT_RELOAD_ENTRY, original)
-      // Let the reload the restore triggers finish, so the next edit is not
-      // queued behind it and timed with it.
-      await waitForMarker(
-        app,
-        (m) => m.event === "mounted" && m.version === "v1",
-        HOT_RELOAD_TIMEOUT_MS,
-        seen,
-      )
-      seen = app.markers.length
-      if (!marker) {
-        log(`hot reload (${label}): edit ${i} never reflected within ${HOT_RELOAD_TIMEOUT_MS}ms`)
-        continue
-      }
-      samples.push((marker.atEpochMs as number) - writeEpochMs)
-    }
-  } finally {
-    fs.writeFileSync(HOT_RELOAD_ENTRY, original)
-    await stop(app)
-  }
-  return samples
 }
 
 // ---------------------------------------------------------------------------
@@ -546,32 +589,31 @@ interface FixtureReport {
   firstLaunchMs?: number
   startup?: Stats
   startupSamples: number[]
+  startupRunDetails: StartupMemorySamples["runDetails"]
+  buildRunDetails?: BuildResult["buildRunDetails"]
   physFootprint?: Stats
   rss?: Stats
-  hotReloadBunHot?: Stats
-  hotReloadVite?: Stats
   notes: string[]
 }
 
 // Jamon Holmgren's published figures for the same shape of app, kept as a
 // fixed reference — not remeasured here. See the brief for the source.
 const JAMON_REFERENCE: Record<string, string> = {
-  "gpuix-hello": "bundle 83.0 MB · startup 1249 ms · memory 140 MB · build 0.4 s · rebuild 0.5 s · hot reload N/A",
+  "gpuix-hello": "bundle 83.0 MB · startup 1249 ms · memory 140 MB · build 0.4 s · rebuild 0.5 s",
   "gpui-hello": "bundle 6.9 MB · startup 215 ms · memory 83.6 MB",
 }
 
 function printReport(reports: FixtureReport[]): void {
   const header =
-    "| Fixture | Bundle (MB) | First launch ms | Startup ms (median, min–max) | Memory phys/RSS (MB, median) | Build cold/rebuild (s) | Hot reload bun/vite (ms, median) | Jamon reference |"
-  const divider = "|---|---|---|---|---|---|---|---|"
+    "| Fixture | Bundle (MB) | First launch ms | Startup ms (median, min–max) | Memory phys/RSS (MB, median) | Build cold/rebuild (s) | Jamon reference |"
+  const divider = "|---|---|---|---|---|---|---|"
   console.log(header)
   console.log(divider)
   for (const r of reports) {
     const memory = `${fmt(r.physFootprint?.median)} / ${fmt(r.rss?.median)}`
     const build = `${fmt(r.coldBuildS, 2)} / ${fmt(r.rebuildS, 2)}`
-    const hotReload = `${fmt(r.hotReloadBunHot?.median, 0)} / ${fmt(r.hotReloadVite?.median, 0)}`
     console.log(
-      `| ${r.label} | ${fmt(r.bundleMB)} | ${fmt(r.firstLaunchMs, 0)} | ${fmtStats(r.startup)} | ${memory} | ${build} | ${hotReload} | ${JAMON_REFERENCE[r.id] ?? "–"} |`,
+      `| ${r.label} | ${fmt(r.bundleMB)} | ${fmt(r.firstLaunchMs, 0)} | ${fmtStats(r.startup)} | ${memory} | ${build} | ${JAMON_REFERENCE[r.id] ?? "–"} |`,
     )
   }
   for (const r of reports) {
@@ -596,74 +638,49 @@ async function main(): Promise<void> {
   // The first launch of a newly written executable waits for a macOS
   // malware scan that scales with file size, so it is reported on its own
   // rather than mixed into the warm startup samples.
-  const firstLaunch = new Map<string, number | undefined>()
+  const firstLaunch = new Map<string, Awaited<ReturnType<typeof measureStartupAndMemoryRun>>>()
   for (const fixture of FIXTURES) {
     log(`first launch: ${fixture.id}`)
-    firstLaunch.set(fixture.id, (await measureStartupAndMemoryRun(fixture)).startupMs)
+    firstLaunch.set(fixture.id, await measureStartupAndMemoryRun(fixture))
   }
 
   // Startup/memory: interleave fixtures run by run — single-run timings on
   // this machine vary by up to 45%, and batching would let a machine-wide
   // slowdown land entirely on whichever fixture ran last.
   const startupMemory = new Map<string, StartupMemorySamples>(
-    FIXTURES.map((f) => [f.id, { startupMs: [], physFootprintMB: [], rssMB: [] }]),
+    FIXTURES.map((f) => [f.id, { startupMs: [], physFootprintMB: [], rssMB: [], runDetails: [] }]),
   )
   for (let run = 0; run < runs; run++) {
     for (const fixture of FIXTURES) {
       log(`run ${run + 1}/${runs}: ${fixture.id} startup + memory`)
       const sample = await measureStartupAndMemoryRun(fixture)
       const bucket = startupMemory.get(fixture.id)!
+      bucket.runDetails.push(sample)
       if (sample.startupMs !== undefined) bucket.startupMs.push(sample.startupMs)
       if (sample.physFootprintMB !== undefined) bucket.physFootprintMB.push(sample.physFootprintMB)
       if (sample.rssMB !== undefined) bucket.rssMB.push(sample.rssMB)
     }
   }
 
-  log("hot reload: bun --hot")
-  const hotReloadBunHot = await measureHotReload(
-    "bun --hot",
-    "bun",
-    ["--hot", HOT_RELOAD_ENTRY],
-    BENCH_DIR,
-    runs,
-  )
-
-  log("hot reload: @gpuix/vite")
-  const hotReloadVite = await measureHotReload(
-    "vite",
-    "bun",
-    ["run", "--bun", "vite", "--config", "vite.config.ts"],
-    BENCH_DIR,
-    runs,
-  )
-
   const reports: FixtureReport[] = FIXTURES.map((fixture) => {
     const build = buildResults.get(fixture.id)!
     const sm = startupMemory.get(fixture.id)!
     const notes: string[] = []
     if (!fixture.measuresBuild) notes.push("bundle/build not measured — see examples/bench/README.md")
-    if (!fixture.measuresHotReload) notes.push("hot reload not applicable")
     const report: FixtureReport = {
       id: fixture.id,
       label: fixture.label,
       bundleMB: build.bundleMB,
       coldBuildS: build.coldBuildS,
       rebuildS: build.rebuildS,
-      firstLaunchMs: firstLaunch.get(fixture.id),
+      firstLaunchMs: firstLaunch.get(fixture.id)?.startupMs,
       startup: stats(sm.startupMs),
       startupSamples: sm.startupMs,
+      startupRunDetails: [firstLaunch.get(fixture.id)!, ...sm.runDetails],
+      buildRunDetails: build.buildRunDetails,
       physFootprint: stats(sm.physFootprintMB),
       rss: stats(sm.rssMB),
       notes,
-    }
-    if (fixture.id === gpuixHello.id) {
-      report.hotReloadBunHot = stats(hotReloadBunHot)
-      report.hotReloadVite = stats(hotReloadVite)
-      if (hotReloadVite.length === 0) {
-        notes.push(
-          "@gpuix/vite hot reload not measured: the fixture produced no marker under the plugin",
-        )
-      }
     }
     return report
   })
@@ -676,7 +693,7 @@ async function main(): Promise<void> {
   fs.writeFileSync(
     jsonPath,
     JSON.stringify(
-      { runs, generatedAt: new Date().toISOString(), reports, hotReloadBunHot, hotReloadVite },
+      { runs, generatedAt: new Date().toISOString(), reports },
       null,
       2,
     ),

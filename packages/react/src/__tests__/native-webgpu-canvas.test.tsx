@@ -8,7 +8,9 @@ import { describe, expect, it } from "vitest"
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 import { decodePng, type RgbaImage } from "../testing-png.js"
 
-const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
+// Test GPU canvas presentation exists only in the macOS test-support build.
+const describeNative =
+  isNativeTestRendererAvailable() && process.platform === "darwin" ? describe : describe.skip
 
 const RED = 0xff0000ff
 const GREEN = 0x00ff00ff

@@ -68,10 +68,10 @@ describeNative("Select item registration", () => {
             <SelectPrimitive.Trigger style={triggerStyle}>
               <SelectPrimitive.Value placeholder="Choose" />
             </SelectPrimitive.Trigger>
-            <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+            <SelectPrimitive.Popup side="bottom" sideOffset={4} style={contentStyle}>
               <WrappedItem value="alpha" style={itemStyle}>Alpha</WrappedItem>
               <WrappedItem value="beta" style={itemStyle}>Beta</WrappedItem>
-            </SelectPrimitive.Content>
+            </SelectPrimitive.Popup>
           </SelectPrimitive.Root>
           <text>{`Value: ${value ?? "none"}`}</text>
         </div>
@@ -98,12 +98,12 @@ describeNative("Select item registration", () => {
             <SelectPrimitive.Trigger style={triggerStyle}>
               <SelectPrimitive.Value placeholder="Choose" />
             </SelectPrimitive.Trigger>
-            <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+            <SelectPrimitive.Popup side="bottom" sideOffset={4} style={contentStyle}>
               <WrappedItem value="disabled" disabled style={itemStyle}>
                 Disabled
               </WrappedItem>
               <WrappedItem value="enabled" style={itemStyle}>Enabled</WrappedItem>
-            </SelectPrimitive.Content>
+            </SelectPrimitive.Popup>
           </SelectPrimitive.Root>
           <text>{`Value: ${value ?? "none"}`}</text>
         </div>
@@ -128,12 +128,12 @@ describeNative("Select item registration", () => {
             <SelectPrimitive.Trigger style={triggerStyle}>
               <SelectPrimitive.Value placeholder="Choose" />
             </SelectPrimitive.Trigger>
-            <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+            <SelectPrimitive.Popup side="bottom" sideOffset={4} style={contentStyle}>
               <WrappedItem value="alpha" style={itemStyle}>Alpha</WrappedItem>
               {showBeta ? (
                 <WrappedItem value="beta" style={itemStyle}>Beta</WrappedItem>
               ) : null}
-            </SelectPrimitive.Content>
+            </SelectPrimitive.Popup>
           </SelectPrimitive.Root>
           <text>{`Value: ${value ?? "none"}`}</text>
         </div>
@@ -162,11 +162,11 @@ describeNative("Select item registration", () => {
             <SelectPrimitive.Trigger style={triggerStyle}>
               <SelectPrimitive.Value placeholder="Choose" />
             </SelectPrimitive.Trigger>
-            <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+            <SelectPrimitive.Popup side="bottom" sideOffset={4} style={contentStyle}>
               <StyledWrapper testId="styled-wrapper" value="alpha" style={itemStyle}>
                 Alpha
               </StyledWrapper>
-            </SelectPrimitive.Content>
+            </SelectPrimitive.Popup>
           </SelectPrimitive.Root>
           <text>{`Value: ${value ?? "none"}`}</text>
         </div>
@@ -208,13 +208,13 @@ describeNative("Select item order (issue #387)", () => {
           <SelectPrimitive.Trigger data-testid="trigger" style={triggerStyle}>
             <SelectPrimitive.Value placeholder="Choose" />
           </SelectPrimitive.Trigger>
-          <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+          <SelectPrimitive.Popup side="bottom" sideOffset={4} style={contentStyle}>
             <SelectPrimitive.Item value="alpha" style={itemStyle}>Alpha</SelectPrimitive.Item>
             {show ? (
               <SelectPrimitive.Item value="beta" style={itemStyle}>Beta</SelectPrimitive.Item>
             ) : null}
             <SelectPrimitive.Item value="gamma" style={itemStyle}>Gamma</SelectPrimitive.Item>
-          </SelectPrimitive.Content>
+          </SelectPrimitive.Popup>
         </SelectPrimitive.Root>
         <text>{`Value: ${value ?? "none"}`}</text>
       </div>
@@ -261,13 +261,13 @@ describeNative("Select item order (issue #387)", () => {
             <SelectPrimitive.Trigger data-testid="trigger" style={triggerStyle}>
               <SelectPrimitive.Value placeholder="Choose" />
             </SelectPrimitive.Trigger>
-            <SelectPrimitive.Content side="bottom" sideOffset={4} style={contentStyle}>
+            <SelectPrimitive.Popup side="bottom" sideOffset={4} style={contentStyle}>
               {order.map((itemValue) => (
                 <SelectPrimitive.Item key={itemValue} value={itemValue} style={itemStyle}>
                   {itemValue === "alpha" ? "Alpha" : "Beta"}
                 </SelectPrimitive.Item>
               ))}
-            </SelectPrimitive.Content>
+            </SelectPrimitive.Popup>
           </SelectPrimitive.Root>
           <text>{`Value: ${value ?? "none"}`}</text>
         </div>
@@ -310,7 +310,7 @@ describeNative("Select item identity (issue #420)", () => {
             <SelectPrimitive.Trigger data-testid="trigger" style={triggerStyle}>
               <SelectPrimitive.Value placeholder="Choose" />
             </SelectPrimitive.Trigger>
-            <SelectPrimitive.Content
+            <SelectPrimitive.Popup
               ref={contentRef}
               side="bottom"
               sideOffset={4}
@@ -324,7 +324,7 @@ describeNative("Select item identity (issue #420)", () => {
                   Beta
                 </SelectPrimitive.Item>
               </SelectPrimitive.Group>
-            </SelectPrimitive.Content>
+            </SelectPrimitive.Popup>
           </SelectPrimitive.Root>
           <text>{`Value: ${value ?? "none"}`}</text>
         </div>
@@ -355,5 +355,135 @@ describeNative("Select item identity (issue #420)", () => {
     testRoot.renderer.simulateKeystrokes("enter")
 
     expect(testRoot.renderer.getAllText()).toContain("Value: alpha")
+  })
+})
+
+describeNative("Select multiple selection (issue #612)", () => {
+  let testRoot: ReturnType<typeof createTestRoot>
+
+  beforeEach(() => {
+    testRoot = createTestRoot()
+  })
+
+  function Options() {
+    return (
+      <SelectPrimitive.Popup side="bottom" sideOffset={4} style={contentStyle}>
+        <SelectPrimitive.List>
+          <SelectPrimitive.Item value="alpha" style={itemStyle}>Alpha</SelectPrimitive.Item>
+          <SelectPrimitive.Item value="beta" style={itemStyle}>Beta</SelectPrimitive.Item>
+          <SelectPrimitive.Item value="gamma" style={itemStyle}>Gamma</SelectPrimitive.Item>
+        </SelectPrimitive.List>
+      </SelectPrimitive.Popup>
+    )
+  }
+
+  it("toggles controlled values without closing the popup", () => {
+    function Demo() {
+      const [values, setValues] = useState<string[]>(["alpha"])
+      return (
+        <div style={{ width: 400, height: 300, padding: 12 }}>
+          <SelectPrimitive.Root multiple value={values} onValueChange={setValues}>
+            <SelectPrimitive.Trigger style={triggerStyle}>
+              <SelectPrimitive.Value />
+            </SelectPrimitive.Trigger>
+            <Options />
+          </SelectPrimitive.Root>
+          <text data-testid="values">{values.join("|")}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    testRoot.renderer.nativeSimulateClick(30, 25)
+
+    testRoot.renderer.simulateKeystrokes("down")
+    testRoot.renderer.simulateKeystrokes("enter")
+    expect(testRoot.renderer.getAllText()).toContain("alpha|beta")
+    expect(testRoot.renderer.getAllText()).toContain("Gamma")
+
+    testRoot.renderer.simulateKeystrokes("down")
+    testRoot.renderer.simulateKeystrokes("enter")
+    expect(testRoot.renderer.getAllText()).toContain("alpha|beta|gamma")
+
+    testRoot.renderer.simulateKeystrokes("up")
+    testRoot.renderer.simulateKeystrokes("enter")
+    expect(testRoot.renderer.getAllText()).toContain("alpha|gamma")
+    expect(testRoot.renderer.getAllText()).toContain("Beta")
+  })
+
+  it("toggles uncontrolled values and reports each array value", () => {
+    const changes: string[][] = []
+    testRoot.render(
+      <div style={{ width: 400, height: 300, padding: 12 }}>
+        <SelectPrimitive.Root
+          multiple
+          defaultValue={["alpha"]}
+          onValueChange={(value) => changes.push(value)}
+        >
+          <SelectPrimitive.Trigger style={triggerStyle}>
+            <SelectPrimitive.Value />
+          </SelectPrimitive.Trigger>
+          <Options />
+        </SelectPrimitive.Root>
+      </div>
+    )
+
+    testRoot.renderer.nativeSimulateClick(30, 25)
+    testRoot.renderer.simulateKeystrokes("down")
+    testRoot.renderer.simulateKeystrokes("enter")
+    testRoot.renderer.simulateKeystrokes("enter")
+
+    expect(changes).toEqual([["alpha", "beta"], ["alpha"]])
+    expect(testRoot.renderer.getAllText()).toContain("Gamma")
+  })
+
+  it("mounts the Base UI parts and exposes listbox option state", () => {
+    const triggerRef = React.createRef<PublicInstance>()
+    const listRef = React.createRef<PublicInstance>()
+    const itemRef = React.createRef<PublicInstance>()
+    const textRef = React.createRef<PublicInstance>()
+    const indicatorRef = React.createRef<PublicInstance>()
+    const iconRef = React.createRef<PublicInstance>()
+
+    testRoot.render(
+      <div style={{ width: 400, height: 300, padding: 12 }}>
+        <SelectPrimitive.Root multiple defaultValue={["alpha"]}>
+          <SelectPrimitive.Trigger ref={triggerRef} style={triggerStyle}>
+            <SelectPrimitive.Value />
+            <SelectPrimitive.Icon ref={iconRef}>Icon</SelectPrimitive.Icon>
+          </SelectPrimitive.Trigger>
+          <SelectPrimitive.Popup side="bottom" sideOffset={4} style={contentStyle}>
+            <SelectPrimitive.List ref={listRef}>
+              <SelectPrimitive.Item ref={itemRef} value="alpha" style={itemStyle}>
+                <SelectPrimitive.ItemIndicator ref={indicatorRef}>Check</SelectPrimitive.ItemIndicator>
+                <SelectPrimitive.ItemText ref={textRef}>Alpha</SelectPrimitive.ItemText>
+              </SelectPrimitive.Item>
+            </SelectPrimitive.List>
+          </SelectPrimitive.Popup>
+        </SelectPrimitive.Root>
+      </div>
+    )
+
+    expect(testRoot.renderer.getAllText()).toContain("Alpha")
+    testRoot.renderer.nativeSimulateClick(30, 25)
+
+    expect(triggerRef.current).toBeDefined()
+    expect(listRef.current).toBeDefined()
+    expect(itemRef.current).toBeDefined()
+    expect(textRef.current).toBeDefined()
+    expect(indicatorRef.current).toBeDefined()
+    expect(iconRef.current).toBeDefined()
+    expect(listRef.current!.getAttribute("aria-multiselectable")).toBe("true")
+    expect(itemRef.current!.getAttribute("aria-selected")).toBe("true")
+
+    const tree = testRoot.renderer.getAccessibilityTree()
+    const nodes = Object.values(tree.nodes)
+    expect(nodes.find((node) => node.host_id === listRef.current!.id)?.aria).toMatchObject({
+      role: "ListBox",
+    })
+    expect(nodes.find((node) => node.host_id === itemRef.current!.id)?.aria).toMatchObject({
+      role: "ListBoxOption",
+      selected: true,
+    })
   })
 })

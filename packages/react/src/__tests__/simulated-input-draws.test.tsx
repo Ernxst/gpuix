@@ -99,4 +99,86 @@ describeNative("simulated input draws", () => {
       root.unmount()
     }
   })
+
+  describe("keyboard on a 250-row tree", () => {
+    // Every draw rebuilds, lays out and paints the whole tree, so a redraw of
+    // an unchanged window costs as much as a real one (#663).
+    function Rows({ log }: { log: string[] }) {
+      return (
+        <div>
+          {Array.from({ length: 250 }, (_, index) => (
+            <div key={index} style={{ display: "flex", gap: 8, padding: 4 }}>
+              <div
+                tabIndex={0}
+                ariaLabel={`row ${index}`}
+                onFocus={() => log.push(`focus ${index}`)}
+                onBlur={() => log.push(`blur ${index}`)}
+              >
+                Row {index}
+              </div>
+              <text>Value {index}</text>
+            </div>
+          ))}
+        </div>
+      )
+    }
+
+    function drawsDuring(root: ReturnType<typeof createTestRoot>, action: () => void): number {
+      const baseline = settledSampleBaseline(root)
+      action()
+      return root.renderer.getDebugFrameOverlayStats().samples - baseline
+    }
+
+    it("draws once per Tab: the draw that reports the focus move", async () => {
+      const root = createTestRoot()
+      const log: string[] = []
+
+      try {
+        root.render(<Rows log={log} />)
+        await root.userEvent.tab()
+        log.length = 0
+
+        const draws = drawsDuring(root, () => root.renderer.simulateKeystrokes("tab"))
+
+        expect(draws).toBe(1)
+        expect(log).toEqual(["blur 0", "focus 1"])
+        expect(root.renderer.getActiveElement()).toBe(root.getByLabelText("row 1").id)
+      } finally {
+        root.unmount()
+      }
+    })
+
+    it("draws twice for the first Tab, which also activates the offscreen window", () => {
+      const root = createTestRoot()
+      const log: string[] = []
+
+      try {
+        root.render(<Rows log={log} />)
+
+        const draws = drawsDuring(root, () => root.renderer.simulateKeystrokes("tab"))
+
+        expect(draws).toBe(2)
+        expect(log).toEqual(["focus 0"])
+      } finally {
+        root.unmount()
+      }
+    })
+
+    it("does not draw for a key that changes nothing", async () => {
+      const root = createTestRoot()
+      const log: string[] = []
+
+      try {
+        root.render(<Rows log={log} />)
+        await root.userEvent.tab()
+
+        const draws = drawsDuring(root, () => root.renderer.simulateKeystrokes("x"))
+
+        expect(draws).toBe(0)
+        expect(root.renderer.getActiveElement()).toBe(root.getByLabelText("row 0").id)
+      } finally {
+        root.unmount()
+      }
+    })
+  })
 })

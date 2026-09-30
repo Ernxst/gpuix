@@ -97,7 +97,9 @@ describeNative("instance reads reuse a clean rendered frame", () => {
       const framesAfterFirstRead = root.renderer.getDebugFrameOverlayStats().frames
       expect(root.renderer.getElementBounds(pill.id)).toEqual({ x: 0, y: 0, width: 60, height: 32 })
       expect(root.renderer.getDebugFrameOverlayStats().frames).toBe(framesAfterFirstRead)
-      expect(framesAfterFirstRead - framesBefore).toBe(2)
+      // Current GPUI resolves the intrinsic image size during the same layout
+      // draw that consumes the React batch, so the first read needs one frame.
+      expect(framesAfterFirstRead - framesBefore).toBe(1)
     } finally {
       root.unmount()
     }
