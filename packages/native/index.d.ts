@@ -503,6 +503,7 @@ export declare class TestGpuixRenderer {
   simulateMenuAction(id: string): void
   /** Whether GPUI reports a currently installed application menu bar. */
   hasMainMenu(): boolean
+  getLastBoundsReadDrawCount(): number
   /**
    * Notify the view entity and draw it immediately. Eager mode then drains
    * queued native tasks; manual mode leaves them for `advanceAsyncClock`.

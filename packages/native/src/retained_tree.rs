@@ -227,11 +227,31 @@ pub struct RetainedTree {
     /// such as virtual-list remeasurement use revisions as invalidation keys,
     /// so redundant writes must not advance this counter.
     next_revision: u64,
+    /// Changes that can alter painted element geometry. General GPUI dirtiness
+    /// also includes hover, focus, paint-only styles and scrolling.
+    layout_revision: u64,
 }
 
 impl RetainedTree {
     pub(crate) fn has_stacking_candidates(&self) -> bool {
         self.stacking_candidates != 0
+    }
+
+    pub(crate) fn layout_revision(&self) -> u64 {
+        self.layout_revision
+    }
+
+    pub(crate) fn has_layout_affecting_interaction_styles(&self) -> bool {
+        self.elements.values().any(|element| {
+            element
+                .style
+                .as_deref()
+                .is_some_and(StyleDesc::has_layout_affecting_state_overrides)
+        })
+    }
+
+    pub(crate) fn invalidate_layout(&mut self) {
+        self.layout_revision = self.layout_revision.wrapping_add(1).max(1);
     }
 
     pub(crate) fn subtree_has_stacking_candidates(&self, id: u64) -> bool {
@@ -276,8 +296,7 @@ impl RetainedTree {
         matches!(
             style.position.as_deref(),
             Some("relative" | "absolute" | "fixed")
-        )
-            || style.opacity.is_some_and(|opacity| opacity < 1.0)
+        ) || style.opacity.is_some_and(|opacity| opacity < 1.0)
             || style.z_index.is_some()
     }
 
@@ -313,6 +332,7 @@ impl RetainedTree {
             stacking_candidates: 0,
             root_id: None,
             next_revision: 1,
+            layout_revision: 1,
         }
     }
 
@@ -330,6 +350,7 @@ impl RetainedTree {
         if self.root_id != root_id {
             self.root_id = root_id;
             self.take_revision();
+            self.invalidate_layout();
         }
     }
 
@@ -354,7 +375,13 @@ impl RetainedTree {
 
     /// Invalidate `id` and its ancestors, including their searchable text.
     fn mark_changed(&mut self, id: u64) {
+        self.invalidate_layout();
         self.mark_changed_detail(id, true);
+    }
+
+    fn mark_layout_render_changed(&mut self, id: u64) {
+        self.invalidate_layout();
+        self.mark_render_changed(id);
     }
 
     /// Invalidate for rendering only. Use for changes that cannot move a glyph
@@ -609,12 +636,18 @@ impl RetainedTree {
             .and_then(|style| style.focus_within_group.clone());
         let new_focus_group = style.focus_within_group.clone();
         let mut changed = false;
+        let mut layout_changed = false;
         if let Some(element) = self.elements.get_mut(&id) {
             let same = element
                 .style
                 .as_ref()
                 .is_some_and(|current| Arc::ptr_eq(current, &style) || **current == *style);
             if !same {
+                let old_style = element.style.as_deref();
+                layout_changed = old_style.map_or_else(
+                    || !StyleDesc::default().has_same_layout_as(&style),
+                    |old_style| !old_style.has_same_layout_as(&style),
+                );
                 element.style = Some(style);
                 changed = true;
             }
@@ -639,7 +672,11 @@ impl RetainedTree {
                 }
                 _ => {}
             }
-            self.mark_render_changed(id);
+            if layout_changed {
+                self.mark_layout_render_changed(id);
+            } else {
+                self.mark_render_changed(id);
+            }
         }
     }
 
@@ -683,6 +720,10 @@ impl RetainedTree {
     pub fn set_custom_prop(&mut self, id: u64, key: String, value: serde_json::Value) {
         let mut changed = false;
         let is_highlight = key == "highlight";
+        let layout_affecting = !matches!(
+            key.as_str(),
+            "autoFocus" | "testId" | "id" | "data-testid" | "highlight"
+        );
         let was_declaration = self
             .elements
             .get(&id)
@@ -732,7 +773,13 @@ impl RetainedTree {
         if !changed {
             return;
         }
-        self.mark_render_changed(id);
+        if layout_affecting {
+            // Native custom-element props can change their intrinsic size
+            // (input values and placeholders are common examples).
+            self.mark_layout_render_changed(id);
+        } else {
+            self.mark_render_changed(id);
+        }
         let is_declaration = self
             .elements
             .get(&id)

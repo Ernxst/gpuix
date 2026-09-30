@@ -153,7 +153,22 @@ const sharedHostNodes = hostNodeRegistry()
 const { hostNodeStates, publicInstanceContainers } = sharedHostNodes
 const { virtualListsByContainer, warnedVirtualListZeroHeights } = sharedHostNodes
 const virtualListsPendingValidation = new WeakMap<Container, Set<Instance>>()
+const zeroHeightVirtualListsPendingCheck = new WeakMap<Container, Set<Instance>>()
 const warnedVirtualListRowContracts = new WeakSet<Instance>()
+
+const LAYOUT_STYLE_KEYS = [
+  "display", "visibility", "flexDirection", "flexWrap", "flexGrow", "flexShrink", "flexBasis",
+  "alignItems", "alignSelf", "alignContent", "justifyContent", "gap", "rowGap", "columnGap",
+  "gridTemplateColumns", "gridTemplateRows", "gridColumn", "gridRow", "gridColumnStart",
+  "gridColumnEnd", "gridRowStart", "gridRowEnd", "gridArea", "gridAutoFlow", "gridAutoRows",
+  "gridAutoColumns", "justifyItems", "justifySelf", "width", "height", "minWidth", "minHeight",
+  "maxWidth", "maxHeight", "aspectRatio", "padding", "paddingTop", "paddingRight", "paddingBottom",
+  "paddingLeft", "margin", "marginTop", "marginRight", "marginBottom", "marginLeft", "position",
+  "top", "right", "bottom", "left", "borderWidth", "borderTopWidth", "borderRightWidth",
+  "borderBottomWidth", "borderLeftWidth", "borderStyle", "fontSize", "fontFamily", "fontWeight",
+  "letterSpacing", "fontVariantNumeric", "textTransform", "textAlign", "lineHeight", "whiteSpace",
+  "textWrap", "textOverflow", "lineClamp", "overflow", "overflowX", "overflowY", "scrollbarWidth",
+] as const
 
 class InlineTextChildError extends Error {
   override name = "InlineTextChildError"
@@ -252,12 +267,45 @@ function validatePendingVirtualLists(container: Container): void {
   }
 }
 
-function diagnoseZeroHeightVirtualLists(container: Container): void {
-  const lists = virtualListsByContainer.get(container)
-  const getElementBounds = container.native.getElementBounds
-  if (!lists || !getElementBounds) return
+function scheduleZeroHeightVirtualListCheck(instance: Instance, container: Container): void {
+  let pending = zeroHeightVirtualListsPendingCheck.get(container)
+  if (!pending) {
+    pending = new Set()
+    zeroHeightVirtualListsPendingCheck.set(container, pending)
+  }
+  pending.add(instance)
+}
 
-  for (const instance of lists) {
+function scheduleZeroHeightChecksBelow(parent: Instance, container: Container): void {
+  const lists = virtualListsByContainer.get(container)
+  if (!lists) return
+
+  for (const list of lists) {
+    let ancestor: Instance | null = list
+    while (ancestor && ancestor !== parent) ancestor = stateFor(ancestor).parent
+    if (ancestor === parent) scheduleZeroHeightVirtualListCheck(list, container)
+  }
+}
+
+function layoutStyleSignature(style: StyleDesc | undefined): string {
+  if (!style) return ""
+  const layoutStyle: Partial<StyleDesc> = {}
+  const values = style as StyleDesc & Record<string, unknown>
+  for (const key of LAYOUT_STYLE_KEYS) {
+    if (values[key] !== undefined) {
+      ;(layoutStyle as Record<string, unknown>)[key] = values[key]
+    }
+  }
+  return JSON.stringify(layoutStyle)
+}
+
+function diagnoseZeroHeightVirtualLists(container: Container): void {
+  const pending = zeroHeightVirtualListsPendingCheck.get(container)
+  const getElementBounds = container.native.getElementBounds
+  if (!pending || !getElementBounds) return
+  zeroHeightVirtualListsPendingCheck.delete(container)
+
+  for (const instance of pending) {
     const state = stateFor(instance)
     if (!state.mounted || state.children.length === 0) continue
 
@@ -2288,6 +2336,7 @@ function materialize(node: HostNode): HostNodeState {
       virtualListsByContainer.set(state.container, lists)
     }
     lists.add(node)
+    scheduleZeroHeightVirtualListCheck(node, state.container)
   }
 
   for (const child of state.children) {
@@ -2470,6 +2519,9 @@ export const hostConfig = {
     materialize(child)
     if (!("type" in child)) parentState.container.eventTargets.set(child.id, parent)
     scheduleVirtualListValidation(parent, parentState)
+    if (parent.type !== "virtual-list") {
+      scheduleZeroHeightChecksBelow(parent, parentState.container)
+    }
     parentState.container.renderer.appendChild(parent.id, child.id)
   },
 
@@ -2482,6 +2534,9 @@ export const hostConfig = {
     removeTrackedChild(parentState, child)
     markUnmounted(child)
     scheduleVirtualListValidation(parent, parentState)
+    if (parent.type !== "virtual-list") {
+      scheduleZeroHeightChecksBelow(parent, parentState.container)
+    }
     const destroyed = parentState.container.renderer.destroyElement(child.id)
     for (const id of destroyed) {
       unregisterEventHandlers(parentState.container.eventHandlers, id)
@@ -2504,6 +2559,9 @@ export const hostConfig = {
     materialize(child)
     if (!("type" in child)) parentState.container.eventTargets.set(child.id, parent)
     scheduleVirtualListValidation(parent, parentState)
+    if (parent.type !== "virtual-list") {
+      scheduleZeroHeightChecksBelow(parent, parentState.container)
+    }
     parentState.container.renderer.insertBefore(parent.id, child.id, beforeChild.id)
   },
 
@@ -2657,6 +2715,9 @@ export const hostConfig = {
     // Always resend style — per-element JSON is small, and this avoids
     // bugs from same-reference mutations or style removal.
     const resolvedStyle = styleForRenderer(instance, container, newProps)
+    const layoutChanged =
+      layoutStyleSignature(styleForRenderer(instance, container, oldProps)) !==
+      layoutStyleSignature(resolvedStyle)
     container.renderer.setStyle(instance.id, resolvedStyle ?? {})
     setResolvedStyle(instance, resolvedStyle)
     if (
@@ -2669,6 +2730,18 @@ export const hostConfig = {
     }
     // Custom prop diff (for non-div/text elements)
     instance.props = newProps
+    if (
+      layoutChanged ||
+      (instance.type === "virtual-list" &&
+        ((oldProps as Props & VirtualListProps).itemCount !==
+          (newProps as Props & VirtualListProps).itemCount ||
+          (oldProps as Props & VirtualListProps).estimatedItemHeight !==
+            (newProps as Props & VirtualListProps).estimatedItemHeight ||
+          (oldProps as Props & VirtualListProps).alignment !==
+            (newProps as Props & VirtualListProps).alignment))
+    ) {
+      scheduleZeroHeightChecksBelow(instance, container)
+    }
     if (instance.type === "canvas") {
       const canvas = instance as CanvasHostElement
       if (oldCanvasProps.width !== newCanvasProps.width || oldCanvasProps.height !== newCanvasProps.height) {
