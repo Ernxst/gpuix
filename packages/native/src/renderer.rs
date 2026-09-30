@@ -12140,6 +12140,10 @@ fn build_element_with_parent_layout(
 ) -> gpui::AnyElement {
     use gpui::IntoElement;
 
+    if !ctx.tree.has_stacking_candidates() {
+        return build_element_inner(id, default_flex_none, ctx, window, cx);
+    }
+
     let Some(element) = ctx.tree.elements.get(&id) else {
         return gpui::Empty.into_any_element();
     };
@@ -12183,12 +12187,10 @@ fn retained_source_order(tree: &RetainedTree, id: u64) -> Vec<u32> {
         let Some(parent_id) = element.parent else {
             break;
         };
-        let Some(parent) = tree.elements.get(&parent_id) else {
+        if !tree.elements.contains_key(&parent_id) {
             break;
-        };
-        if let Some(index) = parent.children.iter().position(|child| *child == current) {
-            order.push(index.min(u32::MAX as usize) as u32);
         }
+        order.push(element.sibling_order.min(u32::MAX as u64) as u32);
         current = parent_id;
     }
     order.reverse();

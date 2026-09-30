@@ -5480,6 +5480,7 @@ mod tests {
             "marginBottom": -1,
             "marginLeft": -1,
             "position": "absolute",
+            "zIndex": 3,
             "top": 1,
             "right": 1,
             "bottom": 1,
@@ -5526,6 +5527,7 @@ mod tests {
             "overflow": "visible",
             "overflowX": "hidden",
             "overflowY": "scroll",
+            "scrollbarWidth": "auto",
             "clipPath": "inset(50%)",
             "cursor": "pointer",
             "pointerEvents": "auto",
@@ -5547,6 +5549,10 @@ mod tests {
             "focus": { "borderColor": "yellow" },
             "focusVisible": { "outlineColor": "cyan" },
             "focusWithin": { "borderColor": "pink" },
+            "focusWithinGroup": "card",
+            "groupFocus": { "color": "purple" },
+            "groupFocusVisible": { "color": "navy" },
+            "groupFocusWithin": { "color": "maroon" },
             "dragOver": { "backgroundColor": "teal" }
         }"#,
         )
@@ -5565,7 +5571,13 @@ mod tests {
             .unwrap()
             .keys()
             .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(declared_keys, covered_keys);
+        assert_eq!(
+            declared_keys,
+            covered_keys,
+            "missing source keys: {:?}; unexpected source keys: {:?}",
+            declared_keys.difference(&covered_keys).collect::<Vec<_>>(),
+            covered_keys.difference(&declared_keys).collect::<Vec<_>>()
+        );
 
         // This catches the original alignSelf failure mode: a field may parse
         // and serialize correctly while never reaching any renderer branch.

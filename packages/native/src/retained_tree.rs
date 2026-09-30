@@ -30,6 +30,9 @@ pub struct RetainedElement {
     pub events: HashSet<String>,
     pub children: Vec<u64>,
     pub parent: Option<u64>,
+    /// Position in `parent.children`, maintained by tree mutations so paint
+    /// ordering never has to search each ancestor's child list.
+    pub sibling_order: u64,
     /// Props for custom elements (input, editor, diff, etc.).
     /// Keyed by prop name, values are JSON. Ignored for "div" and "text".
     pub custom_props: HashMap<String, serde_json::Value>,
@@ -63,6 +66,7 @@ impl RetainedElement {
             events: HashSet::new(),
             children: Vec::new(),
             parent: None,
+            sibling_order: 0,
             auto_focus: false,
             subtree_revision: revision,
             search_revision: revision,
@@ -209,6 +213,9 @@ pub struct RetainedTree {
     pub elements: ElementMap,
     pub styles: StyleTable,
     focus_group_refcounts: HashMap<String, usize>,
+    /// Count of elements whose styles could participate in stacking. This
+    /// lets ordinary trees skip the paint-order path entirely.
+    stacking_candidates: usize,
     /// The root element ID set by appendChildToContainer.
     pub root_id: Option<u64>,
     /// Advances only when a retained-tree operation changes state. Consumers
@@ -218,6 +225,32 @@ pub struct RetainedTree {
 }
 
 impl RetainedTree {
+    pub(crate) fn has_stacking_candidates(&self) -> bool {
+        self.stacking_candidates != 0
+    }
+
+    fn reindex_children(&mut self, parent_id: u64) {
+        let children = self
+            .elements
+            .get(&parent_id)
+            .map(|parent| parent.children.clone())
+            .unwrap_or_default();
+        for (index, child_id) in children.into_iter().enumerate() {
+            if let Some(child) = self.elements.get_mut(&child_id) {
+                child.sibling_order = index as u64;
+            }
+        }
+    }
+
+    fn is_stacking_candidate(style: &StyleDesc) -> bool {
+        matches!(
+            style.position.as_deref(),
+            Some("relative" | "absolute" | "fixed")
+        )
+            || style.opacity.is_some_and(|opacity| opacity < 1.0)
+            || style.z_index.is_some()
+    }
+
     /// Whether an element is still connected to the current React root.
     ///
     /// React may detach a child before its later `destroyElement` callback, so
@@ -247,6 +280,7 @@ impl RetainedTree {
             elements: ElementMap::default(),
             styles: StyleTable::default(),
             focus_group_refcounts: HashMap::default(),
+            stacking_candidates: 0,
             root_id: None,
             next_revision: 1,
         }
@@ -327,6 +361,7 @@ impl RetainedTree {
             if let Some(parent) = self.elements.get_mut(&parent_id) {
                 parent.children.retain(|child| *child != id);
             }
+            self.reindex_children(parent_id);
         }
         let mut destroyed = Vec::new();
         self.destroy_element_recursive(id, &mut destroyed);
@@ -343,6 +378,13 @@ impl RetainedTree {
 
     fn destroy_element_recursive(&mut self, id: u64, destroyed: &mut Vec<u64>) {
         if let Some(element) = self.elements.remove(&id) {
+            if element
+                .style
+                .as_deref()
+                .is_some_and(Self::is_stacking_candidate)
+            {
+                self.stacking_candidates -= 1;
+            }
             if let Some(name) = element
                 .style
                 .as_deref()
@@ -390,6 +432,7 @@ impl RetainedTree {
                 .expect("old parent was read from the retained tree")
                 .children
                 .retain(|id| *id != child_id);
+            self.reindex_children(old_parent_id);
             self.mark_changed(old_parent_id);
         }
         if parent_changed {
@@ -403,6 +446,9 @@ impl RetainedTree {
                 .get_mut(&child_id)
                 .expect("child was read from the retained tree")
                 .parent = Some(parent_id);
+        }
+        if parent_changed {
+            self.reindex_children(parent_id);
         }
         self.mark_changed(parent_id);
     }
@@ -451,6 +497,7 @@ impl RetainedTree {
                 .expect("old parent was read from the retained tree")
                 .children
                 .retain(|id| *id != child_id);
+            self.reindex_children(old_parent_id);
             self.mark_changed(old_parent_id);
         }
         if parent_changed {
@@ -465,6 +512,9 @@ impl RetainedTree {
                 .expect("child was read from the retained tree")
                 .parent = Some(parent_id);
         }
+        if parent_changed {
+            self.reindex_children(parent_id);
+        }
         self.mark_changed(parent_id);
     }
 
@@ -475,6 +525,12 @@ impl RetainedTree {
     /// are two `Arc`s holding the same style. Only a pointer miss pays for the
     /// ~80-field compare, which is what decides whether this repaints.
     pub fn set_style(&mut self, id: u64, style: Arc<StyleDesc>) {
+        let new_stacking_candidate = Self::is_stacking_candidate(&style);
+        let old_stacking_candidate = self
+            .elements
+            .get(&id)
+            .and_then(|element| element.style.as_deref())
+            .is_some_and(Self::is_stacking_candidate);
         let old_focus_group = self
             .elements
             .get(&id)
@@ -500,6 +556,11 @@ impl RetainedTree {
                 if let Some(name) = new_focus_group {
                     *self.focus_group_refcounts.entry(name).or_default() += 1;
                 }
+            }
+            match (old_stacking_candidate, new_stacking_candidate) {
+                (false, true) => self.stacking_candidates += 1,
+                (true, false) => self.stacking_candidates -= 1,
+                _ => {}
             }
             self.mark_render_changed(id);
         }
@@ -848,6 +909,45 @@ fn element_to_json(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn maintains_sibling_order_and_stacking_candidate_count() {
+        let mut tree = RetainedTree::new();
+        for id in 1..=4 {
+            tree.create_element(id, "div".to_string());
+        }
+        tree.append_child(1, 2);
+        tree.append_child(1, 3);
+        tree.append_child(1, 4);
+        assert_eq!(tree.elements.get(&2).unwrap().sibling_order, 0);
+        assert_eq!(tree.elements.get(&3).unwrap().sibling_order, 1);
+        assert_eq!(tree.elements.get(&4).unwrap().sibling_order, 2);
+
+        tree.insert_before(1, 4, 3);
+        assert_eq!(tree.elements.get(&2).unwrap().sibling_order, 0);
+        assert_eq!(tree.elements.get(&4).unwrap().sibling_order, 1);
+        assert_eq!(tree.elements.get(&3).unwrap().sibling_order, 2);
+
+        let candidate = Arc::new(StyleDesc {
+            z_index: Some(2),
+            ..StyleDesc::default()
+        });
+        tree.set_style(4, candidate);
+        assert!(tree.has_stacking_candidates());
+        tree.set_style(4, Arc::new(StyleDesc::default()));
+        assert!(!tree.has_stacking_candidates());
+
+        tree.set_style(
+            3,
+            Arc::new(StyleDesc {
+                position: Some("fixed".to_string()),
+                ..StyleDesc::default()
+            }),
+        );
+        assert!(tree.has_stacking_candidates());
+        tree.destroy_element(3);
+        assert!(!tree.has_stacking_candidates());
+    }
 
     #[test]
     fn tracks_referenced_focus_groups_across_style_changes_and_destruction() {
