@@ -188,6 +188,10 @@ The binary carries the renderer, so it runs with no Bun and no Node install.
 Keep `--production`: without it the binary bundles React's development build,
 which in the chat example costs about 20 MB of memory.
 
+This embeds `@gpuix/native`'s `.node` addon in the executable, which a
+single-file binary you hand someone should keep — see the next step for a
+`.app`, which has room to avoid the embedding cost instead.
+
 `bun build --compile` on the command line takes no plugins, so an app using
 CSS modules must build through `Bun.build({ compile: { outfile }, plugins: [gpuixCssModulesBun()] })`
 instead — see [CSS modules](./packages/plugins/README.md#css-modules) in the
@@ -251,7 +255,117 @@ open "bundle/My App.app"
 | Windows | `"nsis"` | setup `.exe` |
 | Linux | `"appimage"` | `.AppImage` |
 
-On this machine the Bun chat `.app` is **82 MB**.
+On this machine the Bun chat `.app` packed this way is **82 MB**, with the
+addon embedded in `dist/app` as in step 4. That embedding costs a macOS
+`.app` more than it costs a single-file binary: `bun build --compile`
+extracts the addon to `$TMPDIR` on first launch, `dlopen`s it from there, and
+pays a Gatekeeper scan on that extracted copy; the extraction is purged
+periodically, so a later launch re-pays it. A `.app` has room to avoid this
+by shipping the addon as a real file next to the executable instead — the
+addon is then scanned once, when the app is installed, not each time
+`$TMPDIR` is purged.
+
+**Keep the addon out of the executable.** Compile with `--external '*.node'`
+so Bun leaves the addon's `require()` call alone instead of embedding the
+file it points to, then ship the addon at `Contents/Frameworks/<addon>.node`
+and point `@gpuix/native`'s loader at it before your entry file's first
+import of `@gpuix/react` runs. The loader — napi-rs's generated `index.js` —
+checks `NAPI_RS_NATIVE_LIBRARY_PATH` before anything else, so setting that
+env var is enough; no GPUIX-internal API needed:
+
+GPU-IX ships only an arm64 macOS addon. The app build and copy commands stop
+on an Intel Mac with an unsupported-architecture error.
+
+```ts
+// app-entry.ts — compile this instead of app.tsx directly
+import path from 'node:path'
+
+// Contents/MacOS/app -> ../Frameworks/<addon>.node
+if (process.arch !== 'arm64') {
+  throw new Error(
+    `Unsupported macOS architecture: ${process.arch}. GPU-IX ships only the arm64 macOS addon.`,
+  )
+}
+const addonFileName = 'gpuix-native.darwin-arm64.node'
+
+process.env.NAPI_RS_NATIVE_LIBRARY_PATH ??= path.join(
+  path.dirname(process.execPath),
+  '..',
+  'Frameworks',
+  addonFileName,
+)
+
+await import('./app.tsx')
+```
+
+```bash
+bun build --compile --production --external '*.node' app-entry.ts --outfile dist/app
+```
+
+`cargo packager`'s `binaries` config wraps a binary as-is; it does not know
+about the addon. After packing, copy the addon your platform loads (the file
+under `packages/native/*.node`, or `node_modules/@gpuix/native/` in an
+installed app) into the bundle yourself. Sign the nested addon first and the
+app second; cargo-packager may already have signed the app before the addon was
+added:
+
+```bash
+APP="bundle/My App.app"
+if [ "$(uname -m)" != arm64 ]; then
+  echo "GPU-IX ships only the arm64 macOS addon" >&2
+  exit 1
+fi
+ADDON="gpuix-native.darwin-arm64.node"
+mkdir -p "$APP/Contents/Frameworks"
+cp "node_modules/@gpuix/native/$ADDON" "$APP/Contents/Frameworks/"
+codesign --force --sign - "$APP/Contents/Frameworks/$ADDON"
+codesign --force --sign - "$APP"
+codesign --verify --deep --strict "$APP"
+```
+
+For hardened runtime, sign the addon and app with the same Team ID. An Apple
+Development or Developer ID identity can sign both individually:
+
+```bash
+IDENTITY="Apple Development: Your Name (TEAMID)"
+codesign --force --options runtime --sign "$IDENTITY" "$APP/Contents/Frameworks/$ADDON"
+codesign --force --options runtime --sign "$IDENTITY" "$APP"
+codesign --verify --deep --strict "$APP"
+```
+
+An ad-hoc signature has no Team ID, so hardened runtime rejects the ad-hoc
+addon by default. If you need hardened runtime with ad-hoc signing, give the
+app the `com.apple.security.cs.disable-library-validation` entitlement, which
+allows it to load the bundled addon:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>
+```
+
+Sign the addon first, then pass that file to the app's signing command with
+`--entitlements`:
+
+```bash
+codesign --force --options runtime --sign - "$APP/Contents/Frameworks/$ADDON"
+codesign --force --options runtime --entitlements app.entitlements --sign - "$APP"
+codesign --verify --deep --strict "$APP"
+```
+
+The entitlement is needed only for the ad-hoc hardened-runtime case; when both
+signatures share a Team ID, sign the addon and app with the same identity and
+omit it.
+
+This also shrinks the executable: about 30 MB smaller for the chat example,
+whose addon is about 29 MB. `examples/compile-chat.ts` does all of this for
+the chat example without cargo-packager, wrapping `dist/chat` by hand; read
+it for the same steps end to end.
 
 ### 6. Auto-update
 

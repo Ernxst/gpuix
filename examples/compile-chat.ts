@@ -21,6 +21,25 @@ const WINDOWS =
 const BINARY = path.join(DIST, outputName())
 const APP_NAME = 'GPUIX Chat'
 const APP_BUNDLE = path.join(DIST, `${APP_NAME}.app`)
+const NATIVE_DIR = path.join(ROOT, '..', 'packages', 'native')
+const APP_ENTRY_SOURCE = path.join(ROOT, '.app-entry.generated.ts')
+
+// GPU-IX's macOS release package ships only the arm64 addon.
+function nativeAddonFileName(): string {
+  if (process.arch !== 'arm64') {
+    throw new Error(
+      `Unsupported macOS architecture: ${process.arch}. GPU-IX ships only the arm64 macOS addon.`,
+    )
+  }
+  return 'gpuix-native.darwin-arm64.node'
+}
+
+function macAppAddonFileName(): string | undefined {
+  if (process.env.COMPILE_SKIP_APP === '1') return undefined
+  if (process.platform !== 'darwin') return undefined
+  if (COMPILE_TARGET && !COMPILE_TARGET.includes('darwin')) return undefined
+  return nativeAddonFileName()
+}
 
 function outputName(): string {
   const requested = process.env.COMPILE_OUT
@@ -163,21 +182,83 @@ async function compileBinary(): Promise<void> {
   log(`wrote ${path.relative(ROOT, output)}`)
 }
 
-function wrapMacApp(): void {
-  if (process.env.COMPILE_SKIP_APP === '1') return
-  if (process.platform !== 'darwin') return
-  if (COMPILE_TARGET && !COMPILE_TARGET.includes('darwin')) return
+/**
+ * Compile the `.app`'s executable so it does not embed the native addon.
+ *
+ * `bun build --compile` embeds any `.node` file it finds statically required
+ * from the entrypoint, extracting it to `$TMPDIR` on first launch and paying
+ * a Gatekeeper scan there every time that extraction is purged. Marking
+ * `.node` files external stops the embedding; the addon then ships beside
+ * the executable instead, in `Contents/Frameworks`.
+ *
+ * A plain `require('@gpuix/native')` can't find that file relative to a
+ * bundled, single-file executable, so this writes a small entry file that
+ * points `NAPI_RS_NATIVE_LIBRARY_PATH` — the environment variable napi-rs's
+ * generated loader checks before anything else — at the addon's real path
+ * next to the running executable, then loads the real entry. An app author
+ * can reproduce this without any GPUIX-internal knowledge: set the env var
+ * before importing anything that loads `@gpuix/native`, from `node:path`
+ * and `process.execPath` alone.
+ */
+async function compileAppExecutable(
+  executable: string,
+  addonFileName: string,
+): Promise<void> {
+  writeFileSync(
+    APP_ENTRY_SOURCE,
+    [
+      "import path from 'node:path'",
+      '',
+      '// Contents/MacOS/chat -> ../Frameworks/<addon>.node',
+      'const addon = path.join(',
+      '  path.dirname(process.execPath),',
+      "  '..',",
+      "  'Frameworks',",
+      `  ${JSON.stringify(addonFileName)},`,
+      ')',
+      'process.env.NAPI_RS_NATIVE_LIBRARY_PATH ??= addon',
+      '',
+      "await import('./chat.tsx')",
+      '',
+    ].join('\n'),
+  )
+  try {
+    log(`bundling ${path.basename(APP_ENTRY_SOURCE)} into ${path.relative(ROOT, executable)}`)
+    const result = await Bun.build({
+      entrypoints: [APP_ENTRY_SOURCE],
+      compile: { outfile: executable },
+      external: ['*.node'],
+      minify: true,
+      define: { 'process.env.NODE_ENV': JSON.stringify('production') },
+    })
+    if (!result.success) {
+      for (const message of result.logs) console.error(message)
+      throw new Error('bun build --compile failed for the .app executable')
+    }
+  } finally {
+    rmSync(APP_ENTRY_SOURCE, { force: true })
+  }
+  run('chmod', ['+x', executable])
+}
 
-  log(`wrapping ${path.relative(ROOT, BINARY)} in ${path.basename(APP_BUNDLE)}`)
+async function wrapMacApp(addonFileName: string | undefined): Promise<void> {
+  if (!addonFileName) return
+
+  log(`wrapping chat.tsx in ${path.basename(APP_BUNDLE)}`)
   rmSync(APP_BUNDLE, { recursive: true, force: true })
   const macos = path.join(APP_BUNDLE, 'Contents', 'MacOS')
   const resources = path.join(APP_BUNDLE, 'Contents', 'Resources')
+  const frameworks = path.join(APP_BUNDLE, 'Contents', 'Frameworks')
   mkdirSync(macos, { recursive: true })
   mkdirSync(resources, { recursive: true })
+  mkdirSync(frameworks, { recursive: true })
+
+  const addon = path.join(frameworks, addonFileName)
+  run('cp', [path.join(NATIVE_DIR, addonFileName), addon])
+  run('codesign', ['--force', '--sign', '-', addon])
 
   const executable = path.join(macos, 'chat')
-  run('cp', [BINARY, executable])
-  run('chmod', ['+x', executable])
+  await compileAppExecutable(executable, addonFileName)
   if (existsSync(ICNS)) {
     run('cp', [ICNS, path.join(resources, 'AppIcon.icns')])
   }
@@ -219,16 +300,21 @@ function wrapMacApp(): void {
   ].join('\n')
   writeFileSync(path.join(APP_BUNDLE, 'Contents', 'Info.plist'), plist)
   run('touch', [APP_BUNDLE])
+
+  // Sign nested code before the app bundle. The app signature then seals
+  // the bundle without re-signing its nested code.
+  run('codesign', ['--force', '--sign', '-', APP_BUNDLE])
   log(`wrote ${path.relative(ROOT, APP_BUNDLE)}`)
 }
 
 async function main(): Promise<void> {
+  const addonFileName = macAppAddonFileName()
   log(`output dir ${path.relative(ROOT, DIST) || '.'}`)
   rmSync(DIST, { recursive: true, force: true })
   mkdirSync(DIST, { recursive: true })
   await buildIcons()
   await compileBinary()
-  wrapMacApp()
+  await wrapMacApp(addonFileName)
   log('done')
   if (process.platform === 'darwin' && existsSync(APP_BUNDLE)) {
     log(`run: open "${APP_BUNDLE}"`)
