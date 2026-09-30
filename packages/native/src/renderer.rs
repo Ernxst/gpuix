@@ -9030,6 +9030,7 @@ impl GpuixView {
             gpui_element_path,
             measuring: false,
             intrinsic_probe: None,
+            stacking_wrapper_suppression: 0,
         };
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
         emit_highlight_events(&callback, &highlight_events);
@@ -9340,6 +9341,9 @@ pub(crate) struct BuildCtx<'a> {
     /// measure it at: the transition's target with the intrinsic axes forced
     /// back to `auto`.
     intrinsic_probe: Option<(u64, StyleDesc)>,
+    /// Non-context descendants of a candidate-free subtree share their
+    /// ancestor's stacking slot, so only the subtree root needs a wrapper.
+    stacking_wrapper_suppression: usize,
 }
 
 /// Style properties that cascade into descendants.
@@ -11805,6 +11809,7 @@ impl gpui::Render for GpuixView {
                     gpui_element_path,
                     measuring: false,
                     intrinsic_probe: None,
+                    stacking_wrapper_suppression: 0,
                 };
                 build_element(root_id, &mut ctx, window, cx)
             }
@@ -12140,13 +12145,20 @@ fn build_element_with_parent_layout(
 ) -> gpui::AnyElement {
     use gpui::IntoElement;
 
-    if !ctx.tree.has_stacking_candidates() {
+    if !ctx.tree.has_stacking_candidates() || ctx.stacking_wrapper_suppression > 0 {
         return build_element_inner(id, default_flex_none, ctx, window, cx);
     }
 
     let Some(element) = ctx.tree.elements.get(&id) else {
         return gpui::Empty.into_any_element();
     };
+    if !ctx.tree.subtree_has_stacking_candidates(id) {
+        let source_order = retained_source_order(ctx.tree, id);
+        ctx.stacking_wrapper_suppression += 1;
+        let built = build_element_inner(id, default_flex_none, ctx, window, cx);
+        ctx.stacking_wrapper_suppression -= 1;
+        return gpui::stacking(built, source_order, 1, 0, false).into_any_element();
+    }
     let style = element.style.as_deref();
     let authored_position = style.and_then(|style| style.position.as_deref());
     let positioned = matches!(authored_position, Some("relative" | "absolute" | "fixed"));

@@ -33,6 +33,10 @@ pub struct RetainedElement {
     /// Position in `parent.children`, maintained by tree mutations so paint
     /// ordering never has to search each ancestor's child list.
     pub sibling_order: u64,
+    /// Number of stacking candidates in this element's subtree, including
+    /// itself. Lets scene construction stop adding stacking wrappers once it
+    /// reaches a branch that cannot contain an ordering boundary.
+    pub stacking_candidates_in_subtree: usize,
     /// Props for custom elements (input, editor, diff, etc.).
     /// Keyed by prop name, values are JSON. Ignored for "div" and "text".
     pub custom_props: HashMap<String, serde_json::Value>,
@@ -67,6 +71,7 @@ impl RetainedElement {
             children: Vec::new(),
             parent: None,
             sibling_order: 0,
+            stacking_candidates_in_subtree: 0,
             auto_focus: false,
             subtree_revision: revision,
             search_revision: revision,
@@ -229,6 +234,31 @@ impl RetainedTree {
         self.stacking_candidates != 0
     }
 
+    pub(crate) fn subtree_has_stacking_candidates(&self, id: u64) -> bool {
+        self.elements
+            .get(&id)
+            .is_some_and(|element| element.stacking_candidates_in_subtree != 0)
+    }
+
+    fn adjust_stacking_candidates_in_ancestors(
+        &mut self,
+        mut current: Option<u64>,
+        count: usize,
+        add: bool,
+    ) {
+        while let Some(id) = current {
+            let Some(element) = self.elements.get_mut(&id) else {
+                break;
+            };
+            element.stacking_candidates_in_subtree = if add {
+                element.stacking_candidates_in_subtree.saturating_add(count)
+            } else {
+                element.stacking_candidates_in_subtree.saturating_sub(count)
+            };
+            current = element.parent;
+        }
+    }
+
     fn reindex_children(&mut self, parent_id: u64) {
         let children = self
             .elements
@@ -356,12 +386,21 @@ impl RetainedTree {
     /// changed so caches cannot serve text that is no longer in the tree.
     pub fn destroy_element(&mut self, id: u64) -> Vec<u64> {
         let parent_id = self.elements.get(&id).and_then(|element| element.parent);
+        let subtree_candidates = self
+            .elements
+            .get(&id)
+            .map_or(0, |element| element.stacking_candidates_in_subtree);
         let destroys_root = self.root_id == Some(id);
         if let Some(parent_id) = parent_id {
             if let Some(parent) = self.elements.get_mut(&parent_id) {
                 parent.children.retain(|child| *child != id);
             }
             self.reindex_children(parent_id);
+            self.adjust_stacking_candidates_in_ancestors(
+                Some(parent_id),
+                subtree_candidates,
+                false,
+            );
         }
         let mut destroyed = Vec::new();
         self.destroy_element_recursive(id, &mut destroyed);
@@ -412,6 +451,7 @@ impl RetainedTree {
         new_children.push(child_id);
         let parent_changed = new_children != parent.children;
         let child_changed = old_parent_id != Some(parent_id);
+        let moved_stacking_candidates = child.stacking_candidates_in_subtree;
         let old_parent_changed = old_parent_id
             .filter(|old_parent_id| *old_parent_id != parent_id)
             .and_then(|old_parent_id| {
@@ -424,6 +464,21 @@ impl RetainedTree {
             });
         if !parent_changed && !child_changed && old_parent_changed.is_none() {
             return;
+        }
+
+        if child_changed {
+            if let Some(old_parent_id) = old_parent_id {
+                self.adjust_stacking_candidates_in_ancestors(
+                    Some(old_parent_id),
+                    moved_stacking_candidates,
+                    false,
+                );
+            }
+            self.adjust_stacking_candidates_in_ancestors(
+                Some(parent_id),
+                moved_stacking_candidates,
+                true,
+            );
         }
 
         if let Some((old_parent_id, true)) = old_parent_changed {
@@ -477,6 +532,7 @@ impl RetainedTree {
         new_children.insert(position, child_id);
         let parent_changed = new_children != parent.children;
         let child_changed = old_parent_id != Some(parent_id);
+        let moved_stacking_candidates = child.stacking_candidates_in_subtree;
         let old_parent_changed = old_parent_id
             .filter(|old_parent_id| *old_parent_id != parent_id)
             .and_then(|old_parent_id| {
@@ -489,6 +545,21 @@ impl RetainedTree {
             });
         if !parent_changed && !child_changed && old_parent_changed.is_none() {
             return;
+        }
+
+        if child_changed {
+            if let Some(old_parent_id) = old_parent_id {
+                self.adjust_stacking_candidates_in_ancestors(
+                    Some(old_parent_id),
+                    moved_stacking_candidates,
+                    false,
+                );
+            }
+            self.adjust_stacking_candidates_in_ancestors(
+                Some(parent_id),
+                moved_stacking_candidates,
+                true,
+            );
         }
 
         if let Some((old_parent_id, true)) = old_parent_changed {
@@ -558,8 +629,14 @@ impl RetainedTree {
                 }
             }
             match (old_stacking_candidate, new_stacking_candidate) {
-                (false, true) => self.stacking_candidates += 1,
-                (true, false) => self.stacking_candidates -= 1,
+                (false, true) => {
+                    self.stacking_candidates += 1;
+                    self.adjust_stacking_candidates_in_ancestors(Some(id), 1, true);
+                }
+                (true, false) => {
+                    self.stacking_candidates -= 1;
+                    self.adjust_stacking_candidates_in_ancestors(Some(id), 1, false);
+                }
                 _ => {}
             }
             self.mark_render_changed(id);
@@ -934,8 +1011,12 @@ mod tests {
         });
         tree.set_style(4, candidate);
         assert!(tree.has_stacking_candidates());
+        assert!(tree.subtree_has_stacking_candidates(1));
+        assert!(tree.subtree_has_stacking_candidates(4));
+        assert!(!tree.subtree_has_stacking_candidates(2));
         tree.set_style(4, Arc::new(StyleDesc::default()));
         assert!(!tree.has_stacking_candidates());
+        assert!(!tree.subtree_has_stacking_candidates(1));
 
         tree.set_style(
             3,
@@ -945,8 +1026,43 @@ mod tests {
             }),
         );
         assert!(tree.has_stacking_candidates());
+        assert!(tree.subtree_has_stacking_candidates(1));
         tree.destroy_element(3);
         assert!(!tree.has_stacking_candidates());
+        assert!(!tree.subtree_has_stacking_candidates(1));
+    }
+
+    #[test]
+    fn stacking_candidate_subtree_counts_follow_reparenting_and_removal() {
+        let mut tree = RetainedTree::new();
+        for id in 1..=5 {
+            tree.create_element(id, "div".to_string());
+        }
+        tree.append_child(1, 2);
+        tree.append_child(1, 3);
+        tree.append_child(2, 4);
+        tree.append_child(3, 5);
+        tree.set_style(
+            4,
+            Arc::new(StyleDesc {
+                z_index: Some(1),
+                ..StyleDesc::default()
+            }),
+        );
+
+        assert!(tree.subtree_has_stacking_candidates(1));
+        assert!(tree.subtree_has_stacking_candidates(2));
+        assert!(!tree.subtree_has_stacking_candidates(3));
+
+        tree.append_child(3, 2);
+        assert!(tree.subtree_has_stacking_candidates(1));
+        assert!(tree.subtree_has_stacking_candidates(2));
+        assert!(tree.subtree_has_stacking_candidates(3));
+
+        tree.destroy_element(2);
+        assert!(!tree.has_stacking_candidates());
+        assert!(!tree.subtree_has_stacking_candidates(1));
+        assert!(!tree.subtree_has_stacking_candidates(3));
     }
 
     #[test]
