@@ -175,6 +175,5 @@ All from `@gpuix/react`.
 | Issue | Gap |
 |---|---|
 | #579 | Base UI Autocomplete typing does not update the value. |
-| #481 | No `zIndex`. |
 | #326 | Popups cannot leave the window. |
 | #572 | No native message box. |

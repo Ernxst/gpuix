@@ -935,6 +935,7 @@ pub struct StyleDesc {
     pub margin_left: Option<LengthValue>,
 
     pub position: Option<String>,
+    pub z_index: Option<i32>,
     pub top: Option<LengthValue>,
     pub right: Option<LengthValue>,
     pub bottom: Option<LengthValue>,
@@ -2687,6 +2688,27 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         }
         enum_field!(key, value, "display", display, ["none", "flex", "grid"]);
         enum_field!(key, value, "visibility", visibility, ["visible", "hidden"]);
+        if key == "zIndex" {
+            if prefix.is_empty() {
+                parsed.style.z_index = value.as_i64().and_then(|value| i32::try_from(value).ok());
+                if parsed.style.z_index.is_none() {
+                    reject(
+                        &mut parsed.problems,
+                        property!("zIndex"),
+                        value,
+                        "expected a signed 32-bit integer",
+                    );
+                }
+            } else {
+                reject(
+                    &mut parsed.problems,
+                    property!("zIndex"),
+                    value,
+                    "zIndex is not supported in state styles",
+                );
+            }
+            continue;
+        }
         enum_field!(
             key,
             value,
@@ -6210,5 +6232,34 @@ mod tests {
         assert_eq!(parsed.style.box_shadow, None);
         assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
         assert_eq!(parsed.problems[0].property, "boxShadow.color");
+    }
+
+    #[test]
+    fn z_index_accepts_signed_integers() {
+        for (value, expected) in [(-10, -10), (0, 0), (12, 12)] {
+            let parsed = parse_style_value(&json!({ "zIndex": value }));
+            assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+            assert_eq!(parsed.style.z_index, Some(expected));
+        }
+    }
+
+    #[test]
+    fn z_index_rejects_values_that_are_not_signed_32_bit_integers() {
+        for value in [json!(1.5), json!("2"), json!(2147483648_i64), json!(-2147483649_i64)] {
+            let parsed = parse_style_value(&json!({ "zIndex": value }));
+            assert_eq!(parsed.style.z_index, None);
+            assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
+            assert_eq!(parsed.problems[0].property, "zIndex");
+        }
+    }
+
+    #[test]
+    fn z_index_is_rejected_in_state_styles() {
+        for state in ["hover", "active", "focus"] {
+            let parsed = parse_style_value(&json!({ state: { "zIndex": 1 } }));
+            assert_eq!(parsed.style.z_index, None);
+            assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
+            assert_eq!(parsed.problems[0].property, format!("{state}.zIndex"));
+        }
     }
 }

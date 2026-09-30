@@ -117,7 +117,7 @@ Their text is selectable and searchable, but test text queries cannot see it; us
 
 `<anchored>` places its children beside the box of its direct parent, so put it inside the trigger's parent (the built-in Content parts follow this shape). Props: `position`, `side`, `align`, `gap`, `anchor`, `offset`, `fit` (`"switch"` flips to the other side on overflow, `"snap"` shifts inside the window), `snapMargin`, `deferred` (paint in a later pass, on top; on by default), `priority`, `occlude` (block hits to what is behind; on by default).
 
-- Menus, tooltips and dialogs need `<anchored>` (or the built-in Content parts), which is deferred unless `deferred={false}`. A `position: "absolute"` card paints in tree order, so a later `<virtual-list>` paints over it and takes its clicks. There is no `zIndex` (#481).
+- Menus, tooltips and dialogs need `<anchored>` (or the built-in Content parts), which is deferred unless `deferred={false}`. A positioned element or flex/grid item can use `style.zIndex` to paint above overlapping siblings; pointer hits follow that paint order. `zIndex` does not change tab, accessibility, or text-selection order. Ordinary in-flow blocks ignore it.
 - Give overlays an opaque fill. Built-in floating popups use a `#1A1A1A` fallback only when no background is supplied; an explicitly transparent background takes precedence and lets the page show through.
 - A `div` that paints a fill or is positioned blocks clicks and hovers behind it, but the wheel passes through to **any** scroller behind it, not only an ancestor. Give a modal backdrop `pointerEvents: "auto"` to swallow the wheel. `pointerEvents: "none"` removes an element's hitbox without disabling its own listeners, and does not inherit.
 - Overlays cannot leave the window (#326).

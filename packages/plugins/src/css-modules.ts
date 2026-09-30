@@ -67,6 +67,7 @@ export const SUPPORTED_PROPERTIES = new Set([
   "marginBottom",
   "marginLeft",
   "position",
+  "zIndex",
   "top",
   "right",
   "bottom",

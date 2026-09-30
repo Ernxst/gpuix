@@ -177,6 +177,7 @@ margin-right
 margin-bottom
 margin-left
 position
+z-index
 top
 right
 bottom
@@ -254,7 +255,7 @@ Being on this list means the property name compiles. The Traps section lists val
 | `transition: opacity 150ms ease-out` | The shorthand string, on the base rule only. |
 | `color: red !important` | `"red !important"`, passed through and rejected natively. |
 
-Rejected at build time: `font`, `font-style`, `transform`, `z-index`, `inset`, the `outline` shorthand, `outline-style`, `place-items`, `background-image`, `background: linear-gradient(…)`, `-webkit-line-clamp`, `transition-*` longhands, `animation`, `line-height: normal`, and anything else not listed above. Errors read `property "<camelName>" is not supported by the native style prop` (or `…by the native "<state>" style` inside a state); `font` is reported as `fontStyle`, and `line-height: normal` and `background: linear-gradient(…)` fail with `Failed to parse declaration …`.
+Rejected at build time: `font`, `font-style`, `transform`, `inset`, the `outline` shorthand, `outline-style`, `place-items`, `background-image`, `background: linear-gradient(…)`, `-webkit-line-clamp`, `transition-*` longhands, `animation`, `line-height: normal`, and anything else not listed above. Errors read `property "<camelName>" is not supported by the native style prop` (or `…by the native "<state>" style` inside a state); `font` is reported as `fontStyle`, and `line-height: normal` and `background: linear-gradient(…)` fail with `Failed to parse declaration …`.
 
 ## The compiled value and `className`
 

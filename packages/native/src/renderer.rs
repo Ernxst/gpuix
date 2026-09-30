@@ -12143,6 +12143,70 @@ fn build_element_with_parent_layout(
     let Some(element) = ctx.tree.elements.get(&id) else {
         return gpui::Empty.into_any_element();
     };
+    let style = element.style.as_deref();
+    let authored_position = style.and_then(|style| style.position.as_deref());
+    let positioned = matches!(authored_position, Some("relative" | "absolute" | "fixed"));
+    let flex_or_grid_item = element
+        .parent
+        .and_then(|parent| ctx.tree.elements.get(&parent))
+        .and_then(|parent| parent.style.as_deref())
+        .and_then(|style| style.display.as_deref())
+        .is_some_and(|display| matches!(display, "flex" | "grid"));
+    let specified_z_index = style.and_then(|style| style.z_index);
+    let opacity_context = style
+        .and_then(|style| style.opacity)
+        .is_some_and(|opacity| opacity < 1.0);
+    let fixed_context = authored_position == Some("fixed");
+    let z_index = specified_z_index.filter(|_| positioned || flex_or_grid_item);
+    let context = fixed_context || opacity_context || z_index.is_some();
+    let stacking_phase = if positioned && z_index.is_none() {
+        2
+    } else if z_index.is_some_and(|z_index| z_index < 0) {
+        0
+    } else if z_index.is_some_and(|z_index| z_index > 0) {
+        3
+    } else if positioned || z_index.is_some() {
+        2
+    } else {
+        1
+    };
+    let z_index = z_index.unwrap_or(0);
+    let source_order = retained_source_order(ctx.tree, id);
+    let built = build_element_inner(id, default_flex_none, ctx, window, cx);
+    gpui::stacking(built, source_order, stacking_phase, z_index, context).into_any_element()
+}
+
+fn retained_source_order(tree: &RetainedTree, id: u64) -> Vec<u32> {
+    let mut order = Vec::new();
+    let mut current = id;
+    while let Some(element) = tree.elements.get(&current) {
+        let Some(parent_id) = element.parent else {
+            break;
+        };
+        let Some(parent) = tree.elements.get(&parent_id) else {
+            break;
+        };
+        if let Some(index) = parent.children.iter().position(|child| *child == current) {
+            order.push(index.min(u32::MAX as usize) as u32);
+        }
+        current = parent_id;
+    }
+    order.reverse();
+    order
+}
+
+fn build_element_inner(
+    id: u64,
+    default_flex_none: bool,
+    ctx: &mut BuildCtx,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<GpuixView>,
+) -> gpui::AnyElement {
+    use gpui::IntoElement;
+
+    let Some(element) = ctx.tree.elements.get(&id) else {
+        return gpui::Empty.into_any_element();
+    };
 
     // A measured subtree is dropped before prepaint, so its GPUI element path
     // is not the one the painted element gets. Recording it would overwrite the

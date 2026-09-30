@@ -283,7 +283,7 @@ export type AlignContent =
   | "space-evenly"
   | "stretch"
 export type JustifyContent = Exclude<AlignContent, "normal" | "stretch">
-export type Position = "relative" | "absolute"
+export type Position = "relative" | "absolute" | "fixed"
 export type Overflow = "visible" | "hidden" | "scroll" | "auto"
 export type ScrollbarWidth = "auto" | "none"
 export type Cursor = "default" | "pointer"
@@ -602,6 +602,8 @@ export interface StyleDesc {
   marginLeft?: LengthValue
 
   position?: Position
+  /** CSS stacking level for positioned elements and flex/grid items. */
+  zIndex?: number
   top?: LengthValue
   right?: LengthValue
   bottom?: LengthValue

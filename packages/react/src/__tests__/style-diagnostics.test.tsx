@@ -1595,6 +1595,24 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     error.mockRestore()
   })
 
+  it("accepts z-index from a CSS module in strict mode", async () => {
+    const source = new URL("../../../plugins/src/css-modules.ts", import.meta.url).href
+    const { transformGpuixCssModule } = await import(source)
+    const styles = await transformGpuixCssModule(
+      ".stacked { position: relative; z-index: 3; }",
+      "/fixture/stacked.module.css",
+    )
+    for (const style of Object.values(styles)) {
+      Object.defineProperty(style, COMPILED_STYLE, { value: true })
+    }
+
+    const testRoot = createTestRoot({ strictStyles: true })
+    testRoot.render(<div className={styles.stacked as unknown as string} />)
+
+    expect(testRoot.renderer.drainStyleDiagnostics()).toEqual([])
+    testRoot.unmount()
+  })
+
   it("lets the style prop outrank a compiled className", () => {
     const testRoot = createTestRoot({ strictStyles: true })
     const card = {
