@@ -307,9 +307,9 @@ bun build --compile --production --external '*.node' app-entry.ts --outfile dist
 `cargo packager`'s `binaries` config wraps a binary as-is; it does not know
 about the addon. After packing, copy the addon your platform loads (the file
 under `packages/native/*.node`, or `node_modules/@gpuix/native/` in an
-installed app) into the bundle yourself, then ad-hoc sign both — there is no
-Developer ID certificate in most CI environments, and cargo-packager may
-already have signed the app once, before the addon was added to it:
+installed app) into the bundle yourself. Sign the nested addon first and the
+app second; cargo-packager may already have signed the app before the addon was
+added:
 
 ```bash
 APP="bundle/My App.app"
@@ -322,7 +322,47 @@ mkdir -p "$APP/Contents/Frameworks"
 cp "node_modules/@gpuix/native/$ADDON" "$APP/Contents/Frameworks/"
 codesign --force --sign - "$APP/Contents/Frameworks/$ADDON"
 codesign --force --sign - "$APP"
+codesign --verify --deep --strict "$APP"
 ```
+
+For hardened runtime, sign the addon and app with the same Team ID. An Apple
+Development or Developer ID identity can sign both individually:
+
+```bash
+IDENTITY="Apple Development: Your Name (TEAMID)"
+codesign --force --options runtime --sign "$IDENTITY" "$APP/Contents/Frameworks/$ADDON"
+codesign --force --options runtime --sign "$IDENTITY" "$APP"
+codesign --verify --deep --strict "$APP"
+```
+
+An ad-hoc signature has no Team ID, so hardened runtime rejects the ad-hoc
+addon by default. If you need hardened runtime with ad-hoc signing, give the
+app the `com.apple.security.cs.disable-library-validation` entitlement, which
+allows it to load the bundled addon:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>
+```
+
+Sign the addon first, then pass that file to the app's signing command with
+`--entitlements`:
+
+```bash
+codesign --force --options runtime --sign - "$APP/Contents/Frameworks/$ADDON"
+codesign --force --options runtime --entitlements app.entitlements --sign - "$APP"
+codesign --verify --deep --strict "$APP"
+```
+
+The entitlement is needed only for the ad-hoc hardened-runtime case; when both
+signatures share a Team ID, sign the addon and app with the same identity and
+omit it.
 
 This also shrinks the executable: about 30 MB smaller for the chat example,
 whose addon is about 29 MB. `examples/compile-chat.ts` does all of this for
