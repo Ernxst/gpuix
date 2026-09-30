@@ -1926,7 +1926,7 @@ fn settle_ui_layout_for_bounds_read(
         }
         gpui::AnyWindowHandle::from(window).update(cx, |_view, window, cx| {
             window.draw(cx).clear(cx);
-            Ok(true)
+            true
         })
     })
 }
@@ -5976,7 +5976,8 @@ impl GpuixRenderer {
         {
             let (response, receiver) = sync_channel(1);
             self.send_ui_command(UiCommand::GetElementBounds { id, response })?;
-            return recv_ui_response(receiver, "the GPUI element bounds query");
+            return Ok(recv_ui_response(receiver, "the GPUI element bounds query")?
+                .map(ElementBounds::from_painted));
         }
 
         #[cfg(not(any(
