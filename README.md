@@ -4933,9 +4933,9 @@ value instead of animating — a card that lifts while focus is inside it, via
 
 These state styles work on **every** element, including `<text>`, `<code>`,
 `<markdown>`, `<diff>`, `<img>`, `<svg>` and the editors. `<virtual-list>` also
-supports focus state styles, but its `style` type rejects `hover`, `active`, and
-`dragOver` because the list has no hover or pressed state; put those on a
-wrapping `<div>`.
+supports `focus`, `focusVisible`, and `focusWithin` styles, but its `style` type
+rejects `hover`, `active`, and `dragOver` because the list has no hover or
+pressed state; put those on a wrapping `<div>`.
 
 ### Shared web and native style helpers
 
