@@ -273,22 +273,20 @@ import of `@gpuix/react` runs. The loader — napi-rs's generated `index.js` —
 checks `NAPI_RS_NATIVE_LIBRARY_PATH` before anything else, so setting that
 env var is enough; no GPUIX-internal API needed:
 
+GPU-IX ships only an arm64 macOS addon. The app build and copy commands stop
+on an Intel Mac with an unsupported-architecture error.
+
 ```ts
 // app-entry.ts — compile this instead of app.tsx directly
 import path from 'node:path'
 
 // Contents/MacOS/app -> ../Frameworks/<addon>.node
-let addonFileName
-switch (process.arch) {
-  case 'arm64':
-    addonFileName = 'gpuix-native.darwin-arm64.node'
-    break
-  case 'x64':
-    addonFileName = 'gpuix-native.darwin-x64.node'
-    break
-  default:
-    throw new Error(`Unsupported macOS architecture: ${process.arch}`)
+if (process.arch !== 'arm64') {
+  throw new Error(
+    `Unsupported macOS architecture: ${process.arch}. GPU-IX ships only the arm64 macOS addon.`,
+  )
 }
+const addonFileName = 'gpuix-native.darwin-arm64.node'
 
 process.env.NAPI_RS_NATIVE_LIBRARY_PATH ??= path.join(
   path.dirname(process.execPath),
@@ -313,11 +311,11 @@ added:
 
 ```bash
 APP="bundle/My App.app"
-case "$(uname -m)" in
-  arm64) ADDON="gpuix-native.darwin-arm64.node" ;;
-  x86_64) ADDON="gpuix-native.darwin-x64.node" ;;
-  *) echo "Unsupported macOS architecture: $(uname -m)" >&2; exit 1 ;;
-esac
+if [ "$(uname -m)" != arm64 ]; then
+  echo "GPU-IX ships only the arm64 macOS addon" >&2
+  exit 1
+fi
+ADDON="gpuix-native.darwin-arm64.node"
 mkdir -p "$APP/Contents/Frameworks"
 cp "node_modules/@gpuix/native/$ADDON" "$APP/Contents/Frameworks/"
 codesign --force --sign - "$APP/Contents/Frameworks/$ADDON"

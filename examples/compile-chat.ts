@@ -24,18 +24,21 @@ const APP_BUNDLE = path.join(DIST, `${APP_NAME}.app`)
 const NATIVE_DIR = path.join(ROOT, '..', 'packages', 'native')
 const APP_ENTRY_SOURCE = path.join(ROOT, '.app-entry.generated.ts')
 
-// The `.node` napi-rs picks for this host. `wrapMacApp` only runs when
-// compiling on macOS for macOS, so the running process's arch is the one
-// that matters here.
+// GPU-IX's macOS release package ships only the arm64 addon.
 function nativeAddonFileName(): string {
-  switch (process.arch) {
-    case 'arm64':
-      return 'gpuix-native.darwin-arm64.node'
-    case 'x64':
-      return 'gpuix-native.darwin-x64.node'
-    default:
-      throw new Error(`Unsupported macOS architecture: ${process.arch}`)
+  if (process.arch !== 'arm64') {
+    throw new Error(
+      `Unsupported macOS architecture: ${process.arch}. GPU-IX ships only the arm64 macOS addon.`,
+    )
   }
+  return 'gpuix-native.darwin-arm64.node'
+}
+
+function macAppAddonFileName(): string | undefined {
+  if (process.env.COMPILE_SKIP_APP === '1') return undefined
+  if (process.platform !== 'darwin') return undefined
+  if (COMPILE_TARGET && !COMPILE_TARGET.includes('darwin')) return undefined
+  return nativeAddonFileName()
 }
 
 function outputName(): string {
@@ -197,8 +200,10 @@ async function compileBinary(): Promise<void> {
  * before importing anything that loads `@gpuix/native`, from `node:path`
  * and `process.execPath` alone.
  */
-async function compileAppExecutable(executable: string): Promise<void> {
-  const addonFileName = nativeAddonFileName()
+async function compileAppExecutable(
+  executable: string,
+  addonFileName: string,
+): Promise<void> {
   writeFileSync(
     APP_ENTRY_SOURCE,
     [
@@ -236,10 +241,8 @@ async function compileAppExecutable(executable: string): Promise<void> {
   run('chmod', ['+x', executable])
 }
 
-async function wrapMacApp(): Promise<void> {
-  if (process.env.COMPILE_SKIP_APP === '1') return
-  if (process.platform !== 'darwin') return
-  if (COMPILE_TARGET && !COMPILE_TARGET.includes('darwin')) return
+async function wrapMacApp(addonFileName: string | undefined): Promise<void> {
+  if (!addonFileName) return
 
   log(`wrapping chat.tsx in ${path.basename(APP_BUNDLE)}`)
   rmSync(APP_BUNDLE, { recursive: true, force: true })
@@ -250,13 +253,12 @@ async function wrapMacApp(): Promise<void> {
   mkdirSync(resources, { recursive: true })
   mkdirSync(frameworks, { recursive: true })
 
-  const addonFileName = nativeAddonFileName()
   const addon = path.join(frameworks, addonFileName)
   run('cp', [path.join(NATIVE_DIR, addonFileName), addon])
   run('codesign', ['--force', '--sign', '-', addon])
 
   const executable = path.join(macos, 'chat')
-  await compileAppExecutable(executable)
+  await compileAppExecutable(executable, addonFileName)
   if (existsSync(ICNS)) {
     run('cp', [ICNS, path.join(resources, 'AppIcon.icns')])
   }
@@ -306,12 +308,13 @@ async function wrapMacApp(): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  const addonFileName = macAppAddonFileName()
   log(`output dir ${path.relative(ROOT, DIST) || '.'}`)
   rmSync(DIST, { recursive: true, force: true })
   mkdirSync(DIST, { recursive: true })
   await buildIcons()
   await compileBinary()
-  await wrapMacApp()
+  await wrapMacApp(addonFileName)
   log('done')
   if (process.platform === 'darwin' && existsSync(APP_BUNDLE)) {
     log(`run: open "${APP_BUNDLE}"`)
