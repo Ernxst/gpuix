@@ -6,6 +6,7 @@
 ///
 /// All IDs are u64 — JS generates them with an incrementing counter,
 /// passes them as numbers across napi (no string allocation).
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -221,6 +222,9 @@ pub struct RetainedTree {
     /// Count of elements whose styles could participate in stacking. This
     /// lets ordinary trees skip the paint-order path entirely.
     stacking_candidates: usize,
+    /// Cached retained-tree source paths are shared with GPUI stacking wrappers.
+    /// Structural order changes clear them; style and content changes do not.
+    source_order_cache: RefCell<HashMap<u64, Arc<[u32]>>>,
     /// The root element ID set by appendChildToContainer.
     pub root_id: Option<u64>,
     /// Advances only when a retained-tree operation changes state. Consumers
@@ -265,19 +269,56 @@ impl RetainedTree {
             .get(&parent_id)
             .map(|parent| parent.children.clone())
             .unwrap_or_default();
+        let mut changed = false;
         for (index, child_id) in children.into_iter().enumerate() {
             if let Some(child) = self.elements.get_mut(&child_id) {
-                child.sibling_order = index as u64;
+                let sibling_order = index as u64;
+                changed |= child.sibling_order != sibling_order;
+                child.sibling_order = sibling_order;
             }
         }
+        if changed {
+            self.invalidate_source_order_cache();
+        }
+    }
+
+    pub(crate) fn source_order(&self, id: u64) -> Arc<[u32]> {
+        if !self.elements.contains_key(&id) {
+            return Arc::from([]);
+        }
+        let cached_path = self.source_order_cache.borrow().get(&id).cloned();
+        if let Some(path) = cached_path {
+            return path;
+        }
+
+        let Some(element) = self.elements.get(&id) else {
+            return Arc::from([]);
+        };
+        let path: Arc<[u32]> = match element.parent {
+            Some(parent_id) if self.elements.contains_key(&parent_id) => {
+                let parent_path = self.source_order(parent_id);
+                let mut path = Vec::with_capacity(parent_path.len() + 1);
+                path.extend_from_slice(&parent_path);
+                path.push(element.sibling_order.min(u32::MAX as u64) as u32);
+                Arc::from(path)
+            }
+            _ => Arc::from([]),
+        };
+        self.source_order_cache
+            .borrow_mut()
+            .insert(id, path.clone());
+        path
+    }
+
+    fn invalidate_source_order_cache(&mut self) {
+        self.source_order_cache.get_mut().clear();
     }
 
     fn is_stacking_candidate(style: &StyleDesc) -> bool {
         matches!(
             style.position.as_deref(),
             Some("relative" | "absolute" | "fixed")
-        )
-            || style.opacity.is_some_and(|opacity| opacity < 1.0)
+        ) || style.opacity.is_some_and(|opacity| opacity < 1.0)
             || style.z_index.is_some()
     }
 
@@ -311,12 +352,14 @@ impl RetainedTree {
             styles: StyleTable::default(),
             focus_group_refcounts: HashMap::default(),
             stacking_candidates: 0,
+            source_order_cache: RefCell::new(HashMap::default()),
             root_id: None,
             next_revision: 1,
         }
     }
 
     pub fn create_element(&mut self, id: u64, element_type: String) {
+        self.invalidate_source_order_cache();
         let revision = self.take_revision();
         self.elements
             .insert(id, RetainedElement::new(id, element_type, revision));
@@ -404,6 +447,9 @@ impl RetainedTree {
         }
         let mut destroyed = Vec::new();
         self.destroy_element_recursive(id, &mut destroyed);
+        if !destroyed.is_empty() {
+            self.invalidate_source_order_cache();
+        }
         if destroys_root {
             self.set_root(None);
         }
@@ -467,6 +513,7 @@ impl RetainedTree {
         }
 
         if child_changed {
+            self.invalidate_source_order_cache();
             if let Some(old_parent_id) = old_parent_id {
                 self.adjust_stacking_candidates_in_ancestors(
                     Some(old_parent_id),
@@ -548,6 +595,7 @@ impl RetainedTree {
         }
 
         if child_changed {
+            self.invalidate_source_order_cache();
             if let Some(old_parent_id) = old_parent_id {
                 self.adjust_stacking_candidates_in_ancestors(
                     Some(old_parent_id),
@@ -1030,6 +1078,25 @@ mod tests {
         tree.destroy_element(3);
         assert!(!tree.has_stacking_candidates());
         assert!(!tree.subtree_has_stacking_candidates(1));
+    }
+
+    #[test]
+    fn source_order_paths_are_shared_until_tree_order_changes() {
+        let mut tree = RetainedTree::new();
+        for id in 1..=3 {
+            tree.create_element(id, "div".to_string());
+        }
+        tree.append_child(1, 2);
+        tree.append_child(1, 3);
+
+        let first = tree.source_order(2);
+        let reused = tree.source_order(2);
+        assert_eq!(&*first, &[0]);
+        assert!(Arc::ptr_eq(&first, &reused));
+
+        tree.insert_before(1, 3, 2);
+        assert_eq!(&*tree.source_order(3), &[0]);
+        assert_eq!(&*tree.source_order(2), &[1]);
     }
 
     #[test]
