@@ -8,7 +8,9 @@ import React, {
   useCallback,
   useContext,
   useInsertionEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react"
 import type { ReactElement, ReactNode, Ref } from "react"
@@ -34,8 +36,12 @@ export type PositionerOffsetFunction = (data: {
   positioner: { width: number; height: number }
 }) => number
 export type PositionerCollisionAvoidance = {
-  side?: "flip" | "shift" | "none"
+  side?: "flip" | "none"
   align?: "flip" | "shift" | "none"
+  fallbackAxisSide?: "start" | "end" | "none"
+} | {
+  side?: "shift" | "none"
+  align?: "shift" | "none"
   fallbackAxisSide?: "start" | "end" | "none"
 }
 
@@ -46,8 +52,7 @@ export interface PositionerState {
   anchorHidden: boolean
 }
 
-/** Shared positioning options for floating controls. Unsupported native-only
- * inputs are accepted for Base UI source compatibility and ignored by GPUI. */
+/** Shared positioning options for floating controls. */
 export interface PositionerProps extends Omit<Props, "className" | "style"> {
   children?: ReactNode
   position?: { x: number; y: number }
@@ -63,7 +68,6 @@ export interface PositionerProps extends Omit<Props, "className" | "style"> {
   arrowPadding?: number
   disableAnchorTracking?: boolean
   collisionAvoidance?: PositionerCollisionAvoidance
-  alignItemWithTrigger?: boolean
   open?: boolean
   render?: ReactElement | ((props: Props, state: PositionerState) => ReactNode)
   className?: string | ((state: PositionerState) => string | undefined)
@@ -404,12 +408,18 @@ export const FloatingPositioner = forwardRef<PublicInstance, PositionerProps>(
     {
       children,
       position,
+      anchor,
+      positionMethod: _positionMethod,
       side = "bottom",
       sideOffset = 0,
       align = "center",
       alignOffset = 0,
+      collisionBoundary: _collisionBoundary,
       collisionPadding = 5,
       collisionAvoidance,
+      sticky: _sticky,
+      arrowPadding: _arrowPadding,
+      disableAnchorTracking: _disableAnchorTracking,
       open = true,
       render,
       className,
@@ -418,14 +428,92 @@ export const FloatingPositioner = forwardRef<PublicInstance, PositionerProps>(
     },
     ref
   ) {
-    const resolvedSideOffset = typeof sideOffset === "number" ? sideOffset : sideOffset({
-      side, align, anchor: { width: 0, height: 0 }, positioner: { width: 0, height: 0 },
+    const positionerRef = useRef<PublicInstance | null>(null)
+    const [measuredPlacement, setMeasuredPlacement] = useState<{
+      side: PositionerSide
+      align: PositionerAlign
+      position?: { x: number; y: number }
+    } | null>(null)
+    const [measuredDimensions, setMeasuredDimensions] = useState<{
+      anchor: { width: number; height: number }
+      positioner: { width: number; height: number }
+    } | null>(null)
+    const anchorNode = typeof anchor === "function"
+      ? anchor()
+      : anchor && "current" in anchor
+        ? anchor.current
+        : anchor
+    const anchorRect = anchorNode && "getBoundingClientRect" in anchorNode
+      ? anchorNode.getBoundingClientRect()
+      : null
+    useLayoutEffect(() => {
+      if (!open || !anchorRect || !positionerRef.current) {
+        setMeasuredPlacement(null)
+        return
+      }
+      const popupRect = positionerRef.current.getBoundingClientRect()
+      const nextDimensions = {
+        anchor: { width: anchorRect.width, height: anchorRect.height },
+        positioner: { width: popupRect.width, height: popupRect.height },
+      }
+      setMeasuredDimensions((current) => current?.anchor.width === nextDimensions.anchor.width &&
+        current.anchor.height === nextDimensions.anchor.height &&
+        current.positioner.width === nextDimensions.positioner.width &&
+        current.positioner.height === nextDimensions.positioner.height
+        ? current
+        : nextDimensions)
+      let resolvedSide: PositionerSide = side
+      if (side === "bottom" && popupRect.top < anchorRect.top) resolvedSide = "top"
+      else if (side === "top" && popupRect.bottom > anchorRect.bottom) resolvedSide = "bottom"
+      else if (side === "right" && popupRect.left < anchorRect.left) resolvedSide = "left"
+      else if (side === "left" && popupRect.right > anchorRect.right) resolvedSide = "right"
+      else if (popupRect.bottom <= anchorRect.top) resolvedSide = "top"
+      else if (popupRect.top >= anchorRect.bottom) resolvedSide = "bottom"
+      else if (popupRect.right <= anchorRect.left) resolvedSide = "left"
+      else if (popupRect.left >= anchorRect.right) resolvedSide = "right"
+      else if (popupRect.top < anchorRect.top && popupRect.bottom <= anchorRect.bottom + 1) resolvedSide = "top"
+      else if (popupRect.left < anchorRect.left && popupRect.right <= anchorRect.right + 1) resolvedSide = "left"
+      let resolvedAlign: PositionerAlign = align
+      if (resolvedSide === "top" || resolvedSide === "bottom") {
+        if (Math.abs(popupRect.left - anchorRect.left) <= 1) resolvedAlign = "start"
+        else if (Math.abs(popupRect.right - anchorRect.right) <= 1) resolvedAlign = "end"
+        else resolvedAlign = "center"
+      } else {
+        if (Math.abs(popupRect.top - anchorRect.top) <= 1) resolvedAlign = "start"
+        else if (Math.abs(popupRect.bottom - anchorRect.bottom) <= 1) resolvedAlign = "end"
+        else resolvedAlign = "center"
+      }
+      const nextPosition = resolvedSide === side
+        ? position
+        : resolvedSide === "top"
+          ? { x: resolvedAlign === "start" ? anchorRect.left : resolvedAlign === "end" ? anchorRect.right : anchorRect.left + anchorRect.width / 2, y: anchorRect.top }
+          : resolvedSide === "bottom"
+            ? { x: resolvedAlign === "start" ? anchorRect.left : resolvedAlign === "end" ? anchorRect.right : anchorRect.left + anchorRect.width / 2, y: anchorRect.bottom }
+            : resolvedSide === "left"
+              ? { x: anchorRect.left, y: resolvedAlign === "start" ? anchorRect.top : resolvedAlign === "end" ? anchorRect.bottom : anchorRect.top + anchorRect.height / 2 }
+              : { x: anchorRect.right, y: resolvedAlign === "start" ? anchorRect.top : resolvedAlign === "end" ? anchorRect.bottom : anchorRect.top + anchorRect.height / 2 }
+      setMeasuredPlacement((current) => current?.side === resolvedSide && current.align === resolvedAlign && current.position?.x === nextPosition?.x && current.position?.y === nextPosition?.y
+        ? current
+        : { side: resolvedSide, align: resolvedAlign, position: nextPosition })
     })
-    const resolvedAlignOffset = typeof alignOffset === "number" ? alignOffset : alignOffset({
-      side, align, anchor: { width: 0, height: 0 }, positioner: { width: 0, height: 0 },
-    })
-    const state: PositionerState = { open, side: open ? side : "none", align, anchorHidden: false }
-    const offset = physicalSide(side) === "top" || physicalSide(side) === "bottom"
+    const resolvedSide = measuredPlacement?.side ?? side
+    const resolvedAlign = measuredPlacement?.align ?? align
+    const resolvedPosition = measuredPlacement?.position ?? position
+    // GPUI's anchored custom element performs measurement and collision
+    // correction natively. Offset callbacks require measured dimensions, so
+    // they are resolved by a later render once the relevant native layout
+    // APIs expose both anchor and popup geometry. Never invoke them with
+    // invented dimensions.
+    const offsetData = {
+      side: resolvedSide,
+      align: resolvedAlign,
+      anchor: measuredDimensions?.anchor ?? { width: 0, height: 0 },
+      positioner: measuredDimensions?.positioner ?? { width: 0, height: 0 },
+    }
+    const resolvedSideOffset = typeof sideOffset === "number" ? sideOffset : measuredDimensions ? sideOffset(offsetData) : 0
+    const resolvedAlignOffset = typeof alignOffset === "number" ? alignOffset : measuredDimensions ? alignOffset(offsetData) : 0
+    const state: PositionerState = { open, side: open ? resolvedSide : "none", align: resolvedAlign, anchorHidden: false }
+    const offset = physicalSide(resolvedSide) === "top" || physicalSide(resolvedSide) === "bottom"
       ? { x: resolvedAlignOffset, y: 0 }
       : { x: 0, y: resolvedAlignOffset }
     const fit = collisionAvoidance?.side === "none"
@@ -435,12 +523,15 @@ export const FloatingPositioner = forwardRef<PublicInstance, PositionerProps>(
         : "switch"
     const contentProps: Props = {
       ...props,
-      ref,
+      ref: (instance: PublicInstance | null) => {
+        positionerRef.current = instance
+        setRefs(instance, ref)
+      },
       className: typeof className === "function" ? className(state) : className,
       style: typeof style === "function" ? style(state) : style,
       "data-open": open ? "" : undefined,
       "data-side": state.side,
-      "data-align": align,
+      "data-align": resolvedAlign,
       "data-anchor-hidden": undefined,
     }
     let content: ReactNode
@@ -454,9 +545,9 @@ export const FloatingPositioner = forwardRef<PublicInstance, PositionerProps>(
     const margin = paddingInset(collisionPadding)
     return (
       <anchored
-        position={position}
-        side={physicalSide(side)}
-        align={align}
+        position={resolvedPosition}
+        side={physicalSide(resolvedSide)}
+      align={resolvedAlign}
         gap={resolvedSideOffset}
         offset={offset}
         fit={fit}

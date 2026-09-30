@@ -1,7 +1,7 @@
 import React from "react"
 import * as BaseSelect from "@base-ui/react/select"
-import * as GpuixSelect from "../../dist/components/select.js"
-import type { Props } from "../../dist/index.js"
+import * as GpuixSelect from "@gpuix/react/select"
+import type { Props } from "@gpuix/react"
 
 type Product = { sku: string; title: string }
 const product: Product = { sku: "a-1", title: "Alpha" }
@@ -9,7 +9,7 @@ const edge = { x: 0, y: 0, width: 320, height: 640 }
 
 const baseFixture = (
   <BaseSelect.Select.Root<Product>
-    value={product}
+    value={null}
     defaultValue={product}
     onValueChange={(value, details) => {
       value?.sku
@@ -64,7 +64,7 @@ const baseFixture = (
 
 const gpuixFixture = (
   <GpuixSelect.Root<Product>
-    value={product}
+    value={null}
     defaultValue={product}
     onValueChange={(value, details) => {
       value?.sku

@@ -3563,10 +3563,15 @@ Each primitive has a dedicated namespace entry point:
 | Import | Main parts |
 |---|---|
 | `@gpuix/react/dialog` | `Root`, `Trigger`, `Portal`, `Backdrop`, `Popup`, `Title`, `Description`, `Close` |
-| `@gpuix/react/select` | `Root`, `Trigger`, `Value`, `Icon`, `Popup`, `List`, `Item`, `ItemText`, `ItemIndicator` |
+| `@gpuix/react/select` | `Root`, `Label`, `Trigger`, `Value`, `Icon`, `Portal`, `Backdrop`, `Positioner`, `Popup`, `List`, `Item`, `ItemIndicator`, `ItemText`, `Arrow`, `ScrollUpArrow`, `ScrollDownArrow`, `Group`, `GroupLabel`, `Separator` |
 | `@gpuix/react/combobox` | `Root`, `Input`, `Popup`, `List`, `Item`, `Empty` |
 | `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Popup` |
-| `@gpuix/react/floating` | `FloatingLayer`, `renderSlot` |
+| `@gpuix/react/floating` | `FloatingLayer`, `PositionerProps`, `FloatingPositioner`, `renderSlot` |
+
+In Select, `Label` labels the field and `GroupLabel` labels an item group.
+The namespace also includes `Portal`, `Backdrop`, `Positioner`, `Arrow`, both
+scroll arrows, and `Separator`. Values are generic and nullable for
+single-select mode, event callbacks receive details, and `items` is optional.
 
 ### Build a local Select
 
@@ -3580,6 +3585,8 @@ import * as SelectPrimitive from '@gpuix/react/select'
 export const Select = SelectPrimitive.Root
 export const SelectValue = SelectPrimitive.Value
 export const SelectGroup = SelectPrimitive.Group
+export const SelectGroupLabel = SelectPrimitive.GroupLabel
+export const SelectLabel = SelectPrimitive.Label
 export const SelectIcon = SelectPrimitive.Icon
 export const SelectList = SelectPrimitive.List
 export const SelectItemText = SelectPrimitive.ItemText

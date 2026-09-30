@@ -70,7 +70,7 @@ interface SelectContextValue {
   triggerPressedWhileOpen: React.MutableRefObject<boolean>
   dismissedByOutsidePress: React.MutableRefObject<boolean>
   triggerRef: React.MutableRefObject<PublicInstance | null>
-  setOpen: (open: boolean) => void
+  setOpen: (open: boolean, reason?: SelectChangeEventDetails["reason"]) => void
   setActiveValue: (value: unknown | null) => void
   setListId: (id: string) => void
   setListMounted: (mounted: boolean) => void
@@ -78,7 +78,7 @@ interface SelectContextValue {
   setFocused: (focused: boolean) => void
   typeahead: (character: string) => void
   moveActive: (delta: number) => void
-  selectValue: (value: unknown) => void
+  selectValue: (value: unknown, reason?: SelectChangeEventDetails["reason"]) => void
   items: SelectItemRecord[]
   registerItem: (item: SelectItemRecord) => void
   unregisterItem: (value: unknown) => void
@@ -171,7 +171,7 @@ export interface SelectProps<Value = unknown, Multiple extends boolean | undefin
 }
 
 export interface SelectChangeEventDetails {
-  reason: "trigger-press" | "trigger-hover" | "trigger-focus" | "outside-press" | "item-press" | "escape-key" | "focus-out" | "list-navigation" | "cancel-open" | "window-resize" | "none"
+  reason: "trigger-press" | "outside-press" | "item-press" | "escape-key" | "focus-out" | "list-navigation" | "cancel-open" | "window-resize" | "none"
   event: Event
   cancel: () => void
   allowPropagation: () => void
@@ -180,15 +180,17 @@ export interface SelectChangeEventDetails {
   trigger: Element | undefined
 }
 
-function createSelectChangeDetails(reason: SelectChangeEventDetails["reason"]): SelectChangeEventDetails {
+function createSelectChangeDetails(reason: SelectChangeEventDetails["reason"], trigger?: Element): SelectChangeEventDetails {
+  let isCanceled = false
+  let isPropagationAllowed = false
   return {
     reason,
-    event: new Event("select-change"),
-    cancel() {},
-    allowPropagation() {},
-    isCanceled: false,
-    isPropagationAllowed: false,
-    trigger: undefined,
+    event: new Event(reason),
+    cancel() { isCanceled = true },
+    allowPropagation() { isPropagationAllowed = true },
+    get isCanceled() { return isCanceled },
+    get isPropagationAllowed() { return isPropagationAllowed },
+    trigger,
   }
 }
 
@@ -216,17 +218,10 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
   const [value, setValue] = useControllableState<SelectSelection<unknown>>({
     value: valueProp,
     defaultValue: defaultValue ?? null,
-    onChange: (nextValue) => {
-      onValueChange?.(nextValue as SelectValueFor<Value, Multiple>, createSelectChangeDetails("item-press"))
-    },
   })
   const [open, setOpenState] = useControllableState({
     value: openProp,
     defaultValue: defaultOpen,
-    onChange: (nextOpen) => {
-      onOpenChange?.(nextOpen, createSelectChangeDetails("trigger-press"))
-      onOpenChangeComplete?.(nextOpen)
-    },
   })
   const [activeValue, setActiveValue] = useState<unknown | null>(null)
   const generatedListId = useId()
@@ -309,8 +304,13 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     return next
   }, [itemsProp])
 
-  const setOpen = (nextOpen: boolean) => {
+  const setOpen = (nextOpen: boolean, reason: SelectChangeEventDetails["reason"] = "trigger-press") => {
+    if (open === nextOpen) return
+    const details = createSelectChangeDetails(reason, triggerRef.current as unknown as Element | undefined)
+    onOpenChange?.(nextOpen, details)
+    if (details.isCanceled) return
     setOpenState(nextOpen)
+    onOpenChangeComplete?.(nextOpen)
     if (nextOpen) {
       const rect = triggerRef.current?.getBoundingClientRect()
       if (rect) setPopupPosition({ x: rect.x, y: rect.y + rect.height })
@@ -361,7 +361,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     if (!match) return
     typeaheadMatchIndex.current = wrappedMatchIndex
     if (open) setActiveValue(match.value)
-    else if (!readOnly && !multiple) selectValue(match.value)
+    else if (!readOnly && !multiple) selectValue(match.value, "list-navigation")
   }
 
   const moveActive = (delta: number) => {
@@ -374,21 +374,31 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     setActiveValue(enabled[nextIndex].value)
   }
 
-  const selectValue = (nextValue: unknown) => {
+  const selectValue = (nextValue: unknown, reason: SelectChangeEventDetails["reason"] = "item-press") => {
     if (disabled) return
     const item = items.find((candidate) => candidate.value === nextValue)
     if (!item || item.disabled) return
     if (multiple) {
       const selected = Array.isArray(value) ? value : []
-      setValue(
+      const nextSelection =
         selected.some((candidate) => compareValues(candidate, nextValue))
           ? selected.filter((candidate) => !compareValues(candidate, nextValue))
           : [...selected, nextValue]
-      )
+      const details = createSelectChangeDetails(reason, triggerRef.current as unknown as Element | undefined)
+      onValueChange?.(nextSelection as SelectValueFor<Value, Multiple>, details)
+      if (!details.isCanceled) setValue(nextSelection)
       return
     }
-    setValue(nextValue)
-    setOpen(false)
+    if (Object.is(value, nextValue)) {
+      setOpen(false, reason)
+      return
+    }
+    const details = createSelectChangeDetails(reason, triggerRef.current as unknown as Element | undefined)
+    onValueChange?.(nextValue as SelectValueFor<Value, Multiple>, details)
+    if (!details.isCanceled) {
+      setValue(nextValue)
+      setOpen(false, reason)
+    }
   }
 
   const context = useMemo<SelectContextValue>(
@@ -558,7 +568,7 @@ export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
         onKeyDown?.(event)
         if (disabled) return
         if (event.key === "Escape") {
-          if (!event.defaultPrevented) context.setOpen(false)
+          if (!event.defaultPrevented) context.setOpen(false, "escape-key")
         } else if (event.key === "ArrowDown" || (event.key === "n" && event.modifiers?.ctrl)) {
           if (!context.open) context.setOpen(true)
           context.moveActive(1)
@@ -670,21 +680,21 @@ export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
             queueMicrotask(() => {
               context.dismissedByOutsidePress.current = false
             })
-            context.setOpen(false)
+            context.setOpen(false, "outside-press")
           },
           onKeyDown: (event: GpuixKeyboardEvent) => {
             onKeyDown?.(event)
             if (event.key.toLowerCase() === "escape") {
               if (dismissLayer(event)) {
                 onEscapeKeyDown?.(event)
-                if (!event.defaultPrevented) context.setOpen(false)
+                if (!event.defaultPrevented) context.setOpen(false, "escape-key")
               }
             } else if (event.key === "ArrowDown" || (event.key === "n" && event.modifiers?.ctrl)) {
               context.moveActive(1)
             } else if (event.key === "ArrowUp" || (event.key === "p" && event.modifiers?.ctrl)) {
               context.moveActive(-1)
             } else if ((event.key === "Enter" || event.key === " ") && context.activeValue) {
-              context.selectValue(context.activeValue)
+              context.selectValue(context.activeValue, "item-press")
             } else if (event.key.length === 1 && !event.modifiers?.ctrl && !event.modifiers?.alt && !event.modifiers?.cmd) {
               context.typeahead(event.key)
             }
@@ -957,17 +967,28 @@ export const SelectLabel = forwardRef<PublicInstance, SelectPartProps<SelectLabe
 
 export interface SelectPositionerProps extends PositionerProps {
   children?: ReactNode
+  alignItemWithTrigger?: boolean | undefined
 }
 
-export const SelectPositioner = forwardRef<PublicInstance, SelectPositionerProps>(function SelectPositioner({ children, open, ...props }, ref) {
+export const SelectPositioner = forwardRef<PublicInstance, SelectPositionerProps>(function SelectPositioner({ children, open, alignItemWithTrigger: _alignItemWithTrigger, ...props }, ref) {
   const context = useSelectContext("SelectPositioner")
   const isOpen = open ?? context.open
   const side = props.side ?? "bottom"
   const align = props.align ?? "center"
+  const triggerRect = context.triggerRef.current?.getBoundingClientRect()
+  const triggerPosition = triggerRect
+    ? side === "top"
+      ? { x: align === "start" ? triggerRect.left : align === "end" ? triggerRect.right : triggerRect.left + triggerRect.width / 2, y: triggerRect.top }
+      : side === "bottom"
+        ? { x: align === "start" ? triggerRect.left : align === "end" ? triggerRect.right : triggerRect.left + triggerRect.width / 2, y: triggerRect.bottom }
+        : side === "left"
+          ? { x: triggerRect.left, y: align === "start" ? triggerRect.top : align === "end" ? triggerRect.bottom : triggerRect.top + triggerRect.height / 2 }
+          : { x: triggerRect.right, y: align === "start" ? triggerRect.top : align === "end" ? triggerRect.bottom : triggerRect.top + triggerRect.height / 2 }
+    : context.popupPosition
   return (
     <SelectPositionedContext.Provider value>
       <SelectPopupSideContext.Provider value={side}>
-        <FloatingPositioner {...props} ref={ref} open={isOpen} position={context.popupPosition}>
+        <FloatingPositioner {...props} anchor={props.anchor ?? context.triggerRef.current as unknown as Element | null} ref={ref} open={isOpen} position={props.position ?? triggerPosition}>
           {children}
         </FloatingPositioner>
       </SelectPopupSideContext.Provider>
