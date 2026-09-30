@@ -2,10 +2,15 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "exactOptionalPropertyTypes": true,
+    "jsxImportSource": "react",
+    "paths": {
+      "@gpuix/react/dialog": ["./dist/components/dialog.d.ts"],
+      "@gpuix/react/alert-dialog": ["./dist/components/alert-dialog.d.ts"]
+    },
     "skipLibCheck": true,
     "disableSourceOfProjectReferenceRedirect": true,
     "noEmit": true
   },
-  "files": ["src/__tests__/exact-optional.types.ts"],
-  "include": ["src/__tests__/exact-optional.types.ts"]
+  "files": ["src/__tests__/exact-optional.types.ts", "src/__tests__/dialog-parity.types.tsx"],
+  "include": ["src/__tests__/exact-optional.types.ts", "src/__tests__/dialog-parity.types.tsx"]
 }

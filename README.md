@@ -3506,8 +3506,8 @@ kind and options.
 
 ### Headless Dialog
 
-`@gpuix/react/dialog` provides Base UI-shaped `Root`, `Trigger`, `Portal`,
-`Backdrop`, `Popup`, `Title`, `Description`, and `Close` parts. The same parts
+`@gpuix/react/dialog` provides the Base UI 1.8.0 `Dialog` namespace and part
+tree, including `Viewport` and the `Handle`/`createHandle` APIs. The same parts
 are exported with a `Dialog` prefix from `@gpuix/react`.
 
 ```tsx
@@ -3526,13 +3526,29 @@ import * as Dialog from "@gpuix/react/dialog"
 </Dialog.Root>
 ```
 
-`Root` supports `open`, `defaultOpen`, `onOpenChange`, and `modal` (true by
-default). A modal Popup reports `aria-modal`, traps Tab and Shift+Tab among its
-painted tab stops, and focuses the Popup on open. Set `initialFocus` and
-`finalFocus` on Popup to use a host ref or numeric host element ID; by default,
+`Root` supports `onOpenChange(open, eventDetails)`, `onOpenChangeComplete`,
+`actionsRef`, trigger IDs, render-function children, handles, and `modal` values
+`true`, `false`, and `"trap-focus"`. The native renderer traps focus for both
+modal modes; only `true` blocks interaction behind the full-window portal.
+`Portal` accepts Base UI's `container` prop for shared source compatibility, but
+native portals always fill the GPU-IX window. Parts accept Base UI's `render`,
+state-function `className` and `style`, and state/data attributes.
+
+A modal Popup reports `aria-modal`, traps Tab and Shift+Tab among painted tab
+stops, and focuses the Popup on open. Set `initialFocus` and `finalFocus` on
+Popup to use a host ref, numeric host element ID, or callback; by default,
 focus returns to the Trigger, or to the element focused before the dialog.
 Escape dismisses the topmost open Dialog, Select, Combobox, or Tooltip layer.
-`AlertDialog` uses the same parts with the Popup role set to `alertdialog`.
+
+### Headless Alert Dialog
+
+`@gpuix/react/alert-dialog` provides the Base UI `AlertDialog` namespace and
+part tree. Its Popup has the `alertdialog` role and cannot be dismissed by
+Escape or by pressing the Backdrop; include an `AlertDialog.Close` action so
+users can complete or cancel the prompt. `Dialog.Handle` and
+`AlertDialog.Handle` are handle classes created with each namespace's
+`createHandle()` method. The `AlertDialog` export from `/dialog` remains as a
+deprecated alias.
 
 `Dialog.Trigger` and `Dialog.Close` are keyboard-operable buttons. The root
 `Button` export gives a styled `div` button activation with Enter and Space; it

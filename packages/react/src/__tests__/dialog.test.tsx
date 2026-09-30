@@ -1,7 +1,7 @@
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { Button } from "../components/button.js"
-import { Dialog, DialogPopup, DialogPortal, DialogTrigger, DialogTitle } from "../components/dialog.js"
+import { AlertDialog, Dialog, DialogPopup, DialogPortal, DialogTrigger, DialogTitle } from "../components/dialog.js"
 import { Select, SelectItem, SelectPopup, SelectTrigger } from "../components/select.js"
 import { Combobox, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup } from "../components/combobox.js"
 import { createTestRoot, isNativeTestRendererAvailable, type TestRoot } from "../testing.js"
@@ -22,7 +22,7 @@ describeNative("Dialog", () => {
     const first = React.createRef<PublicInstance>()
     const last = React.createRef<PublicInstance>()
     screen.render(
-      <Dialog defaultOpen>
+      <Dialog defaultOpen modal="trap-focus">
         <DialogPortal>
           <DialogPopup>
             <DialogTitle>Confirm</DialogTitle>
@@ -157,8 +157,9 @@ describeNative("Dialog", () => {
 
   it("opens a Dialog.Trigger with Enter and Space", () => {
     const trigger = React.createRef<PublicInstance>()
+    const changes: Array<{ open: boolean; reason: string }> = []
     screen.render(
-      <Dialog>
+      <Dialog onOpenChange={(open, details) => changes.push({ open, reason: details.reason })}>
         <DialogTrigger ref={trigger} ariaLabel="Open dialog" />
         <DialogPortal>
           <DialogPopup><DialogTitle>Keyboard dialog</DialogTitle></DialogPopup>
@@ -169,7 +170,9 @@ describeNative("Dialog", () => {
     screen.renderer.focusElement(trigger.current!.id)
     screen.renderer.simulateKeystrokes("enter")
     expect(screen.getByRole("dialog", { name: "Keyboard dialog" })).toBeDefined()
+    expect(changes.at(-1)).toEqual({ open: true, reason: "trigger-press" })
     screen.renderer.simulateKeystrokes("escape")
+    expect(changes.at(-1)).toEqual({ open: false, reason: "escape-key" })
     screen.renderer.focusElement(trigger.current!.id)
     screen.renderer.simulateKeystrokes("space")
     expect(screen.getByRole("dialog", { name: "Keyboard dialog" })).toBeDefined()
@@ -319,6 +322,36 @@ describeNative("Dialog", () => {
     expect(screen.renderer.getActiveElement()).toBe(initial.current!.id)
     screen.render(<Fixture open={false} />)
     expect(screen.renderer.getActiveElement()).toBe(final.current!.id)
+  })
+
+  it("keeps an AlertDialog open on Escape and closes it through Close", () => {
+    const close = React.createRef<PublicInstance>()
+    const changes: Array<{ open: boolean; reason: string }> = []
+    screen.render(
+      <AlertDialog
+        defaultOpen
+        onOpenChange={(open, details) => changes.push({ open, reason: details.reason })}
+      >
+        <AlertDialog.Portal>
+          <AlertDialog.Backdrop />
+          <AlertDialog.Viewport>
+            <AlertDialog.Popup>
+              <AlertDialog.Title>Delete file?</AlertDialog.Title>
+              <AlertDialog.Description>This cannot be undone.</AlertDialog.Description>
+              <AlertDialog.Close ref={close}>Cancel</AlertDialog.Close>
+            </AlertDialog.Popup>
+          </AlertDialog.Viewport>
+        </AlertDialog.Portal>
+      </AlertDialog>,
+    )
+
+    expect(screen.getByRole("alertdialog", { name: "Delete file?" })).toBeDefined()
+    screen.renderer.simulateKeystrokes("escape")
+    expect(screen.getByRole("alertdialog", { name: "Delete file?" })).toBeDefined()
+    screen.renderer.focusElement(close.current!.id)
+    screen.renderer.simulateKeystrokes("enter")
+    expect(screen.queryByRole("alertdialog", { name: "Delete file?" })).toBeNull()
+    expect(changes).toEqual([{ open: false, reason: "close-press" }])
   })
 
   it("exposes modal semantics in the accessibility tree", () => {

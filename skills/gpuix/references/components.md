@@ -50,37 +50,39 @@ Each component is importable two ways: as a namespace from its subpath (`import 
 - **Combobox and Tooltip set no ARIA roles**; add `role`, `ariaExpanded` and `ariaSelected` yourself. Select sets them.
 - **Tooltip opens instantly by default** (`delayDuration` 0; Base UI waits 600 ms), and opens on any focus, not only keyboard focus. Its delays use `setTimeout` on wall time, so `advanceAsyncClock` in tests does not move them.
 - **Combobox `autoHighlight` defaults to `false`**, so typing and pressing Enter selects nothing until an item is arrowed to. Pass `autoHighlight` for type-and-Enter.
-- **There is no Popover, Menu or message box.** `@gpuix/react/dialogs` is file pickers only (#572 for a message box). Dialog is available from `@gpuix/react/dialog`; it handles modal Tab focus, Escape dismissal, focus restoration and `aria-modal` in AccessKit.
+- **There is no Popover or Menu primitive.** `@gpuix/react/dialogs` provides native file pickers. Dialog and AlertDialog are available from `@gpuix/react/dialog` and `/alert-dialog`.
 
 ## Dialog (`@gpuix/react/dialog`)
 
-The parts follow Base UI names: `Root`, `Trigger`, `Portal`, `Backdrop`,
-`Popup`, `Title`, `Description`, and `Close`. The package root also exports
-`Dialog`, `DialogTrigger`, and the other prefixed parts. `Root` takes
-`open`/`defaultOpen`, `onOpenChange`, and `modal` (default `true`). `Popup` takes
-`initialFocus` and `finalFocus`, each a host ref, numeric host element ID, or
-`false` to skip that focus move.
+The parts follow Base UI 1.8.0: `Root`, `Trigger`, `Portal`, `Backdrop`,
+`Viewport`, `Popup`, `Title`, `Description`, `Close`, and `Handle`. The package
+root also exports `Dialog`, `DialogTrigger`, and the other prefixed parts.
+`Root` takes `open`/`defaultOpen`, `onOpenChange(open, eventDetails)`,
+`onOpenChangeComplete`, trigger IDs, actions and handles. `modal` accepts
+`true`, `false`, or `"trap-focus"`. Parts support `render`, state-function
+`className`/`style`, state attributes, and `data-*` props. `Popup` takes
+`initialFocus` and `finalFocus` refs or callbacks; native host refs and numeric
+host IDs are also accepted.
 
 Modal Popups expose `aria-modal`, focus the Popup when opened, trap Tab and
 Shift+Tab among painted descendants, and return focus to the Trigger or prior
-focused element when closed. Escape dismisses the highest open Dialog, Select,
-Combobox, or Tooltip. GPU-IX does not currently export a Popover primitive.
-`AlertDialog` shares the Dialog parts and renders its Popup with the
-`alertdialog` role. `Dialog.Trigger`, `Dialog.Close`, and the
-root `Button` export activate with Enter and Space; they add no default focus
-ring.
-
-The API follows the `@base-ui/react` Dialog shape but is not a full Base UI API
-match. Compared with Base UI 1.8.0, GPU-IX does not provide
-`Dialog.Viewport`, `onOpenChangeComplete`, `triggerId`, `actionsRef`, or a
-`Dialog.Root` render-function child. `modal` accepts only a boolean, so
-`'trap-focus'` is not available. `initialFocus` and `finalFocus` accept refs,
-numeric host IDs, or `false`; they do not accept `true` or callbacks. GPU-IX's
-`Portal` fills the window, so it does not need a separate `Viewport` part.
+focused element when closed. Both `true` and `"trap-focus"` trap focus; only
+`true` blocks pointer interaction behind the overlay. Escape dismisses the
+highest open Dialog, Select, Combobox, or Tooltip. `Dialog.Trigger`,
+`Dialog.Close`, and the root `Button` activate with Enter and Space; they add no
+default focus ring.
 
 `Portal` mounts a full-window deferred layer with `<anchored fill="window">`.
-All React children remain in the retained tree; this is a native overlay
-component, not a general DOM portal.
+Its `container` prop is accepted for Base UI source compatibility and does not
+change the native portal target. All React children remain in the retained
+tree; this is a native overlay component, not a general DOM portal.
+
+## AlertDialog (`@gpuix/react/alert-dialog`)
+
+AlertDialog has the same part tree and handle pattern as Dialog. Its Popup has
+the `alertdialog` role, and Escape or Backdrop presses do not dismiss it. Add an
+`AlertDialog.Close` action for an explicit response. The `AlertDialog` export
+from `/dialog` is a deprecated alias.
 
 ## Floating layer (`@gpuix/react/floating`)
 
