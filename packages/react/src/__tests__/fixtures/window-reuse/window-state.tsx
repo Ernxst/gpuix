@@ -87,6 +87,15 @@ function menuAction(renderer: TestRenderer, id: string): string {
   }
 }
 
+function createWebGpuDevice(renderer: TestRenderer): number | undefined {
+  if (process.platform === "darwin") return renderer.createWebGpuDevice()
+
+  expect(() => renderer.createWebGpuDevice()).toThrow(
+    "Native WebGPU resources require the macOS test-support build"
+  )
+  return undefined
+}
+
 /** Everything here is either a window-level setting or something a leftover
  *  one would change. Timings are left out; only their presence counts. */
 function readWindowState(screen: RenderResult, trace: string[]) {
@@ -95,8 +104,8 @@ function readWindowState(screen: RenderResult, trace: string[]) {
   renderer.advanceAsyncClock(16)
   const frames = [...framesRun()]
   framesRun().length = 0
-  const webGpuDevice = renderer.createWebGpuDevice()
-  renderer.destroyWebGpuDevice(webGpuDevice)
+  const webGpuDevice = createWebGpuDevice(renderer)
+  if (webGpuDevice !== undefined) renderer.destroyWebGpuDevice(webGpuDevice)
   const stats = renderer.getDebugFrameOverlayStats()
   const idle = {
     hasMainMenu: renderer.hasMainMenu(),
@@ -174,7 +183,7 @@ export function dirtyWindow(): void {
   const { renderer } = screen
 
   renderer.requestFrame(() => framesRun().push("renderer.requestFrame"))
-  renderer.createWebGpuDevice()
+  createWebGpuDevice(renderer)
   renderer.setMenus([
     { name: "Leftover", items: [{ kind: "action", id: "leftover", label: "Leftover" }] },
   ])

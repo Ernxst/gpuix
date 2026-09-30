@@ -12,7 +12,7 @@
     "frame-pump-race:smoke": "bun frame-pump-race.smoke.ts",
     "tick-starvation": "bun tick-starvation.ts",
     "draw-cost": "bun draw-cost.ts",
-    "test": "bun run typecheck:test && vitest run --exclude '**/*.perf.test.tsx'",
+    "test": "bun run typecheck:test && vitest run --exclude '**/*.perf.test.tsx' --exclude '**/menu-fallback.test.ts' && vitest run menu-fallback.test.ts",
     "typecheck:test": "tsc --project tsconfig.test.json",
     "test:perf": "vitest run chat.perf.test.tsx timeline.perf.test.tsx canvas-map.perf.test.tsx",
     "native-text": "bun --hot native-text.tsx",
