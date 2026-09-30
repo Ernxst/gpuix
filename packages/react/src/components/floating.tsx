@@ -22,6 +22,54 @@ export type FloatingSide = "top" | "right" | "bottom" | "left"
 export type FloatingAlign = "start" | "center" | "end"
 export type StateStyle<State> = StyleDesc | ((state: State) => StyleDesc)
 
+/** Logical placement sides accepted by Base UI's shared anchor-positioning API. */
+export type PositionerSide = FloatingSide | "inline-start" | "inline-end"
+export type PositionerAlign = FloatingAlign
+export type PositionerRect = { x: number; y: number; width: number; height: number }
+export type PositionerBoundary = "clipping-ancestors" | Element | Element[] | PositionerRect
+export type PositionerOffsetFunction = (data: {
+  side: PositionerSide
+  align: PositionerAlign
+  anchor: { width: number; height: number }
+  positioner: { width: number; height: number }
+}) => number
+export type PositionerCollisionAvoidance = {
+  side?: "flip" | "shift" | "none"
+  align?: "flip" | "shift" | "none"
+  fallbackAxisSide?: "start" | "end" | "none"
+}
+
+export interface PositionerState {
+  open: boolean
+  side: PositionerSide | "none"
+  align: PositionerAlign
+  anchorHidden: boolean
+}
+
+/** Shared positioning options for floating controls. Unsupported native-only
+ * inputs are accepted for Base UI source compatibility and ignored by GPUI. */
+export interface PositionerProps extends Omit<Props, "className" | "style"> {
+  children?: ReactNode
+  position?: { x: number; y: number }
+  anchor?: Element | null | { getBoundingClientRect(): DOMRect } | React.RefObject<Element | null> | (() => Element | { getBoundingClientRect(): DOMRect } | null)
+  positionMethod?: "absolute" | "fixed"
+  side?: PositionerSide
+  sideOffset?: number | PositionerOffsetFunction
+  align?: PositionerAlign
+  alignOffset?: number | PositionerOffsetFunction
+  collisionBoundary?: PositionerBoundary
+  collisionPadding?: number | { top?: number; right?: number; bottom?: number; left?: number }
+  sticky?: boolean
+  arrowPadding?: number
+  disableAnchorTracking?: boolean
+  collisionAvoidance?: PositionerCollisionAvoidance
+  alignItemWithTrigger?: boolean
+  open?: boolean
+  render?: ReactElement | ((props: Props, state: PositionerState) => ReactNode)
+  className?: string | ((state: PositionerState) => string | undefined)
+  style?: StateStyle<PositionerState> | ((state: PositionerState) => StyleDesc | undefined)
+}
+
 const dismissLayers = new WeakMap<NativeRenderer, Array<{ token: object; depth: number; order: number }>>()
 const DismissLayerDepth = createContext(0)
 let nextDismissLayerOrder = 0
@@ -333,6 +381,90 @@ export const FloatingLayer = forwardRef<PublicInstance, FloatingPopupProps>(
         >
           {children}
         </div>
+      </anchored>
+    )
+  }
+)
+
+function physicalSide(side: PositionerSide): FloatingSide {
+  if (side === "inline-start") return "left"
+  if (side === "inline-end") return "right"
+  return side
+}
+
+function paddingInset(padding: PositionerProps["collisionPadding"]): number {
+  if (typeof padding === "number") return padding
+  if (!padding) return 5
+  return Math.max(padding.top ?? 0, padding.right ?? 0, padding.bottom ?? 0, padding.left ?? 0)
+}
+
+/** A renderer-neutral positioner contract shared by floating controls. */
+export const FloatingPositioner = forwardRef<PublicInstance, PositionerProps>(
+  function FloatingPositioner(
+    {
+      children,
+      position,
+      side = "bottom",
+      sideOffset = 0,
+      align = "center",
+      alignOffset = 0,
+      collisionPadding = 5,
+      collisionAvoidance,
+      open = true,
+      render,
+      className,
+      style,
+      ...props
+    },
+    ref
+  ) {
+    const resolvedSideOffset = typeof sideOffset === "number" ? sideOffset : sideOffset({
+      side, align, anchor: { width: 0, height: 0 }, positioner: { width: 0, height: 0 },
+    })
+    const resolvedAlignOffset = typeof alignOffset === "number" ? alignOffset : alignOffset({
+      side, align, anchor: { width: 0, height: 0 }, positioner: { width: 0, height: 0 },
+    })
+    const state: PositionerState = { open, side: open ? side : "none", align, anchorHidden: false }
+    const offset = physicalSide(side) === "top" || physicalSide(side) === "bottom"
+      ? { x: resolvedAlignOffset, y: 0 }
+      : { x: 0, y: resolvedAlignOffset }
+    const fit = collisionAvoidance?.side === "none"
+      ? undefined
+      : collisionAvoidance?.side === "shift" || collisionAvoidance?.align === "shift"
+        ? "snap"
+        : "switch"
+    const contentProps: Props = {
+      ...props,
+      ref,
+      className: typeof className === "function" ? className(state) : className,
+      style: typeof style === "function" ? style(state) : style,
+      "data-open": open ? "" : undefined,
+      "data-side": state.side,
+      "data-align": align,
+      "data-anchor-hidden": undefined,
+    }
+    let content: ReactNode
+    if (typeof render === "function") {
+      content = render(contentProps, state)
+    } else if (isValidElement<Props>(render)) {
+      content = renderSlot({ asChild: true, children: render, props: contentProps, ref })
+    } else {
+      content = <div {...contentProps}>{children}</div>
+    }
+    const margin = paddingInset(collisionPadding)
+    return (
+      <anchored
+        position={position}
+        side={physicalSide(side)}
+        align={align}
+        gap={resolvedSideOffset}
+        offset={offset}
+        fit={fit}
+        snapMargin={margin}
+        deferred
+        priority={1}
+      >
+        {content}
       </anchored>
     )
   }
