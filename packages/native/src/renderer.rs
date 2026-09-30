@@ -40,9 +40,7 @@ use std::hash::{Hash as _, Hasher as _};
 use std::path::PathBuf;
 #[cfg(any(target_os = "macos", target_family = "wasm"))]
 use std::rc::Rc;
-#[cfg(all(target_os = "macos", feature = "test-support"))]
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
@@ -114,6 +112,21 @@ pub(crate) fn settle_for_read<E>(
     // Every pass in the budget drew, so the tree did not reach rest; a read
     // taken now may be one pass stale.
     log::debug!("settle_for_read: still drawing after {MAX_SETTLE_PASSES} passes");
+    Ok(())
+}
+
+/// Draw synchronously only while retained layout has changed since the last
+/// render. General window dirtiness may come from paint-only state or scrolling
+/// and does not by itself make recorded bounds stale.
+pub(crate) fn settle_layout_for_bounds_read<E>(
+    mut run_pass: impl FnMut() -> std::result::Result<bool, E>,
+) -> std::result::Result<(), E> {
+    for _ in 0..MAX_SETTLE_PASSES {
+        if !run_pass()? {
+            return Ok(());
+        }
+    }
+    log::debug!("settle_layout_for_bounds_read: still drawing after {MAX_SETTLE_PASSES} passes");
     Ok(())
 }
 
@@ -1109,7 +1122,8 @@ fn virtual_list_scroll_generation(list_id: u64) -> u64 {
 }
 
 fn bump_virtual_list_scroll_generation(list_id: u64) {
-    VIRTUAL_LIST_SCROLL_GENERATIONS.with(|cell| *cell.borrow_mut().entry(list_id).or_insert(0) += 1);
+    VIRTUAL_LIST_SCROLL_GENERATIONS
+        .with(|cell| *cell.borrow_mut().entry(list_id).or_insert(0) += 1);
 }
 
 const SELECTION_SCROLL_TICK_MS: u64 = 24;
@@ -1294,6 +1308,19 @@ fn update_window_without_view<R>(
 #[cfg(target_os = "macos")]
 fn draw_window_for_automation_read() -> Result<()> {
     settle_for_read(|pass| update_window_without_view(move |window, cx| pass(window, cx)))
+}
+
+#[cfg(target_os = "macos")]
+fn settle_window_layout_for_bounds_read() -> Result<()> {
+    settle_layout_for_bounds_read(|| {
+        if !update_window(|view, _, _| view.layout_is_stale())? {
+            return Ok(false);
+        }
+        update_window_without_view(|window, cx| {
+            window.draw(cx).clear(cx);
+            true
+        })
+    })
 }
 
 /// Queue a real AppKit mouse click. This is deliberately distinct from the
@@ -1889,6 +1916,22 @@ fn draw_ui_window_for_read(
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+fn settle_ui_layout_for_bounds_read(
+    window: gpui::WindowHandle<GpuixView>,
+    cx: &mut gpui::AsyncApp,
+) -> anyhow::Result<()> {
+    settle_layout_for_bounds_read(|| {
+        if !window.update(cx, |view, _, _| view.layout_is_stale())? {
+            return Ok(false);
+        }
+        gpui::AnyWindowHandle::from(window).update(cx, |_view, window, cx| {
+            window.draw(cx).clear(cx);
+            Ok(true)
+        })
+    })
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 async fn run_ui_commands(
     mut commands: mpsc::UnboundedReceiver<UiCommand>,
     window: gpui::WindowHandle<GpuixView>,
@@ -2128,8 +2171,8 @@ async fn run_ui_commands(
             }
             // Force layout before sampling, the way GetElementBounds does: a
             // read from a mount effect must not report an unscrollable element.
-            UiCommand::GetScrollMetrics { id, response } => draw_ui_window_for_read(window, cx)
-                .and_then(|()| {
+            UiCommand::GetScrollMetrics { id, response } => {
+                settle_ui_layout_for_bounds_read(window, cx).and_then(|()| {
                     let metrics = VIRTUAL_LIST_STATES
                         .with(|cell| cell.borrow().get(&id).map(virtual_list_metrics))
                         .or_else(|| {
@@ -2138,7 +2181,8 @@ async fn run_ui_commands(
                         });
                     response.send(metrics).ok();
                     Ok(())
-                }),
+                })
+            }
             UiCommand::ScrollElementIntoView { id, align_to_top } => {
                 window.update(cx, move |view, window, cx| {
                     view.scroll_element_into_view(id, align_to_top, cx);
@@ -2150,11 +2194,13 @@ async fn run_ui_commands(
                     response.send(crate::automation::all_bounds()).ok();
                     Ok(())
                 }),
-            UiCommand::GetElementBounds { id, response } => draw_ui_window_for_read(window, cx)
-                .and_then(|()| {
-                    response.send(crate::automation::get_bounds(id)).ok();
+            UiCommand::GetElementBounds { id, response } => {
+                settle_ui_layout_for_bounds_read(window, cx).and_then(|()| {
+                    let bounds = window.update(cx, |view, _, _| view.bounds_after_scroll(id))?;
+                    response.send(bounds).ok();
                     Ok(())
-                }),
+                })
+            }
             // The paint logs are thread-local to the thread that paints, so
             // draw and read them here rather than on the calling thread.
             UiCommand::GetPaintedText { response } => {
@@ -5109,7 +5155,12 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::FocusNextWithin(id));
 
-        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux", target_os = "freebsd")))]
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
         Err(Error::from_reason("Unsupported operating system"))
     }
 
@@ -5125,7 +5176,12 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::FocusPreviousWithin(id));
 
-        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux", target_os = "freebsd")))]
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
         Err(Error::from_reason("Unsupported operating system"))
     }
 
@@ -5832,7 +5888,7 @@ impl GpuixRenderer {
     pub fn get_scroll_metrics(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
         let id = to_element_id(element_id)?;
         #[cfg(target_os = "macos")]
-        draw_window_for_automation_read()?;
+        settle_window_layout_for_bounds_read()?;
         #[cfg(target_os = "macos")]
         return Ok(VIRTUAL_LIST_STATES
             .with(|cell| cell.borrow().get(&id).map(virtual_list_metrics))
@@ -5908,8 +5964,28 @@ impl GpuixRenderer {
     pub fn get_element_bounds(&self, id: f64) -> Result<Option<ElementBounds>> {
         let id = to_element_id(id)?;
         #[cfg(target_os = "macos")]
-        draw_window_for_automation_read()?;
-        Ok(self.element_bounds(id)?.map(ElementBounds::from_painted))
+        {
+            settle_window_layout_for_bounds_read()?;
+            return update_window(move |view, _, _| {
+                view.bounds_after_scroll(id)
+                    .map(ElementBounds::from_painted)
+            });
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetElementBounds { id, response })?;
+            return recv_ui_response(receiver, "the GPUI element bounds query");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
     }
 
     /// Start reporting post-paint size changes for one retained element.
@@ -7874,6 +7950,18 @@ pub(crate) struct GpuixView {
     /// Created lazily for elements with overflow: "scroll" (or per-axis scroll).
     /// Handles persist across renders so GPUI maintains scroll offset state.
     pub(crate) scroll_handles: HashMap<u64, gpui::ScrollHandle>,
+    /// Layout revision and scroll offsets represented by the last rendered
+    /// bounds map. Scroll-only movement is applied to those bounds at read
+    /// time without rebuilding the GPUI tree.
+    drawn_layout_revision: u64,
+    drawn_interaction_revision: u64,
+    rendered_layout_revision: u64,
+    rendered_interaction_revision: u64,
+    drawn_layout_tween_active: bool,
+    rendered_reduce_motion: bool,
+    drawn_reduce_motion: bool,
+    drawn_img_image_revision: u64,
+    drawn_scroll_offsets: HashMap<u64, (f64, f64)>,
     /// Last painted offsets for scrollable elements with `onScroll`.
     /// Paint is the first point after GPUI has clamped and applied a wheel or
     /// programmatic position change, so comparing here reports position changes.
@@ -8190,6 +8278,88 @@ fn resolve_highlight(
 }
 
 impl GpuixView {
+    pub(crate) fn invalidate_layout(&mut self) {
+        self.tree.lock().unwrap().invalidate_layout();
+    }
+
+    pub(crate) fn layout_is_stale(&self) -> bool {
+        let tree = self.tree.lock().unwrap();
+        let stale_reasons = [
+            tree.layout_revision() != self.drawn_layout_revision,
+            self.interaction_revision != self.drawn_interaction_revision
+                && tree.has_layout_affecting_interaction_styles(),
+            self.img_image_store.revision() != self.drawn_img_image_revision,
+            self.drawn_layout_tween_active,
+            self.has_active_layout_tween(self.drawn_reduce_motion),
+        ];
+        stale_reasons.into_iter().any(|stale| stale)
+    }
+
+    fn has_active_layout_tween(&self, reduce_motion: bool) -> bool {
+        let now = self.clock.now();
+        self.transition_states
+            .values()
+            .any(|state| state.active_layout_tween(now, reduce_motion))
+    }
+
+    pub(crate) fn bounds_after_scroll(&self, id: u64) -> Option<crate::automation::ElementBounds> {
+        let mut bounds = crate::automation::get_bounds(id)?;
+        let tree = self.tree.lock().unwrap();
+        let mut ancestor = tree.elements.get(&id)?.parent;
+        while let Some(ancestor_id) = ancestor {
+            let element = tree.elements.get(&ancestor_id)?;
+            let current_offset = if let Some(handle) = self.scroll_handles.get(&ancestor_id) {
+                let offset = handle.offset();
+                Some((
+                    f64::from(f32::from(offset.x)),
+                    f64::from(f32::from(offset.y)),
+                ))
+            } else {
+                self.virtual_lists.get(&ancestor_id).map(|entry| {
+                    let offset = entry.state.scroll_px_offset_for_scrollbar();
+                    (0.0, -f64::from(f32::from(offset.y)))
+                })
+            };
+            if let (Some((current_x, current_y)), Some((drawn_x, drawn_y))) = (
+                current_offset,
+                self.drawn_scroll_offsets.get(&ancestor_id).copied(),
+            ) {
+                bounds.x += current_x - drawn_x;
+                bounds.y += current_y - drawn_y;
+            }
+            ancestor = element.parent;
+        }
+        Some(bounds)
+    }
+
+    fn capture_bounds_layout(&mut self) {
+        // Use the revisions represented by the element tree built for this
+        // draw. The retained tree can change after `Render` returns but before
+        // GPUI finishes paint; capturing its live revision here would mark
+        // those unpainted changes as current.
+        self.drawn_layout_revision = self.rendered_layout_revision;
+        self.drawn_interaction_revision = self.rendered_interaction_revision;
+        self.drawn_reduce_motion = self.rendered_reduce_motion;
+        self.drawn_layout_tween_active =
+            self.has_active_layout_tween(self.rendered_reduce_motion);
+        self.drawn_scroll_offsets.clear();
+        for (&id, handle) in &self.scroll_handles {
+            let offset = handle.offset();
+            self.drawn_scroll_offsets.insert(
+                id,
+                (
+                    f64::from(f32::from(offset.x)),
+                    f64::from(f32::from(offset.y)),
+                ),
+            );
+        }
+        for (&id, entry) in &self.virtual_lists {
+            let offset = entry.state.scroll_px_offset_for_scrollbar();
+            self.drawn_scroll_offsets
+                .insert(id, (0.0, -f64::from(f32::from(offset.y))));
+        }
+    }
+
     pub(crate) fn new(
         tree: Arc<Mutex<RetainedTree>>,
         canvas_display_lists: SharedDisplayLists,
@@ -8221,6 +8391,15 @@ impl GpuixView {
             focus_subscriptions: HashMap::new(),
             custom_registry: CustomElementRegistry::with_defaults(),
             scroll_handles: HashMap::new(),
+            drawn_layout_revision: 0,
+            drawn_interaction_revision: 0,
+            rendered_layout_revision: 0,
+            rendered_interaction_revision: 0,
+            drawn_layout_tween_active: false,
+            rendered_reduce_motion: false,
+            drawn_reduce_motion: false,
+            drawn_img_image_revision: 0,
+            drawn_scroll_offsets: HashMap::new(),
             scroll_event_offsets: Arc::new(Mutex::new(HashMap::new())),
             focus_scroll_anchors: HashMap::new(),
             motion_states: HashMap::new(),
@@ -8494,9 +8673,9 @@ impl GpuixView {
             .iter()
             .copied()
             .filter(|target| {
-                stale_groups.iter().any(|group| {
-                    is_hover_target_descendant(&tree, *target, *group)
-                })
+                stale_groups
+                    .iter()
+                    .any(|group| is_hover_target_descendant(&tree, *target, *group))
             })
             .collect::<Vec<_>>();
         drop(tree);
@@ -8896,6 +9075,7 @@ impl GpuixView {
         if self.window_bounds_subscription.is_none() {
             self.window_bounds_subscription =
                 Some(cx.observe_window_bounds(window, |view, window, _cx| {
+                    view.tree.lock().unwrap().invalidate_layout();
                     emit_window_resize(&view.window_event_callback, window)
                 }));
         }
@@ -8952,6 +9132,7 @@ impl GpuixView {
         let mut style_transition_active = false;
         let mut motion_settled = Vec::new();
         let reduce_motion = cx.reduce_motion();
+        self.rendered_reduce_motion = reduce_motion;
         let mut highlight_events = Vec::new();
 
         // Re-resolve against the tree as it is NOW. gpui calls this during
@@ -9269,7 +9450,13 @@ fn element_display_none_in_ancestry(
             return false;
         };
         let (focused, focus_visible, hover_within, focus_within, active_within) =
-            interaction_state_for_element(tree, focus_handles, interactive_style_states, id, window);
+            interaction_state_for_element(
+                tree,
+                focus_handles,
+                interactive_style_states,
+                id,
+                window,
+            );
         if element.style.as_deref().is_some_and(|style| {
             effective_display(
                 style,
@@ -9452,7 +9639,10 @@ fn resolve_hover_groups<'a>(
         active_within: active.is_some(),
         hover_paint_group: hovered.or(hover_fallback),
         active_paint_group: active.or(hovered).or(outermost),
-        focus_paint_group: focused.or(focus_visible).or(focus_within).or(hover_fallback),
+        focus_paint_group: focused
+            .or(focus_visible)
+            .or(focus_within)
+            .or(hover_fallback),
     }
 }
 
@@ -11069,7 +11259,13 @@ impl GpuixView {
             scroll_generation: virtual_list_scroll_generation(list_id),
         });
         entry.state.scroll_to_reveal_item(target_index);
-        emit_virtual_window_advance(&self.event_callback, entry, list_id, target_index, direction);
+        emit_virtual_window_advance(
+            &self.event_callback,
+            entry,
+            list_id,
+            target_index,
+            direction,
+        );
         cx.notify();
         true
     }
@@ -11324,7 +11520,8 @@ impl GpuixView {
             let focus_key = (id, "focus".to_string());
             if !self.focus_subscriptions.contains_key(&focus_key) {
                 let callback = callback.clone();
-                let subscription = cx.on_focus(&handle, window, move |_this, _window, cx| {
+                let subscription = cx.on_focus(&handle, window, move |view, _window, cx| {
+                    view.interaction_revision = view.interaction_revision.saturating_add(1);
                     let callback = callback.clone();
                     // GPUI notifies all listeners for one focus transition in
                     // subscription order. Defer focus until that listener pass
@@ -11339,7 +11536,8 @@ impl GpuixView {
             let blur_key = (id, "blur".to_string());
             if !self.focus_subscriptions.contains_key(&blur_key) {
                 let callback = callback.clone();
-                let subscription = cx.on_blur(&handle, window, move |_this, _window, _cx| {
+                let subscription = cx.on_blur(&handle, window, move |view, _window, _cx| {
+                    view.interaction_revision = view.interaction_revision.saturating_add(1);
                     emit_event_full(&callback, id, "blur", |_| {});
                 });
                 self.focus_subscriptions.insert(blur_key, subscription);
@@ -11620,6 +11818,10 @@ impl gpui::Render for GpuixView {
     ) -> impl gpui::IntoElement {
         use gpui::IntoElement;
 
+        // Image completion can race with a draw after the retained tree was
+        // built. Record the store revision before constructing GPUI elements
+        // so a completion during prepaint remains stale until the next draw.
+        self.drawn_img_image_revision = self.img_image_store.revision();
         let _record_build = RecordRenderBuild(std::time::Instant::now());
 
         window.set_window_title(&self.window_title);
@@ -11684,6 +11886,8 @@ impl gpui::Render for GpuixView {
             self.focus_element(id, reveal, window, cx);
         }
         let tree = tree_arc.lock().unwrap();
+        self.rendered_layout_revision = tree.layout_revision();
+        self.rendered_interaction_revision = self.interaction_revision;
 
         if self.focus_lost_subscription.is_none() {
             self.focus_lost_subscription = Some(cx.on_focus_lost(window, |view, window, cx| {
@@ -11719,8 +11923,10 @@ impl gpui::Render for GpuixView {
             .retain(|id, _| tree.elements.contains_key(id));
         self.virtual_lists
             .retain(|id, _| tree.elements.contains_key(id));
-        VIRTUAL_LIST_SCROLL_GENERATIONS
-            .with(|cell| cell.borrow_mut().retain(|id, _| tree.elements.contains_key(id)));
+        VIRTUAL_LIST_SCROLL_GENERATIONS.with(|cell| {
+            cell.borrow_mut()
+                .retain(|id, _| tree.elements.contains_key(id))
+        });
         self.motion_states
             .retain(|id, _| tree.elements.contains_key(id));
         self.intrinsic_probe_cache
@@ -11834,13 +12040,15 @@ impl gpui::Render for GpuixView {
                 .size_full()
                 .text_color(gpui::rgba(0xe2e2e2ff))
                 .track_focus(&self.root_focus_handle)
-                .on_mouse_move(cx.listener(|view, event: &gpui::MouseMoveEvent, _window, _cx| {
-                    let (x, y) = point_to_xy(event.position);
-                    view.last_pointer_position = Some((x, y));
-                    if view.reconcile_hover_state_at_pointer(x, y) {
-                        _cx.notify();
-                    }
-                }))
+                .on_mouse_move(
+                    cx.listener(|view, event: &gpui::MouseMoveEvent, _window, _cx| {
+                        let (x, y) = point_to_xy(event.position);
+                        view.last_pointer_position = Some((x, y));
+                        if view.reconcile_hover_state_at_pointer(x, y) {
+                            _cx.notify();
+                        }
+                    }),
+                )
                 .on_action(cx.listener(Self::focus_next_action))
                 .on_action(cx.listener(Self::focus_previous_action))
                 .on_key_down(cx.listener(|view, event: &gpui::KeyDownEvent, window, cx| {
@@ -11905,6 +12113,7 @@ impl gpui::Render for GpuixView {
                         let scale_factor = f64::from(window.scale_factor());
                         resize_view
                             .update(app, |view, _cx| {
+                                view.capture_bounds_layout();
                                 view.emit_resize_observations(scale_factor);
                             })
                             .ok();
@@ -12005,8 +12214,8 @@ fn retained_gpui_element_id(
 ) -> Option<gpui::ElementId> {
     let id = element.id;
     match element.element_type.as_str() {
-        "div" | "text" | "virtual-list" | "table" | "caption" | "thead" | "tbody"
-        | "tfoot" | "tr" | "th" | "td" => Some(gpui::ElementId::Integer(id)),
+        "div" | "text" | "virtual-list" | "table" | "caption" | "thead" | "tbody" | "tfoot"
+        | "tr" | "th" | "td" => Some(gpui::ElementId::Integer(id)),
         "img" => Some(gpui::ElementId::Name(format!("__gpuix_img_{id}").into())),
         "svg" => Some(gpui::ElementId::Name(format!("__gpuix_svg_{id}").into())),
         "input" | "textarea" => Some(gpui::ElementId::Name(format!("__gpuix_editor_{id}").into())),
@@ -12297,15 +12506,8 @@ fn build_element_inner(
     let supports_style_transitions = is_host_container_type(&element.element_type)
         || matches!(
             element.element_type.as_str(),
-            "img"
-            | "canvas"
-            | "code"
-            | "diff"
-            | "input"
-            | "textarea"
-            | "markdown"
-            | "anchored"
-    );
+            "img" | "canvas" | "code" | "diff" | "input" | "textarea" | "markdown" | "anchored"
+        );
     let transitioned_style = if !supports_style_transitions {
         // Virtual lists and custom renderers outside the supported surface
         // family receive the declared target immediately and retain no track.
@@ -12600,16 +12802,14 @@ fn build_element_inner(
         interaction.hovered,
         interaction.is_active(),
     );
-    ctx.inherited = parent_inherited
-        .clone()
-        .descend(
-            style,
-            hover_group,
-            id,
-            (focused, focus_visible, focus_within),
-            current_color,
-            font,
-        );
+    ctx.inherited = parent_inherited.clone().descend(
+        style,
+        hover_group,
+        id,
+        (focused, focus_visible, focus_within),
+        current_color,
+        font,
+    );
     ctx.inherited.accessibility_hidden |= crate::accessibility::is_hidden(element);
     ctx.inherited.text_accessibility_owned_by_role |=
         crate::accessibility::role_supports_name_from_contents(ctx.tree, element);
@@ -12642,8 +12842,7 @@ fn build_element_inner(
         // own builder meant every interaction prop on the shared `Props` type
         // (onClick, hover, focus, tabIndex) type-checked, registered a JS
         // listener, and then silently did nothing.
-        "div" | "text" | "table" | "caption" | "thead" | "tbody" | "tfoot" | "tr"
-        | "th" | "td" => {
+        "div" | "text" | "table" | "caption" | "thead" | "tbody" | "tfoot" | "tr" | "th" | "td" => {
             ctx.custom_registry.destroy(id);
             build_host_container(
                 element,
@@ -12809,10 +13008,7 @@ fn containing_block_basis(
     content_box_width(tree, parent_id?)
 }
 
-fn content_box_width(
-    tree: &crate::retained_tree::RetainedTree,
-    element_id: u64,
-) -> Option<f64> {
+fn content_box_width(tree: &crate::retained_tree::RetainedTree, element_id: u64) -> Option<f64> {
     let element = tree.elements.get(&element_id)?;
     let bounds = crate::automation::get_bounds(element_id)?;
     let basis = element
@@ -12878,7 +13074,10 @@ fn intrinsic_transition_size(
         window,
         cx,
     );
-    (measured, containing_block_basis(parent, parent_id, ctx.tree))
+    (
+        measured,
+        containing_block_basis(parent, parent_id, ctx.tree),
+    )
 }
 
 /// [`content_sized_intrinsic_axes`], widened for an explicit keyword.
@@ -12944,7 +13143,9 @@ fn content_sized_intrinsic_axes(
         height: false,
     };
     let inset = |start: Option<crate::style::LengthValue>,
-                 end: Option<crate::style::LengthValue>| start.is_some() && end.is_some();
+                 end: Option<crate::style::LengthValue>| {
+        start.is_some() && end.is_some()
+    };
     if let Some(style) = style {
         if matches!(style.position.as_deref(), Some("absolute") | Some("fixed")) {
             return IntrinsicAxes {
@@ -13544,12 +13745,8 @@ pub(crate) fn effective_group_state_style(
             "hoverWithin" if hover_within => style.hover_within.as_deref(),
             "activeWithin" if active_within => style.active_within.as_deref(),
             "groupFocus" if group_focus => style.group_focus.as_deref(),
-            "groupFocusVisible" if group_focus_visible => {
-                style.group_focus_visible.as_deref()
-            }
-            "groupFocusWithin" if group_focus_within => {
-                style.group_focus_within.as_deref()
-            }
+            "groupFocusVisible" if group_focus_visible => style.group_focus_visible.as_deref(),
+            "groupFocusWithin" if group_focus_within => style.group_focus_within.as_deref(),
             _ => None,
         };
         if let Some(overlay) = overlay {
@@ -13684,7 +13881,10 @@ mod intrinsic_state_style_tests {
         let mut merged = base.clone();
         merge_intrinsic_state_style(&mut merged, &overlay);
         assert_eq!(merged.width, base.width);
-        assert_eq!(merged.padding, Some(crate::style::LengthValue::Pixels(20.0)));
+        assert_eq!(
+            merged.padding,
+            Some(crate::style::LengthValue::Pixels(20.0))
+        );
         assert_eq!(merged.font_size, Some(18.0));
         assert!(merged.hover.is_none());
         assert!(merged.focus.is_none());
@@ -13709,7 +13909,10 @@ mod intrinsic_state_style_tests {
 
         let mut merged = base.clone();
         merge_intrinsic_state_style(&mut merged, &overlay);
-        assert_eq!(merged.padding, Some(crate::style::LengthValue::Pixels(20.0)));
+        assert_eq!(
+            merged.padding,
+            Some(crate::style::LengthValue::Pixels(20.0))
+        );
         assert_eq!(merged.padding_left, None);
         assert_eq!(merged.margin, Some(crate::style::LengthValue::Pixels(20.0)));
         assert_eq!(merged.margin_left, None);
@@ -13733,8 +13936,14 @@ mod intrinsic_state_style_tests {
 
         let mut merged = base.clone();
         merge_intrinsic_state_style(&mut merged, &overlay);
-        assert_eq!(merged.padding, Some(crate::style::LengthValue::Pixels(10.0)));
-        assert_eq!(merged.padding_left, Some(crate::style::LengthValue::Pixels(4.0)));
+        assert_eq!(
+            merged.padding,
+            Some(crate::style::LengthValue::Pixels(10.0))
+        );
+        assert_eq!(
+            merged.padding_left,
+            Some(crate::style::LengthValue::Pixels(4.0))
+        );
     }
 
     #[test]
@@ -14432,11 +14641,7 @@ fn build_virtual_list(
         crate::accessibility::AccessibleText::default(),
     );
     let surface = crate::automation::track_own_bounds_with_insets(
-        surface,
-        element.id,
-        None,
-        None,
-        box_insets,
+        surface, element.id, None, None, box_insets,
     );
     if let Some(group) = style.and_then(|style| style.resolved_hover_group.as_ref()) {
         // Keep hoverGroup on an outer surface, with the focused bounds-owning
@@ -14914,7 +15119,11 @@ fn is_descendant_or_self(tree: &RetainedTree, ancestor_id: u64, element_id: u64)
         if current == ancestor_id {
             return true;
         }
-        let Some(parent_id) = tree.elements.get(&current).and_then(|element| element.parent) else {
+        let Some(parent_id) = tree
+            .elements
+            .get(&current)
+            .and_then(|element| element.parent)
+        else {
             return false;
         };
         current = parent_id;
@@ -16307,7 +16516,7 @@ pub(crate) fn build_host_container(
                         .is_some_and(|state| state.set_hovered(is_hovered));
                 let interactive_changed = (tracks_hover || tracks_hover_group)
                     && view.set_interactive_hovered(id, is_hovered, tracks_hover_group);
-                if interactive_changed {
+                if transition_changed || interactive_changed {
                     view.interaction_revision = view.interaction_revision.saturating_add(1);
                 }
                 if transition_changed || interactive_changed {
@@ -16941,11 +17150,7 @@ mod effective_state_style_tests {
 /// Every stateful GPUI root must go through this, never `apply_styles` alone.
 /// GPUI reads the refinements from the element state behind the element's
 /// `ElementId`, so the caller must have called `.id(..)` first.
-pub(crate) fn apply_interactive_styles<E>(
-    mut el: E,
-    style: &StyleDesc,
-    focus_within: bool,
-) -> E
+pub(crate) fn apply_interactive_styles<E>(mut el: E, style: &StyleDesc, focus_within: bool) -> E
 where
     E: gpui::Styled + gpui::StatefulInteractiveElement,
 {
@@ -17585,7 +17790,10 @@ mod scrollbar_width_style_tests {
                 ..StyleDesc::default()
             },
         );
-        assert_eq!(auto.style().scrollbar_width, Some(gpui::AbsoluteLength::default()));
+        assert_eq!(
+            auto.style().scrollbar_width,
+            Some(gpui::AbsoluteLength::default())
+        );
 
         let mut none = apply_styles(
             gpui::div(),
@@ -17890,7 +18098,10 @@ fn emit_virtual_window_advance(
             target_index.saturating_sub(viewport_rows - 1),
             (target_index + 1).min(logical_count),
         ),
-        FocusDirection::Previous => (target_index, (target_index + viewport_rows).min(logical_count)),
+        FocusDirection::Previous => (
+            target_index,
+            (target_index + viewport_rows).min(logical_count),
+        ),
     };
     emit_event_full(callback, list_id, "visibleRange", |payload| {
         payload.start_index = Some(start_index as f64);

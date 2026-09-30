@@ -531,6 +531,9 @@ pub struct TestGpuixRenderer {
     /// that count for the window's lifetime, so the stats report frames drawn
     /// since this point, which is what a newly opened window would report.
     debug_frame_overlay_frame_origin: AtomicU64,
+    /// Number of GPUI draws performed synchronously inside the most recent
+    /// bounds-read N-API call.
+    bounds_read_draw_count: AtomicU64,
 }
 
 #[napi]
@@ -656,6 +659,7 @@ impl TestGpuixRenderer {
             active_pointer_origin: Mutex::new(None),
             file_drag_active: AtomicBool::new(false),
             debug_frame_overlay_frame_origin: AtomicU64::new(0),
+            bounds_read_draw_count: AtomicU64::new(0),
         })
     }
 
@@ -793,10 +797,14 @@ impl TestGpuixRenderer {
             Self::draw_if_dirty(cx, window)?;
             return Ok(());
         }
-        cx.update_window(window, |_, window, app| {
-            window.dispatch_event(event.to_platform_input(), app);
-        })
-        .map_err(|error| Error::from_reason(error.to_string()))
+        cx.set_auto_draw(false);
+        let result = cx
+            .update_window(window, |_, window, app| {
+                window.dispatch_event(event.to_platform_input(), app);
+            })
+            .map_err(|error| Error::from_reason(error.to_string()));
+        cx.set_auto_draw(true);
+        result
     }
 
     /// Draw the window only if something invalidated it since the last draw.
@@ -1492,6 +1500,72 @@ impl TestGpuixRenderer {
             })
         })?;
         self.surface_canvas_preparation_diagnostics()
+    }
+
+    fn settle_layout_for_bounds_read(
+        cx: &mut gpui::VisualTestAppContext,
+        window: gpui::AnyWindowHandle,
+        view: &gpui::Entity<GpuixView>,
+        draw_count: &AtomicU64,
+    ) -> Result<()> {
+        let view = view.clone();
+        let mut settling = false;
+        crate::renderer::settle_layout_for_bounds_read(|| {
+            // Let decoded intrinsic image sizes and other ready executor
+            // work reach the view before deciding whether retained layout is
+            // current. The old full-draw read drained these tasks as part of
+            // its settle loop.
+            Self::run_tasks_without_auto_draw(cx);
+            let stale = view.read_with(cx, |view, _cx| view.layout_is_stale());
+            let dirty = if settling {
+                cx.update_window(window, |_, window, _app| window.is_dirty())
+                    .map_err(|error| Error::from_reason(error.to_string()))?
+            } else {
+                false
+            };
+            let should_draw = stale || dirty;
+            if !should_draw {
+                return Ok(false);
+            }
+            settling = true;
+            let dirty = cx.update_window(window, |_, window, app| {
+                window.draw(app).clear(app);
+                draw_count.fetch_add(1, Ordering::Relaxed);
+                window.is_dirty()
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            Self::run_tasks_without_auto_draw(cx);
+            cx.set_auto_draw(false);
+            let dirty_after_tasks = cx
+                .update_window(window, |_, window, _| window.is_dirty())
+                .map_err(|error| Error::from_reason(error.to_string()));
+            cx.set_auto_draw(true);
+            Ok(dirty || dirty_after_tasks?)
+        })
+    }
+
+    fn read_after_layout<R>(&self, read: impl FnOnce(&GpuixView) -> R) -> Result<R> {
+        self.bounds_read_draw_count.store(0, Ordering::Relaxed);
+        let result = with_test_state(self.state_id, |cx, window, view| {
+            Self::settle_layout_for_bounds_read(
+                cx,
+                window,
+                view,
+                &self.bounds_read_draw_count,
+            )?;
+            let result = view.read_with(cx, |view, _cx| read(view));
+            Ok(result)
+        });
+        let result = result?;
+        self.surface_canvas_preparation_diagnostics()?;
+        Ok(result)
+    }
+
+    #[napi]
+    pub fn get_last_bounds_read_draw_count(&self) -> u32 {
+        self.bounds_read_draw_count
+            .load(Ordering::Relaxed)
+            .min(u64::from(u32::MAX)) as u32
     }
 
     fn surface_canvas_preparation_diagnostics(&self) -> Result<()> {
@@ -2835,18 +2909,7 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_scroll_metrics(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
         let id = to_element_id(element_id)?;
-        self.settle_for_read()?;
-        with_test_state(self.state_id, |cx, window, view| {
-            let view = view.clone();
-            let result = cx
-                .update_window(window, |_, _window, app| {
-                    view.update(app, |view, _cx| {
-                        view.scroll_metrics(id).map(|metrics| metrics.to_vec())
-                    })
-                })
-                .map_err(|e| Error::from_reason(e.to_string()))?;
-            Ok(result)
-        })
+        self.read_after_layout(|view| view.scroll_metrics(id).map(|metrics| metrics.to_vec()))
     }
 
     /// Reveal one element inside every scrollable ancestor, as
@@ -3534,8 +3597,10 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_element_bounds(&self, id: f64) -> Result<Option<crate::renderer::ElementBounds>> {
         let id = to_element_id(id)?;
-        self.settle_for_read()?;
-        Ok(crate::automation::get_bounds(id).map(crate::renderer::ElementBounds::from_painted))
+        self.read_after_layout(|view| {
+            view.bounds_after_scroll(id)
+                .map(crate::renderer::ElementBounds::from_painted)
+        })
     }
 
     #[napi]

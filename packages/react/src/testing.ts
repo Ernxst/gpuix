@@ -299,6 +299,7 @@ interface NativeTestRendererApi extends Omit<NativeRenderer, "requestFrame"> {
   cycleDebugFrameOverlay(): string
   resetDebugFrameOverlayStats(): void
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
+  getLastBoundsReadDrawCount(): number
   resetWindowState(): void
   dragSelect(x1: number, y1: number, x2: number, y2: number): void
   getSelectedText(): string | null
@@ -1167,6 +1168,11 @@ export class TestRenderer implements NativeRenderer {
   /** Override GPUI's reduced-motion policy for deterministic tests. */
   setReducedMotion(enabled: boolean): void {
     this.native.setReducedMotion(enabled)
+  }
+
+  /** Change whether native reads drain GPUI's deferred tasks, for read-path tests. */
+  setAutoDrainAsyncTasks(enabled: boolean): void {
+    this.native.setAutoDrainAsyncTasks(enabled)
   }
 
   /** Number of transition tracks retained by the offscreen native view. */
@@ -2084,6 +2090,11 @@ export class TestRenderer implements NativeRenderer {
 
   getDebugFrameOverlayStats(): DebugFrameOverlayStats {
     return this.native.getDebugFrameOverlayStats()
+  }
+
+  /** Number of draws performed by the most recent bounds or scroll metrics read. */
+  getLastBoundsReadDrawCount(): number {
+    return this.native.getLastBoundsReadDrawCount()
   }
 
   /** Capture the current Metal or DirectX frame and save it as a PNG. */

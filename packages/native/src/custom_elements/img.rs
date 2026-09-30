@@ -1531,7 +1531,10 @@ impl SharedImgImageStore {
                     .unwrap()
                     .finish_load(&request_for_task, result, completed_at);
             let store_for_update = SharedImgImageStore { state };
-            let _ = view.update(cx, move |_view, cx| {
+            let _ = view.update(cx, move |view, cx| {
+                // The decoded image can change the intrinsic size that GPUI
+                // uses for this element and its ancestors.
+                view.invalidate_layout();
                 if let Some(delay) = reload_after {
                     store_for_update.schedule_reload(request_for_task, delay, cx);
                 }

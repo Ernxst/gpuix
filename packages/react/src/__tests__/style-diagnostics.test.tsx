@@ -201,6 +201,40 @@ describeNative("style diagnostics", { timeout: 12_000 }, () => {
     expect(warn).toHaveBeenCalledTimes(1)
   })
 
+  it("checks virtual-list bounds only after layout changes", () => {
+    const testRoot = createTestRoot({ strictStyles: false })
+    const getBounds = vi.spyOn(testRoot.renderer, "getElementBounds")
+    const render = (height: number, backgroundColor: string, windowStart = 0) =>
+      testRoot.render(
+        <div style={{ height, backgroundColor, display: "flex", flexDirection: "column" }}>
+          <virtual-list estimatedItemHeight={40} style={{ flexGrow: 1, minHeight: 0 }}>
+            {Array.from({ length: 4 }, (_, index) => (
+              <div key={windowStart + index} style={{ height: 40 }} />
+            ))}
+          </virtual-list>
+        </div>,
+      )
+
+    try {
+      render(200, "red")
+      expect(getBounds).toHaveBeenCalledTimes(1)
+
+      render(200, "blue")
+      expect(getBounds).toHaveBeenCalledTimes(1)
+
+      render(250, "blue")
+      expect(getBounds).toHaveBeenCalledTimes(2)
+      const listHeight = testRoot.renderer.findByType("virtual-list")[0]!.getBoundingClientRect().height
+      expect(listHeight).toBe(250)
+      expect(getBounds).toHaveBeenCalledTimes(3)
+
+      render(250, "blue", 1)
+      expect(getBounds).toHaveBeenCalledTimes(3)
+    } finally {
+      testRoot.unmount()
+    }
+  })
+
   it("accepts touchAction as a silent native no-op", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const testRoot = createTestRoot({ strictStyles: true })

@@ -1045,6 +1045,129 @@ pub struct StyleDesc {
     pub drag_over: Option<Box<StyleDesc>>,
 }
 
+impl StyleDesc {
+    /// Whether this style has the same layout inputs as another style.
+    ///
+    /// Paint-only changes still need a GPUI frame, but they do not make the
+    /// retained element bounds stale. State selectors are compared recursively
+    /// because a hover or focus rule can itself change layout.
+    pub(crate) fn has_same_layout_as(&self, other: &Self) -> bool {
+        self.default_flex_none == other.default_flex_none
+            && self.display == other.display
+            && self.flex_direction == other.flex_direction
+            && self.flex_wrap == other.flex_wrap
+            && self.flex_grow == other.flex_grow
+            && self.flex_shrink == other.flex_shrink
+            && self.flex_basis == other.flex_basis
+            && self.align_items == other.align_items
+            && self.align_self == other.align_self
+            && self.align_content == other.align_content
+            && self.justify_content == other.justify_content
+            && self.gap == other.gap
+            && self.row_gap == other.row_gap
+            && self.column_gap == other.column_gap
+            && self.grid_template_columns == other.grid_template_columns
+            && self.grid_template_rows == other.grid_template_rows
+            && self.grid_row_start == other.grid_row_start
+            && self.grid_row_end == other.grid_row_end
+            && self.grid_column_start == other.grid_column_start
+            && self.grid_column_end == other.grid_column_end
+            && self.grid_auto_flow == other.grid_auto_flow
+            && self.grid_auto_rows == other.grid_auto_rows
+            && self.grid_auto_columns == other.grid_auto_columns
+            && self.justify_items == other.justify_items
+            && self.justify_self == other.justify_self
+            && self.width == other.width
+            && self.height == other.height
+            && self.min_width == other.min_width
+            && self.min_height == other.min_height
+            && self.max_width == other.max_width
+            && self.max_height == other.max_height
+            && self.aspect_ratio == other.aspect_ratio
+            && self.padding == other.padding
+            && self.padding_top == other.padding_top
+            && self.padding_right == other.padding_right
+            && self.padding_bottom == other.padding_bottom
+            && self.padding_left == other.padding_left
+            && self.margin == other.margin
+            && self.margin_top == other.margin_top
+            && self.margin_right == other.margin_right
+            && self.margin_bottom == other.margin_bottom
+            && self.margin_left == other.margin_left
+            && self.position == other.position
+            && self.top == other.top
+            && self.right == other.right
+            && self.bottom == other.bottom
+            && self.left == other.left
+            && self.border_width == other.border_width
+            && self.border_top_width == other.border_top_width
+            && self.border_right_width == other.border_right_width
+            && self.border_bottom_width == other.border_bottom_width
+            && self.border_left_width == other.border_left_width
+            && self.border_style == other.border_style
+            && self.font_size == other.font_size
+            && self.font_family == other.font_family
+            && self.font_weight == other.font_weight
+            && self.letter_spacing == other.letter_spacing
+            && self.font_variant_numeric == other.font_variant_numeric
+            && self.text_transform == other.text_transform
+            && self.line_height == other.line_height
+            && self.white_space == other.white_space
+            && self.text_wrap == other.text_wrap
+            && self.text_overflow == other.text_overflow
+            && self.line_clamp == other.line_clamp
+            && self.overflow == other.overflow
+            && self.overflow_x == other.overflow_x
+            && self.overflow_y == other.overflow_y
+            && self.scrollbar_width == other.scrollbar_width
+            && self.interpolate_size == other.interpolate_size
+            && state_layout_eq(&self.hover, &other.hover)
+            && state_layout_eq(&self.hover_within, &other.hover_within)
+            && state_layout_eq(&self.active, &other.active)
+            && state_layout_eq(&self.active_within, &other.active_within)
+            && state_layout_eq(&self.focus, &other.focus)
+            && state_layout_eq(&self.focus_visible, &other.focus_visible)
+            && state_layout_eq(&self.focus_within, &other.focus_within)
+            && state_layout_eq(&self.group_focus, &other.group_focus)
+            && state_layout_eq(&self.group_focus_visible, &other.group_focus_visible)
+            && state_layout_eq(&self.group_focus_within, &other.group_focus_within)
+            && state_layout_eq(&self.drag_over, &other.drag_over)
+    }
+
+    /// Whether an interaction selector can change the layout inputs from its
+    /// base style. This is checked only after an interaction revision changes,
+    /// so paint-only hover and focus states do not make bounds reads draw.
+    pub(crate) fn has_layout_affecting_state_overrides(&self) -> bool {
+        [
+            &self.hover,
+            &self.hover_within,
+            &self.active,
+            &self.active_within,
+            &self.focus,
+            &self.focus_visible,
+            &self.focus_within,
+            &self.group_focus,
+            &self.group_focus_visible,
+            &self.group_focus_within,
+            &self.drag_over,
+        ]
+        .into_iter()
+        .flatten()
+        .any(|state| {
+            !Self::default().has_same_layout_as(state)
+                || state.has_layout_affecting_state_overrides()
+        })
+    }
+}
+
+fn state_layout_eq(left: &Option<Box<StyleDesc>>, right: &Option<Box<StyleDesc>>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => left.has_same_layout_as(right),
+        _ => false,
+    }
+}
+
 /// One rejected field. The renderer adds element context when diagnostics are drained,
 /// after the rest of the batch (including `testId`) has been applied.
 #[derive(Debug, Clone, PartialEq)]
@@ -2661,7 +2784,8 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
                                     | "groupFocusVisible"
                                     | "groupFocusWithin"
                             )
-                        }) => {
+                        }) =>
+                    {
                         parsed.style.group_state_order = order
                     }
                     _ => reject(
@@ -5629,19 +5753,37 @@ mod tests {
 
         for property in properties {
             let parsed = parse_style_value(&json!({ property: "10%" }));
-            assert!(parsed.problems.is_empty(), "{property}: {:?}", parsed.problems);
+            assert!(
+                parsed.problems.is_empty(),
+                "{property}: {:?}",
+                parsed.problems
+            );
             let serialized = serde_json::to_value(parsed.style).unwrap();
             assert_eq!(serialized[property], "10%", "{property}");
 
             let pixels = parse_style_value(&json!({ property: "12px" }));
-            assert!(pixels.problems.is_empty(), "{property}: {:?}", pixels.problems);
+            assert!(
+                pixels.problems.is_empty(),
+                "{property}: {:?}",
+                pixels.problems
+            );
             let serialized = serde_json::to_value(pixels.style).unwrap();
             assert_eq!(serialized[property], 12.0, "{property}");
         }
 
-        for property in ["margin", "marginTop", "marginRight", "marginBottom", "marginLeft"] {
+        for property in [
+            "margin",
+            "marginTop",
+            "marginRight",
+            "marginBottom",
+            "marginLeft",
+        ] {
             let parsed = parse_style_value(&json!({ property: "-10%" }));
-            assert!(parsed.problems.is_empty(), "{property}: {:?}", parsed.problems);
+            assert!(
+                parsed.problems.is_empty(),
+                "{property}: {:?}",
+                parsed.problems
+            );
         }
     }
 
@@ -5666,7 +5808,11 @@ mod tests {
             assert_eq!(auto.problems.len(), 1, "{property}");
             assert_eq!(auto.problems[0].property, property);
 
-            if property != "top" && property != "right" && property != "bottom" && property != "left" {
+            if property != "top"
+                && property != "right"
+                && property != "bottom"
+                && property != "left"
+            {
                 let negative = parse_style_value(&json!({ property: "-10%" }));
                 assert_eq!(negative.problems.len(), 1, "{property}");
                 assert_eq!(negative.problems[0].property, property);
@@ -6257,7 +6403,12 @@ mod tests {
 
     #[test]
     fn z_index_rejects_values_that_are_not_signed_32_bit_integers() {
-        for value in [json!(1.5), json!("2"), json!(2147483648_i64), json!(-2147483649_i64)] {
+        for value in [
+            json!(1.5),
+            json!("2"),
+            json!(2147483648_i64),
+            json!(-2147483649_i64),
+        ] {
             let parsed = parse_style_value(&json!({ "zIndex": value }));
             assert_eq!(parsed.style.z_index, None);
             assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
