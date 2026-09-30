@@ -278,9 +278,17 @@ env var is enough; no GPUIX-internal API needed:
 import path from 'node:path'
 
 // Contents/MacOS/app -> ../Frameworks/<addon>.node
-const addonFileName = process.arch === 'arm64'
-  ? 'gpuix-native.darwin-arm64.node'
-  : 'gpuix-native.darwin-x64.node'
+let addonFileName
+switch (process.arch) {
+  case 'arm64':
+    addonFileName = 'gpuix-native.darwin-arm64.node'
+    break
+  case 'x64':
+    addonFileName = 'gpuix-native.darwin-x64.node'
+    break
+  default:
+    throw new Error(`Unsupported macOS architecture: ${process.arch}`)
+}
 
 process.env.NAPI_RS_NATIVE_LIBRARY_PATH ??= path.join(
   path.dirname(process.execPath),

@@ -28,7 +28,14 @@ const APP_ENTRY_SOURCE = path.join(ROOT, '.app-entry.generated.ts')
 // compiling on macOS for macOS, so the running process's arch is the one
 // that matters here.
 function nativeAddonFileName(): string {
-  return `gpuix-native.darwin-${process.arch === 'arm64' ? 'arm64' : 'x64'}.node`
+  switch (process.arch) {
+    case 'arm64':
+      return 'gpuix-native.darwin-arm64.node'
+    case 'x64':
+      return 'gpuix-native.darwin-x64.node'
+    default:
+      throw new Error(`Unsupported macOS architecture: ${process.arch}`)
+  }
 }
 
 function outputName(): string {
@@ -292,10 +299,9 @@ async function wrapMacApp(): Promise<void> {
   writeFileSync(path.join(APP_BUNDLE, 'Contents', 'Info.plist'), plist)
   run('touch', [APP_BUNDLE])
 
-  // Ad-hoc: there is no Developer ID certificate in this environment. This
-  // reseals Contents/_CodeSignature over the addon now sitting in
-  // Frameworks, which the earlier per-file signature alone doesn't cover.
-  run('codesign', ['--force', '--deep', '--sign', '-', APP_BUNDLE])
+  // Sign nested code before the app bundle. The app signature then seals
+  // the bundle without re-signing its nested code.
+  run('codesign', ['--force', '--sign', '-', APP_BUNDLE])
   log(`wrote ${path.relative(ROOT, APP_BUNDLE)}`)
 }
 
