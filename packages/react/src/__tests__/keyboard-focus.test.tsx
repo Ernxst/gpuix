@@ -65,6 +65,33 @@ describeNative("keyboard focus", () => {
     expect(testRoot.renderer.getActiveElement()).toBe(targetId)
   })
 
+  it("keeps Tab and AccessKit child order in tree order when zIndex reverses paint order", () => {
+    const first = React.createRef<PublicInstance>()
+    const second = React.createRef<PublicInstance>()
+    testRoot.render(
+      <div style={{ position: "relative", width: 200, height: 100 }}>
+        <div ref={first} tabIndex={0} ariaLabel="first" style={{ position: "absolute", left: 20, top: 20, zIndex: 2 }} />
+        <div ref={second} tabIndex={0} ariaLabel="second" style={{ position: "absolute", left: 30, top: 30, zIndex: 1 }} />
+      </div>
+    )
+
+    const tree = testRoot.renderer.getAccessibilityTree()
+    const labelsInTreeOrder: string[] = []
+    const visit = (id: string) => {
+      const node = tree.nodes[id]
+      if (!node) return
+      if (node.aria.label) labelsInTreeOrder.push(node.aria.label)
+      for (const child of node.children ?? []) visit(child)
+    }
+    if (tree.root) visit(tree.root)
+    expect(labelsInTreeOrder).toEqual(["GPUIX Test", "first", "second"])
+
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(testRoot.renderer.getActiveElement()).toBe(first.current!.id)
+    testRoot.renderer.simulateKeystrokes("tab")
+    expect(testRoot.renderer.getActiveElement()).toBe(second.current!.id)
+  })
+
   it("honors focus({ preventScroll: true }) like HTMLElement.focus", () => {
     const scrollerRef = React.createRef<PublicInstance>()
     const targetRef = React.createRef<PublicInstance>()

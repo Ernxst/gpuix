@@ -9030,6 +9030,7 @@ impl GpuixView {
             gpui_element_path,
             measuring: false,
             intrinsic_probe: None,
+            stacking_wrapper_suppression: 0,
         };
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
         emit_highlight_events(&callback, &highlight_events);
@@ -9340,6 +9341,9 @@ pub(crate) struct BuildCtx<'a> {
     /// measure it at: the transition's target with the intrinsic axes forced
     /// back to `auto`.
     intrinsic_probe: Option<(u64, StyleDesc)>,
+    /// Non-context descendants of a candidate-free subtree share their
+    /// ancestor's stacking slot, so only the subtree root needs a wrapper.
+    stacking_wrapper_suppression: usize,
 }
 
 /// Style properties that cascade into descendants.
@@ -11805,6 +11809,7 @@ impl gpui::Render for GpuixView {
                     gpui_element_path,
                     measuring: false,
                     intrinsic_probe: None,
+                    stacking_wrapper_suppression: 0,
                 };
                 build_element(root_id, &mut ctx, window, cx)
             }
@@ -12132,6 +12137,79 @@ mod accessibility_host_identity_tests {
 }
 
 fn build_element_with_parent_layout(
+    id: u64,
+    default_flex_none: bool,
+    ctx: &mut BuildCtx,
+    window: &mut gpui::Window,
+    cx: &mut gpui::Context<GpuixView>,
+) -> gpui::AnyElement {
+    use gpui::IntoElement;
+
+    if !ctx.tree.has_stacking_candidates() || ctx.stacking_wrapper_suppression > 0 {
+        return build_element_inner(id, default_flex_none, ctx, window, cx);
+    }
+
+    let Some(element) = ctx.tree.elements.get(&id) else {
+        return gpui::Empty.into_any_element();
+    };
+    if !ctx.tree.subtree_has_stacking_candidates(id) {
+        let source_order = retained_source_order(ctx.tree, id);
+        ctx.stacking_wrapper_suppression += 1;
+        let built = build_element_inner(id, default_flex_none, ctx, window, cx);
+        ctx.stacking_wrapper_suppression -= 1;
+        return gpui::stacking(built, source_order, 1, 0, false).into_any_element();
+    }
+    let style = element.style.as_deref();
+    let authored_position = style.and_then(|style| style.position.as_deref());
+    let positioned = matches!(authored_position, Some("relative" | "absolute" | "fixed"));
+    let flex_or_grid_item = element
+        .parent
+        .and_then(|parent| ctx.tree.elements.get(&parent))
+        .and_then(|parent| parent.style.as_deref())
+        .and_then(|style| style.display.as_deref())
+        .is_some_and(|display| matches!(display, "flex" | "grid"));
+    let specified_z_index = style.and_then(|style| style.z_index);
+    let opacity_context = style
+        .and_then(|style| style.opacity)
+        .is_some_and(|opacity| opacity < 1.0);
+    let fixed_context = authored_position == Some("fixed");
+    let z_index = specified_z_index.filter(|_| positioned || flex_or_grid_item);
+    let context = fixed_context || opacity_context || z_index.is_some();
+    let stacking_phase = if positioned && z_index.is_none() {
+        2
+    } else if z_index.is_some_and(|z_index| z_index < 0) {
+        0
+    } else if z_index.is_some_and(|z_index| z_index > 0) {
+        3
+    } else if positioned || z_index.is_some() {
+        2
+    } else {
+        1
+    };
+    let z_index = z_index.unwrap_or(0);
+    let source_order = retained_source_order(ctx.tree, id);
+    let built = build_element_inner(id, default_flex_none, ctx, window, cx);
+    gpui::stacking(built, source_order, stacking_phase, z_index, context).into_any_element()
+}
+
+fn retained_source_order(tree: &RetainedTree, id: u64) -> Vec<u32> {
+    let mut order = Vec::new();
+    let mut current = id;
+    while let Some(element) = tree.elements.get(&current) {
+        let Some(parent_id) = element.parent else {
+            break;
+        };
+        if !tree.elements.contains_key(&parent_id) {
+            break;
+        }
+        order.push(element.sibling_order.min(u32::MAX as u64) as u32);
+        current = parent_id;
+    }
+    order.reverse();
+    order
+}
+
+fn build_element_inner(
     id: u64,
     default_flex_none: bool,
     ctx: &mut BuildCtx,

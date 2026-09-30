@@ -23,6 +23,7 @@ use gpui::{
     GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId, SharedString, StyledText,
     TextLayout, TextRun, Window,
 };
+use gpui::PaintOrderKey;
 
 use super::inline::{validate_runs, StyledTextRun};
 use super::selection::{self, SelectionState};
@@ -41,6 +42,7 @@ struct RegEntry {
     key: Arc<str>,
     text: SharedString,
     layout: TextLayout,
+    paint_order: PaintOrderKey,
     /// See [`selection::RegisteredText::group`].
     group: Option<u64>,
 }
@@ -535,6 +537,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                         key: key.clone(),
                         text: text.clone(),
                         layout: layout.clone(),
+                        paint_order: window.current_paint_order_key(),
                         group,
                     })
                 });
@@ -740,7 +743,11 @@ fn registry_point(position: gpui::Point<gpui::Pixels>) -> Option<(usize, usize)>
         for (ei, entry) in reg.iter().enumerate() {
             let b = entry.layout.bounds();
             if b.contains(&position) {
-                contained = Some(ei);
+                if contained.is_none_or(|best| {
+                    reg[best].paint_order < entry.paint_order
+                }) {
+                    contained = Some(ei);
+                }
                 continue;
             }
             let dy = if position.y < b.top() {

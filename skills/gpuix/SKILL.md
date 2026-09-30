@@ -35,7 +35,7 @@ Before writing code that relies on a browser behaviour, check it in the referenc
 - A numeric `lineHeight` is a multiple of the font size, so `lineHeight: 20` is twenty lines tall; write `"20px"` for pixels.
 - `display` is `none`, `flex` or `grid`; omit it for block flow.
 - Grid templates are arrays of track objects. `boxShadow` is an object.
-- There is no `var()`, `rem`/`em`, `zIndex`, `transform`, `flex` shorthand, `margin: auto` or `box-sizing`.
+- There is no `var()`, `rem`/`em`, `transform`, `flex` shorthand, `margin: auto` or `box-sizing`.
 - A rejected field is dropped. Development builds warn in the console; production and compiled binaries drop it silently. Read the warnings.
 
 **`className` takes compiled CSS modules only.** Import `.module.css` by relative path, combine classes with `cn()` from `@gpuix/react/cn`, never with template strings or `clsx`. A string class throws in development.
@@ -55,7 +55,7 @@ Before writing code that relies on a browser behaviour, check it in the referenc
 - App shortcuts go on the single top-level element's `onKeyDown`; with several top-level children they are lost.
 - An element takes focus only with `tabIndex`, a key or focus listener, or `focusWithin`; inputs and textareas already can. `autoFocus` focuses only an element that is already focusable.
 
-**Overlays need `<anchored>`** (deferred by default, so it paints on top) or the built-in Content parts. `<anchored>` sits beside its direct parent's box, so put it inside the trigger's parent. Give it an opaque background: a translucent one lets the page show through. Absolutely positioned cards paint in tree order, and there is no `zIndex`.
+**Overlays need `<anchored>`** (deferred by default, so it paints on top) or the built-in Content parts. `<anchored>` sits beside its direct parent's box, so put it inside the trigger's parent. Give it an opaque background: a translucent one lets the page show through. `zIndex` orders positioned elements and flex/grid items that set it, without changing tree traversal, accessibility, tab or selection order. Ordinary in-flow blocks ignore it.
 
 **Tests need a real native window.** They cannot run inside an agent sandbox, so ask for an unsandboxed run first. Build `dist` before running Vitest directly. `render()` reuses one offscreen window per test file. `requestAnimationFrame` callbacks and async tasks advance only on `advanceAsyncClock`; transitions run on wall time unless you `clockPause()`. A golden can differ between a warm window and a fresh one.
 

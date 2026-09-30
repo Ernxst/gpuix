@@ -935,6 +935,7 @@ pub struct StyleDesc {
     pub margin_left: Option<LengthValue>,
 
     pub position: Option<String>,
+    pub z_index: Option<i32>,
     pub top: Option<LengthValue>,
     pub right: Option<LengthValue>,
     pub bottom: Option<LengthValue>,
@@ -2687,6 +2688,27 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
         }
         enum_field!(key, value, "display", display, ["none", "flex", "grid"]);
         enum_field!(key, value, "visibility", visibility, ["visible", "hidden"]);
+        if key == "zIndex" {
+            if prefix.is_empty() {
+                parsed.style.z_index = value.as_i64().and_then(|value| i32::try_from(value).ok());
+                if parsed.style.z_index.is_none() {
+                    reject(
+                        &mut parsed.problems,
+                        property!("zIndex"),
+                        value,
+                        "expected a signed 32-bit integer",
+                    );
+                }
+            } else {
+                reject(
+                    &mut parsed.problems,
+                    property!("zIndex"),
+                    value,
+                    "zIndex is not supported in state styles",
+                );
+            }
+            continue;
+        }
         enum_field!(
             key,
             value,
@@ -5458,6 +5480,7 @@ mod tests {
             "marginBottom": -1,
             "marginLeft": -1,
             "position": "absolute",
+            "zIndex": 3,
             "top": 1,
             "right": 1,
             "bottom": 1,
@@ -5504,6 +5527,7 @@ mod tests {
             "overflow": "visible",
             "overflowX": "hidden",
             "overflowY": "scroll",
+            "scrollbarWidth": "auto",
             "clipPath": "inset(50%)",
             "cursor": "pointer",
             "pointerEvents": "auto",
@@ -5525,6 +5549,10 @@ mod tests {
             "focus": { "borderColor": "yellow" },
             "focusVisible": { "outlineColor": "cyan" },
             "focusWithin": { "borderColor": "pink" },
+            "focusWithinGroup": "card",
+            "groupFocus": { "color": "purple" },
+            "groupFocusVisible": { "color": "navy" },
+            "groupFocusWithin": { "color": "maroon" },
             "dragOver": { "backgroundColor": "teal" }
         }"#,
         )
@@ -5543,7 +5571,13 @@ mod tests {
             .unwrap()
             .keys()
             .collect::<std::collections::BTreeSet<_>>();
-        assert_eq!(declared_keys, covered_keys);
+        assert_eq!(
+            declared_keys,
+            covered_keys,
+            "missing source keys: {:?}; unexpected source keys: {:?}",
+            declared_keys.difference(&covered_keys).collect::<Vec<_>>(),
+            covered_keys.difference(&declared_keys).collect::<Vec<_>>()
+        );
 
         // This catches the original alignSelf failure mode: a field may parse
         // and serialize correctly while never reaching any renderer branch.
@@ -6210,5 +6244,34 @@ mod tests {
         assert_eq!(parsed.style.box_shadow, None);
         assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
         assert_eq!(parsed.problems[0].property, "boxShadow.color");
+    }
+
+    #[test]
+    fn z_index_accepts_signed_integers() {
+        for (value, expected) in [(-10, -10), (0, 0), (12, 12)] {
+            let parsed = parse_style_value(&json!({ "zIndex": value }));
+            assert!(parsed.problems.is_empty(), "{:?}", parsed.problems);
+            assert_eq!(parsed.style.z_index, Some(expected));
+        }
+    }
+
+    #[test]
+    fn z_index_rejects_values_that_are_not_signed_32_bit_integers() {
+        for value in [json!(1.5), json!("2"), json!(2147483648_i64), json!(-2147483649_i64)] {
+            let parsed = parse_style_value(&json!({ "zIndex": value }));
+            assert_eq!(parsed.style.z_index, None);
+            assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
+            assert_eq!(parsed.problems[0].property, "zIndex");
+        }
+    }
+
+    #[test]
+    fn z_index_is_rejected_in_state_styles() {
+        for state in ["hover", "active", "focus"] {
+            let parsed = parse_style_value(&json!({ state: { "zIndex": 1 } }));
+            assert_eq!(parsed.style.z_index, None);
+            assert_eq!(parsed.problems.len(), 1, "{:?}", parsed.problems);
+            assert_eq!(parsed.problems[0].property, format!("{state}.zIndex"));
+        }
     }
 }
