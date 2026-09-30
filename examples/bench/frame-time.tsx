@@ -15,6 +15,17 @@ const rows = Array.from({ length: 1128 }, (_, index) => (
 function scene(width: number) {
   return (
     <div style={{ width: 640, height: 560, padding: 12, backgroundColor: '#151a23' }}>
+      <div
+        style={{
+          position: 'absolute',
+          top: 12,
+          left: 12,
+          width: 120,
+          height: 24,
+          zIndex: 1,
+          backgroundColor: '#ef4444',
+        }}
+      />
       <div style={{ width, height: 24, backgroundColor: '#fbbf24' }} />
       <div
         ref={(node) => { scrollId = node?.id }}

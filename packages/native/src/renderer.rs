@@ -12153,7 +12153,7 @@ fn build_element_with_parent_layout(
         return gpui::Empty.into_any_element();
     };
     if !ctx.tree.subtree_has_stacking_candidates(id) {
-        let source_order = retained_source_order(ctx.tree, id);
+        let source_order = ctx.tree.source_order(id);
         ctx.stacking_wrapper_suppression += 1;
         let built = build_element_inner(id, default_flex_none, ctx, window, cx);
         ctx.stacking_wrapper_suppression -= 1;
@@ -12187,26 +12187,9 @@ fn build_element_with_parent_layout(
         1
     };
     let z_index = z_index.unwrap_or(0);
-    let source_order = retained_source_order(ctx.tree, id);
+    let source_order = ctx.tree.source_order(id);
     let built = build_element_inner(id, default_flex_none, ctx, window, cx);
     gpui::stacking(built, source_order, stacking_phase, z_index, context).into_any_element()
-}
-
-fn retained_source_order(tree: &RetainedTree, id: u64) -> Vec<u32> {
-    let mut order = Vec::new();
-    let mut current = id;
-    while let Some(element) = tree.elements.get(&current) {
-        let Some(parent_id) = element.parent else {
-            break;
-        };
-        if !tree.elements.contains_key(&parent_id) {
-            break;
-        }
-        order.push(element.sibling_order.min(u32::MAX as u64) as u32);
-        current = parent_id;
-    }
-    order.reverse();
-    order
 }
 
 fn build_element_inner(
