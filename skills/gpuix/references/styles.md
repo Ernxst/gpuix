@@ -144,7 +144,8 @@ A state key holds a partial style applied while the state holds. Later entries i
 - `hover`, `active` and `dragOver` cannot set `display: "none"`; the other states can hide or reveal an element.
 - `focus` and `focusVisible` do not make an element focusable; give it `tabIndex`. `focusVisible` needs keyboard modality. `focusWithin` gives the element a focus handle without making it a Tab stop.
 - `active` also applies while a focused element is activated with Space or Enter.
-- `<virtual-list>` applies only `hoverWithin`, `focusWithin` and `activeWithin`.
+- `<virtual-list>` supports direct `focus` and `focusVisible` styles, plus
+  `hoverWithin`, `focusWithin` and `activeWithin`.
 
 `hover` remains active over descendants, including links, children with their
 own background or hover fill, and positioned children outside the ancestor's

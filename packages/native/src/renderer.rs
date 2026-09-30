@@ -14599,14 +14599,13 @@ fn build_virtual_list(
         .child(list);
     if let Some(style) = style {
         surface = apply_styles(surface, style);
+        // GPUI's List does not run the interactive hooks itself. The surface
+        // div owns focus, so install the same focus and focus-visible styles
+        // as the shared host-container builder.
+        surface = apply_focus_styles(surface, style, focus_within);
         if hover_within {
             if let Some(hover_within_style) = style.hover_within.as_deref() {
                 surface = apply_styles(surface, hover_within_style);
-            }
-        }
-        if focus_within {
-            if let Some(focus_within_style) = style.focus_within.as_deref() {
-                surface = apply_styles(surface, focus_within_style);
             }
         }
         if active_within {
