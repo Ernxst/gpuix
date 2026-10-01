@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { readFile, readdir, realpath } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 
@@ -16,6 +17,15 @@ function run(command: string, args: string[]): string {
     throw result.error ?? new Error(`${command} ${args.join(" ")} failed`);
   }
   return `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
+}
+
+async function executableIdentity(executable: string) {
+  const resolvedPath = await realpath(executable);
+  const binary = await readFile(resolvedPath);
+  return {
+    path: resolvedPath,
+    sha256: createHash("sha256").update(binary).digest("hex"),
+  };
 }
 
 function parseArgs(args: string[]) {
@@ -59,7 +69,98 @@ async function cargoConfigIdentity() {
   return configs;
 }
 
-function sdkIdentity() {
+async function windowsFxcIdentity() {
+  if (process.platform !== "win32") return null;
+
+  let selectedPath: string | undefined;
+  let source: string | undefined;
+  const configuredPath = process.env.GPUI_FXC_PATH;
+  const nativeRoot = path.join(root, "packages/native");
+
+  if (configuredPath) {
+    const resolvedConfiguredPath = path.resolve(nativeRoot, configuredPath);
+    if (existsSync(resolvedConfiguredPath)) selectedPath = resolvedConfiguredPath;
+  }
+  if (selectedPath) {
+    source = "GPUI_FXC_PATH";
+  }
+
+  if (!selectedPath) {
+    const lookup = spawnSync("where.exe", ["fxc.exe"], {
+      cwd: nativeRoot,
+      encoding: "utf8",
+      env: process.env,
+      maxBuffer: 1024 * 1024,
+    });
+    if (lookup.status === 0) {
+      selectedPath = `${lookup.stdout ?? ""}`.trim();
+      source = "PATH";
+    }
+  }
+
+  if (!selectedPath) {
+    const registry = spawnSync(
+      "reg.exe",
+      [
+        "query",
+        "HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Microsoft SDKs\\Windows\\v10.0",
+        "/v",
+        "InstallationFolder",
+      ],
+      { encoding: "utf8", env: process.env, maxBuffer: 1024 * 1024 },
+    );
+    const installFolder = `${registry.stdout ?? ""}`.match(
+      /InstallationFolder\s+REG_(?:EXPAND_)?SZ\s+(.+)\s*$/m,
+    )?.[1];
+    if (installFolder) {
+      const bin = path.join(installFolder.trim(), "bin");
+      let versions: string[] = [];
+      try {
+        versions = (await readdir(bin, { withFileTypes: true }))
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => entry.name);
+      } catch {
+        versions = [];
+      }
+      versions.sort((left, right) => {
+        const numeric = (value: string) =>
+          value.split(".").map((part) => Number(part) || 0);
+        const a = numeric(left);
+        const b = numeric(right);
+        for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+          const difference = (a[index] ?? 0) - (b[index] ?? 0);
+          if (difference !== 0) return difference;
+        }
+        return a.length - b.length;
+      });
+      const sdkArch =
+        process.arch === "x64"
+          ? "x64"
+          : process.arch === "arm64"
+            ? "arm64"
+            : undefined;
+      const newest = versions.at(-1);
+      if (newest && sdkArch) {
+        selectedPath = path.join(bin, newest, sdkArch, "fxc.exe");
+        source = "Windows SDK registry";
+      }
+    }
+  }
+
+  if (!selectedPath || !existsSync(selectedPath)) {
+    throw new Error("Could not resolve the fxc.exe that gpui_windows will use");
+  }
+
+  const resolvedPath = await realpath(path.resolve(nativeRoot, selectedPath));
+  const binary = await readFile(resolvedPath);
+  return {
+    source,
+    path: resolvedPath,
+    sha256: createHash("sha256").update(binary).digest("hex"),
+  };
+}
+
+async function sdkIdentity() {
   if (process.platform === "darwin") {
     return {
       developerDir: run("xcode-select", ["-p"]),
@@ -68,6 +169,12 @@ function sdkIdentity() {
       sdkBuild: run("xcrun", ["--sdk", "macosx", "--show-sdk-build-version"]),
       xcode: run("xcodebuild", ["-version"]),
       linker: run("clang", ["--version"]),
+      metal: await executableIdentity(
+        run("xcrun", ["--sdk", "macosx", "--find", "metal"]),
+      ),
+      metallib: await executableIdentity(
+        run("xcrun", ["--sdk", "macosx", "--find", "metallib"]),
+      ),
     };
   }
   if (process.platform === "win32") {
@@ -102,11 +209,12 @@ const context = {
   mbx: run("mbx", ["--version"]),
   bun: run("bun", ["--version"]),
   cargoConfig: await cargoConfigIdentity(),
-  sdk: sdkIdentity(),
+  sdk: await sdkIdentity(),
+  windowsFxc: await windowsFxcIdentity(),
   buildEnvironment: Object.fromEntries(
     Object.entries(process.env)
       .filter(([name]) =>
-      /^(CARGO|RUST|CC|CXX|AR|CFLAGS|CXXFLAGS|CPPFLAGS|LDFLAGS|SDKROOT|MACOSX_|IPHONEOS_|DEVELOPER_DIR|VCTOOLS|WINDOWSSDK|INCLUDE$|LIB$|PKG_CONFIG|VCPKG|ZIG|DEPLOYMENT_TARGET|NAPI_RS_)/i.test(name) &&
+        /^(CARGO|RUST|CC|CXX|AR|CFLAGS|CXXFLAGS|CPPFLAGS|LDFLAGS|SDKROOT|MACOSX_|IPHONEOS_|DEVELOPER_DIR|VCTOOLS|WINDOWSSDK|INCLUDE$|LIB$|PKG_CONFIG|VCPKG|ZIG|DEPLOYMENT_TARGET|NAPI_RS_|GPUI_FXC_PATH$)/i.test(name) &&
         !/(TOKEN|PASSWORD|SECRET|PRIVATE_KEY)/i.test(name),
       )
       .sort(([left], [right]) => left.localeCompare(right)),

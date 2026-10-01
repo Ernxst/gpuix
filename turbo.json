@@ -55,7 +55,8 @@
         "VCPKG*",
         "ZIG*",
         "DEPLOYMENT_TARGET*",
-        "NAPI_RS_*"
+        "NAPI_RS_*",
+        "GPUI_FXC_PATH"
       ]
     }
   }
