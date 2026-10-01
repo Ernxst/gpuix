@@ -132,7 +132,7 @@ import * as Combobox from "@gpuix/react/combobox"
 ```
 
 - **Root props**: generic `items` (flat, grouped or `createItems` collection), `filteredItems`, controlled/uncontrolled `value`, `inputValue`, and `open`, `onValueChange`, `onInputValueChange`, `onOpenChange`, `onItemHighlighted`, multiple selection, disabled/read-only/required, `autoHighlight`, `autoComplete`, `locale`, `filter`, `limit`, and item value/label/equality accessors. Root renders no host element.
-- **Default filter**: trimmed, locale-aware substring; prefix matches first, then `items` order. `autoComplete` controls the input's `aria-autocomplete` mode (`list` by default).
+- **Default filter**: trimmed, locale-aware substring; prefix matches first, then `items` order. Root `autoComplete` sets the browser's form autofill hint; the input uses `aria-autocomplete="list"` by default and `"none"` while read-only.
 - **Input** is a native `<input>`; it associates with Label and exposes combobox/listbox ARIA state. Click, focus and typing open the popup by default. Escape or moving focus away closes it; Up/Down and Ctrl+N/Ctrl+P move the highlight (wrapping, skipping disabled); Enter selects the highlighted item.
 - **Selection**: single mode sets the value, writes it into the input and closes; multiple mode toggles, clears the input and stays open.
 - **Popup** unmounts while closed; a press outside closes it; focus stays in the input.

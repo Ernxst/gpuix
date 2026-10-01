@@ -39,7 +39,7 @@ export function ComboboxParityFixture() {
       }}
       readOnly={false}
       required={false}
-      autoComplete="both"
+      autoComplete="email"
       locale="en"
       openOnInputClick
       autoHighlight
@@ -100,3 +100,41 @@ export function ComboboxParityFixture() {
 }
 
 void React
+
+type RootAliases = [
+  Combobox.Root.Props<number, false, Person>,
+  Combobox.Root.State,
+  Combobox.Root.Actions,
+  Combobox.Root.ChangeEventReason,
+  Combobox.Root.ChangeEventDetails,
+  Combobox.Root.HighlightEventReason,
+  Combobox.Root.HighlightEventDetails,
+]
+type PartAliases = [
+  Combobox.Label.Props, Combobox.Label.State,
+  Combobox.Value.Props, Combobox.Value.State,
+  Combobox.Input.Props, Combobox.Input.State,
+  Combobox.InputGroup.Props, Combobox.InputGroup.State,
+  Combobox.Trigger.Props, Combobox.Trigger.State,
+  Combobox.List.Props, Combobox.List.State,
+  Combobox.Status.Props, Combobox.Status.State,
+  Combobox.Portal.Props, Combobox.Portal.State,
+  Combobox.Backdrop.Props, Combobox.Backdrop.State,
+  Combobox.Positioner.Props, Combobox.Positioner.State,
+  Combobox.Popup.Props, Combobox.Popup.State,
+  Combobox.Arrow.Props, Combobox.Arrow.State,
+  Combobox.Icon.Props, Combobox.Icon.State,
+  Combobox.Group.Props, Combobox.Group.State,
+  Combobox.GroupLabel.Props, Combobox.GroupLabel.State,
+  Combobox.Item.Props, Combobox.Item.State,
+  Combobox.ItemIndicator.Props, Combobox.ItemIndicator.State,
+  Combobox.Chips.Props, Combobox.Chips.State,
+  Combobox.Chip.Props, Combobox.Chip.State,
+  Combobox.ChipRemove.Props, Combobox.ChipRemove.State,
+  Combobox.Row.Props, Combobox.Row.State,
+  Combobox.Collection.Props, Combobox.Collection.State,
+  Combobox.Empty.Props, Combobox.Empty.State,
+  Combobox.Clear.Props, Combobox.Clear.State,
+  Combobox.Separator.Props, Combobox.Separator.State,
+]
+export type ComboboxNamespaceParity = RootAliases | PartAliases

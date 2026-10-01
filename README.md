@@ -3815,7 +3815,8 @@ matching. Parts accept state functions for `className` and `style`. Combobox use
 the shared `/floating` Positioner used by Select. The input exposes the
 combobox/listbox relationship and each item exposes its selected, highlighted,
 and disabled state through ARIA and `data-*` attributes.
-The root `autoComplete` option controls `aria-autocomplete` (`list` by default),
+The root `autoComplete` option controls the browser's form autofill hint. The input
+uses `aria-autocomplete="list"` by default and `"none"` while read-only,
 and `locale` sets the default filter's string comparison locale.
 
 ```tsx

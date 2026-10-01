@@ -6,6 +6,7 @@ import React, {
   isValidElement,
   useCallback,
   useContext,
+  useEffect,
   useId,
   useMemo,
   useRef,
@@ -179,7 +180,7 @@ interface ComboboxContextValue<Value = unknown> {
   name?: string
   form?: string
   formAutoComplete?: string
-  autoComplete: "list" | "both" | "inline" | "none"
+  autoComplete: "list"
   locale?: Intl.LocalesArgument
   openOnInputClick: boolean
   multiple: boolean
@@ -192,6 +193,8 @@ interface ComboboxContextValue<Value = unknown> {
   activeIndex: number
   listId: string
   labelId: string
+  hasLabel: boolean
+  setHasLabel: React.Dispatch<React.SetStateAction<boolean>>
   inputId: string
   inputRef: React.MutableRefObject<PublicInstance | null>
   inputRefProp?: React.Ref<HTMLInputElement>
@@ -219,6 +222,8 @@ const ComboboxPositionedContext = createContext(false)
 const ComboboxGroupItemsContext = createContext<readonly unknown[] | null>(null)
 const ComboboxItemContext = createContext<{ selected: boolean } | null>(null)
 const ComboboxGroupContext = createContext<string | null>(null)
+const ComboboxChipIndexContext = createContext<number | null>(null)
+const ComboboxChipRegistryContext = createContext<((id: string, update: (index: number) => void) => () => void) | null>(null)
 
 function useComboboxContext(name: string): ComboboxContextValue {
   const context = useContext(ComboboxContext)
@@ -234,12 +239,13 @@ function getRootState(context: ComboboxContextValue, popupSide: PositionerState[
   return { ...getFieldState(context), open: context.open, disabled: context.disabled, readOnly: context.readOnly, required: context.required, popupSide, listEmpty: context.filteredItems.length === 0, placeholder: context.selectedValues.length === 0, value: context.value }
 }
 
-function changeDetails(reason: ComboboxChangeReason, event?: GpuixSyntheticEvent): ComboboxChangeEventDetails {
+function changeDetails(reason: ComboboxChangeReason, event?: GpuixSyntheticEvent, isItemPress?: boolean): ComboboxChangeEventDetails {
   let canceled = false
   let propagationAllowed = false
   return {
     reason,
     event,
+    isItemPress,
     cancel() { canceled = true },
     allowPropagation() { propagationAllowed = true },
     get isCanceled() { return canceled },
@@ -291,9 +297,8 @@ export interface ComboboxRootProps<Value, Multiple extends boolean | undefined =
   name?: string | undefined
   form?: string | undefined
   id?: string | undefined
-  autoComplete?: "list" | "both" | "inline" | "none" | undefined
+  autoComplete?: string | undefined
   locale?: Intl.LocalesArgument | undefined
-  formAutoComplete?: string | undefined
   itemToStringLabel?: ((value: Value) => string) | undefined
   itemToStringValue?: ((value: Value) => string) | undefined
   isItemEqualToValue?: ((itemValue: Value, value: Value) => boolean) | undefined
@@ -310,7 +315,7 @@ export function ComboboxRoot<Value = unknown, Multiple extends boolean | undefin
   inputValue: inputValueProp, defaultInputValue, onInputValueChange, onItemHighlighted,
   multiple = false as Multiple, filter, limit = -1, autoHighlight = false, highlightItemOnHover = true,
   openOnInputClick = true, loopFocus = true, readOnly = false, disabled = false, required = false,
-  autoComplete = "list", locale,
+  autoComplete, locale,
   itemToStringLabel = (value) => value && typeof value === "object" && "label" in value ? String((value as { label: unknown }).label ?? "") : String(value ?? ""),
   itemToStringValue = (value) => value && typeof value === "object" && "value" in value ? String((value as { value: unknown }).value ?? "") : String(value ?? ""),
   isItemEqualToValue = Object.is, inputRef: inputRefProp, id, ...props
@@ -320,6 +325,7 @@ export function ComboboxRoot<Value = unknown, Multiple extends boolean | undefin
   const generatedListId = useId()
   const listId = id ? `${id}-popup` : generatedListId
   const generatedLabelId = useId()
+  const [hasLabel, setHasLabel] = useState(false)
   const generatedInputId = id ?? `combobox-input-${listId}`
   const collection = itemsProp && !Array.isArray(itemsProp) ? itemsProp as unknown as ComboboxItemCollectionData<Item, Value> : null
   const initialInputValue = defaultValue == null || multiple
@@ -388,21 +394,23 @@ export function ComboboxRoot<Value = unknown, Multiple extends boolean | undefin
     }
     if (!next && inputRef.current) renderer?.focusElement?.(inputRef.current.id)
   }
-  const setInputValue = (next: string, reason: ComboboxChangeReason = "input-change", event?: GpuixSyntheticEvent) => {
-    const details = changeDetails(reason, event)
+  const setInputValue = (next: string, reason: ComboboxChangeReason = "input-change", event?: GpuixSyntheticEvent, isItemPress?: boolean) => {
+    const details = changeDetails(reason, event, isItemPress)
     onInputValueChange?.(next, details)
-    if (details.isCanceled) return
+    if (details.isCanceled) return false
     setInputValueState(next)
     if (autoHighlight && next) {
       const first = flatItems.filter((item) => filteredItemsProp || matchesItem(item, next.trim())).slice(0, limit >= 0 ? limit : undefined).find((item) => !disabledFor(item))
       setActiveValue(first === undefined ? undefined : itemToValue(first))
     }
     if (!disabled && !readOnly) setOpen(true, "input-press", event)
+    return true
   }
   const setValue = (next: Value | Value[] | null, reason: ComboboxChangeReason = "none", event?: GpuixSyntheticEvent) => {
     const details = changeDetails(reason, event)
     onValueChange?.(next as ComboboxValue<Value, Multiple>, details)
     if (!details.isCanceled) setValueState(next as ComboboxValue<Value, Multiple>)
+    return !details.isCanceled
   }
   const setActive = (next: Value | undefined, reason: ComboboxHighlightEventReason = "none", event?: GpuixSyntheticEvent) => {
     const index = next === undefined ? -1 : filteredItems.findIndex((item) => isItemEqualToValue(itemToValue(item), next))
@@ -425,10 +433,11 @@ export function ComboboxRoot<Value = unknown, Multiple extends boolean | undefin
         ? selectedValues.filter((item) => !isItemEqualToValue(item, selected))
         : [...selectedValues, selected])
       : selected
-    setValue(next as Value | Value[] | null, "item-press", event)
-    if (multiple) setInputValueState("")
-    else {
-      setInputValueState(itemToLabel(selected))
+    if (!setValue(next as Value | Value[] | null, "item-press", event)) return
+    if (multiple) {
+      if (inputValue) setInputValue("", "input-clear", event, true)
+    } else {
+      if (!setInputValue(itemToLabel(selected), "item-press", event, true)) return
       setOpen(false, "item-press", event)
     }
   }
@@ -445,10 +454,10 @@ export function ComboboxRoot<Value = unknown, Multiple extends boolean | undefin
   }, [])
   const itemToLabel = labelFor
   const context: ComboboxContextValue<Value> = {
-    open, disabled, readOnly, required, ...fieldState, setFocused, setTouched, name: props.name, form: props.form, autoComplete, locale,
-  formAutoComplete: props.formAutoComplete, openOnInputClick, multiple: multiple === true, value: value as Value | Value[] | null,
+    open, disabled, readOnly, required, ...fieldState, setFocused, setTouched, name: props.name, form: props.form, autoComplete: "list", locale,
+    formAutoComplete: autoComplete, openOnInputClick, multiple: multiple === true, value: value as Value | Value[] | null,
     inputValue: String(inputValue ?? ""), items: flatItems, filteredItems, selectedValues,
-    activeValue, activeIndex, listId, labelId: generatedLabelId, inputId: generatedInputId, inputRef, inputRefProp,
+    activeValue, activeIndex, listId, labelId: generatedLabelId, hasLabel, setHasLabel, inputId: generatedInputId, inputRef, inputRefProp,
     itemRecords: records.current, itemToValue, itemToLabel, isEqual: isItemEqualToValue, matchesItem,
     setOpen, setInputValue, setValue, setActive, moveActive, select, registerItem,
     isTopDismissLayer: dismiss, filter: (filter ?? null) as ComboboxContextValue<Value>["filter"], itemToStringLabel, autoHighlight, highlightItemOnHover,
@@ -458,7 +467,7 @@ export function ComboboxRoot<Value = unknown, Multiple extends boolean | undefin
       <DismissLayerScope>
         {children}
         {props.name && selectedValues.map((selected, index) => (
-          <input key={`${String(selected)}-${index}`} type="hidden" name={props.name} form={props.form} autoComplete={props.formAutoComplete} value={itemToStringValue(selected)} />
+          <input key={`${String(selected)}-${index}`} type="hidden" name={props.name} form={props.form} autoComplete={autoComplete} value={itemToStringValue(selected)} />
         ))}
       </DismissLayerScope>
     </ComboboxContext.Provider>
@@ -490,7 +499,7 @@ export const ComboboxInput = forwardRef<PublicInstance, ComboboxInputProps>(func
   const positioner = usePositionerState()
   const disabled = disabledProp ?? context.disabled
   const state = { ...getRootState(context, positioner?.side ?? null), disabled, placeholder: context.value === null || context.value === undefined }
-  const resolved = { ...props, ...stateProps({ render, className, style }, state), ref: (instance: PublicInstance | null) => { context.inputRef.current = instance; const passedRef = context.inputRefProp; if (typeof context.inputRefProp === "function") context.inputRefProp(instance as unknown as HTMLInputElement | null); else if (context.inputRefProp) context.inputRefProp.current = instance as unknown as HTMLInputElement | null; setRefs(instance, ref) }, value: context.inputValue, name: props.name, form: props.form ?? context.form, required: props.required ?? context.required, disabled, readOnly: context.readOnly, role: "combobox", ariaLabelledBy: props.ariaLabelledBy ?? props["aria-labelledby"] ?? context.labelId, ariaExpanded: context.open, ariaControls: context.open ? context.listId : undefined, ariaAutoComplete: context.readOnly ? "none" : context.autoComplete, ariaHasPopup: "listbox", ariaActiveDescendant: context.activeIndex >= 0 ? `${context.listId}-item-${context.activeIndex}` : undefined, id: props.id ?? context.inputId, "data-popup-open": context.open ? "" : undefined, "data-disabled": disabled ? "" : undefined, "data-readonly": context.readOnly ? "" : undefined, "data-required": context.required ? "" : undefined, "data-popup-side": positioner?.side ?? undefined, "data-list-empty": context.filteredItems.length === 0 ? "" : undefined, "data-placeholder": state.placeholder ? "" : undefined }
+  const resolved = { ...props, ...stateProps({ render, className, style }, state), ref: (instance: PublicInstance | null) => { context.inputRef.current = instance; const passedRef = context.inputRefProp; if (typeof context.inputRefProp === "function") context.inputRefProp(instance as unknown as HTMLInputElement | null); else if (context.inputRefProp) context.inputRefProp.current = instance as unknown as HTMLInputElement | null; setRefs(instance, ref) }, value: context.inputValue, name: props.name, form: props.form ?? context.form, required: props.required ?? context.required, autoComplete: "off", disabled, readOnly: context.readOnly, role: "combobox", ariaLabelledBy: props.ariaLabelledBy ?? props["aria-labelledby"] ?? (context.hasLabel && !props["aria-label"] && !props.ariaLabel ? context.labelId : undefined), ariaExpanded: context.open, ariaControls: context.open ? context.listId : undefined, ariaAutoComplete: context.readOnly ? "none" : context.autoComplete, ariaHasPopup: "listbox", ariaActiveDescendant: context.activeIndex >= 0 ? `${context.listId}-item-${context.activeIndex}` : undefined, id: props.id ?? context.inputId, "data-popup-open": context.open ? "" : undefined, "data-disabled": disabled ? "" : undefined, "data-readonly": context.readOnly ? "" : undefined, "data-required": context.required ? "" : undefined, "data-popup-side": positioner?.side ?? undefined, "data-list-empty": context.filteredItems.length === 0 ? "" : undefined, "data-placeholder": state.placeholder ? "" : undefined }
   const inputProps = {
     ...resolved,
     onChange: (event: GpuixChangeEvent) => { onChange?.(event); context.setInputValue(event.value ?? "", "input-change", event) },
@@ -586,8 +595,8 @@ export interface ComboboxCollectionProps<Item = any> { children: (item: Item, in
 export function ComboboxCollection<Item = any>({ children }: ComboboxCollectionProps<Item>): ReactElement {
   const context = useComboboxContext("Combobox.Collection")
   const groupItems = useContext(ComboboxGroupItemsContext)
-  const items = groupItems === null ? context.filteredItems : groupItems.filter((item) => context.matchesItem(item, context.inputValue))
-  return <>{items.map((item, index) => children(item as Item, index))}</>
+  const items = groupItems === null ? context.filteredItems : context.filteredItems.filter((item) => groupItems.includes(item))
+  return <>{items.map((item) => children(item as Item, context.filteredItems.indexOf(item)))}</>
 }
 
 export interface ComboboxGroupProps extends PartProps<Record<string, never>, "children"> { items?: readonly unknown[] | undefined; children?: ReactNode }
@@ -620,6 +629,7 @@ function basicPart<State>(name: string, tag: string, state: (context: ComboboxCo
 
 export const ComboboxLabel = forwardRef<PublicInstance, ComboboxLabelProps>(function ComboboxLabel({ render, className, style, children, ...props }, ref) {
   const context = useComboboxContext("Combobox.Label")
+  useEffect(() => { context.setHasLabel(true); return () => context.setHasLabel(false) }, [context.setHasLabel])
   const state = getRootState(context)
   return renderPart("label", render, { ...stateProps({ render, className, style }, state), ...props, ref, id: props.id ?? context.labelId, htmlFor: context.inputId, "data-disabled": context.disabled ? "" : undefined, "data-required": context.required ? "" : undefined } as Props, children, state, ref) as ReactElement
 })
@@ -660,8 +670,26 @@ export const ComboboxItemIndicator = forwardRef<PublicInstance, ComboboxItemIndi
   if (!state.selected && !keepMounted) return null
   return renderPart("span", render, { ...stateProps({ render, className, style }, state), ...props, ref, "data-selected": state.selected ? "" : undefined } as Props, children, state, ref) as ReactElement
 })
-export const ComboboxChips = basicPart("Combobox.Chips", "div", () => ({}))
-export const ComboboxChip = basicPart("Combobox.Chip", "div", (context) => ({ disabled: context.disabled }), (context) => ({ "data-disabled": context.disabled ? "" : undefined }))
+export const ComboboxChips = forwardRef<PublicInstance, ComboboxChipsProps>(function ComboboxChips({ render, className, style, children, ...props }, ref) {
+  const context = useComboboxContext("Combobox.Chips")
+  const chips = useRef(new Map<string, (index: number) => void>())
+  const register = useCallback((id: string, update: (index: number) => void) => {
+    chips.current.set(id, update)
+    const sync = () => Array.from(chips.current.values()).forEach((notify, index) => notify(index))
+    sync()
+    return () => { chips.current.delete(id); sync() }
+  }, [])
+  return <ComboboxChipRegistryContext.Provider value={register}>{renderPart("div", render, { ...stateProps({ render, className, style }, {}), ...props, ref } as Props, children, {}, ref) as ReactElement}</ComboboxChipRegistryContext.Provider>
+})
+export const ComboboxChip = forwardRef<PublicInstance, ComboboxChipProps>(function ComboboxChip({ render, className, style, children, ...props }, ref) {
+  const context = useComboboxContext("Combobox.Chip")
+  const register = useContext(ComboboxChipRegistryContext)
+  const id = useId()
+  const [index, setIndex] = useState(-1)
+  useEffect(() => register?.(id, setIndex), [register, id])
+  const state = { disabled: context.disabled }
+  return <ComboboxChipIndexContext.Provider value={index}>{renderPart("div", render, { ...stateProps({ render, className, style }, state), ...props, ref, "data-disabled": state.disabled ? "" : undefined } as Props, children, state, ref) as ReactElement}</ComboboxChipIndexContext.Provider>
+})
 export const ComboboxChipRemove = basicPart("Combobox.ChipRemove", "button", (context) => ({ disabled: context.disabled }), (context) => ({ type: "button", disabled: context.disabled, "data-disabled": context.disabled ? "" : undefined }))
 export const ComboboxClear = forwardRef<PublicInstance, ComboboxClearProps>(function ComboboxClear({ render, className, style, disabled: disabledProp, keepMounted: _keepMounted, onClick, children, ...props }, ref) {
   const context = useComboboxContext("Combobox.Clear")
@@ -672,15 +700,20 @@ export const ComboboxClear = forwardRef<PublicInstance, ComboboxClearProps>(func
 
 export const ComboboxChipRemoveButton = forwardRef<PublicInstance, ComboboxChipRemoveProps>(function ComboboxChipRemove({ render, className, style, onClick, children, ...props }, ref) {
   const context = useComboboxContext("Combobox.ChipRemove")
+  const index = useContext(ComboboxChipIndexContext)
   const state = { disabled: context.disabled }
-  return renderPart("button", render, { ...stateProps({ render, className, style }, state), ...props, ref, type: "button", disabled: state.disabled, onClick: (event: GpuixMouseEvent) => { onClick?.(event); if (!event.defaultPrevented && !state.disabled) context.setValue(context.selectedValues.slice(0, -1), "chip-remove-press", event) } } as Props, children, state, ref) as ReactElement
+  return renderPart("button", render, { ...stateProps({ render, className, style }, state), ...props, ref, type: "button", disabled: state.disabled, onClick: (event: GpuixMouseEvent) => { onClick?.(event); if (!event.defaultPrevented && !state.disabled && index !== null && index >= 0) context.setValue(context.selectedValues.filter((_, selectedIndex) => selectedIndex !== index), "chip-remove-press", event) } } as Props, children, state, ref) as ReactElement
 })
 
 export const ComboboxScrollUpArrow = basicPart("Combobox.ScrollUpArrow", "div", () => ({}))
 export const ComboboxScrollDownArrow = basicPart("Combobox.ScrollDownArrow", "div", () => ({}))
 export const ComboboxInputGroupField = ComboboxInputGroup
 
-export const Combobox = Object.assign(ComboboxRoot, {
+export function Combobox<Value = unknown, Multiple extends boolean | undefined = false, Item = Value>(props: ComboboxRootProps<Value, Multiple, Item>): ReactElement {
+  return <ComboboxRoot {...props} />
+}
+
+Object.assign(Combobox, {
   Root: ComboboxRoot,
   InputGroup: ComboboxInputGroup,
   Label: ComboboxLabel,
@@ -744,4 +777,70 @@ export {
   ComboboxStatus as Status,
   ComboboxCollection as Collection,
   useFilteredComboboxItems as useFilteredItems,
+}
+
+export namespace ComboboxRoot {
+  export type Props<Value = unknown, Multiple extends boolean | undefined = false, Item = Value> = ComboboxRootProps<Value, Multiple, Item>
+  export type State = ComboboxRootState
+  export type Actions = { unmount: () => void }
+  export type ChangeEventReason = ComboboxChangeReason
+  export type ChangeEventDetails = ComboboxChangeEventDetails
+  export type HighlightEventReason = ComboboxHighlightEventReason
+  export type HighlightEventDetails = ComboboxHighlightEventDetails
+}
+export namespace ComboboxLabel { export type Props = ComboboxLabelProps; export type State = ComboboxRootState }
+export namespace ComboboxValue { export type Props = ComboboxValueProps; export type State = Record<string, never> }
+export namespace ComboboxInput { export type Props = ComboboxInputProps; export type State = ComboboxInputState }
+export namespace ComboboxInputGroup { export type Props = ComboboxInputGroupProps; export type State = ComboboxRootState }
+export namespace ComboboxTrigger { export type Props = ComboboxTriggerProps; export type State = ComboboxTriggerState }
+export namespace ComboboxList { export type Props = ComboboxListProps; export type State = ComboboxListState }
+export namespace ComboboxStatus { export type Props = ComboboxStatusProps; export type State = Record<string, never> }
+export namespace ComboboxPortal { export type Props = ComboboxPortalProps; export type State = Record<string, never> }
+export namespace ComboboxBackdrop { export type Props = ComboboxBackdropProps; export type State = { open: boolean; transitionStatus: "starting" | "ending" | "idle" } }
+export namespace ComboboxPositioner { export type Props = ComboboxPositionerProps; export type State = ComboboxPositionerState }
+export namespace ComboboxPopup { export type Props = ComboboxPopupProps; export type State = ComboboxPopupState }
+export namespace ComboboxArrow { export type Props = ComboboxArrowProps; export type State = { open: boolean; side: PositionerState["side"]; align: PositionerState["align"]; uncentered: boolean } }
+export namespace ComboboxIcon { export type Props = ComboboxIconProps; export type State = Record<string, never> }
+export namespace ComboboxGroup { export type Props = ComboboxGroupProps; export type State = Record<string, never> }
+export namespace ComboboxGroupLabel { export type Props = ComboboxGroupLabelProps; export type State = Record<string, never> }
+export namespace ComboboxItem { export type Props<Value = unknown> = ComboboxItemProps<Value>; export type State = ComboboxItemState }
+export namespace ComboboxItemIndicator { export type Props = ComboboxItemIndicatorProps; export type State = { selected: boolean; transitionStatus: "starting" | "ending" | "idle" } }
+export namespace ComboboxChips { export type Props = ComboboxChipsProps; export type State = Record<string, never> }
+export namespace ComboboxChip { export type Props = ComboboxChipProps; export type State = { disabled: boolean } }
+export namespace ComboboxChipRemoveButton { export type Props = ComboboxChipRemoveProps; export type State = { disabled: boolean } }
+export namespace ComboboxRow { export type Props = ComboboxRowProps; export type State = Record<string, never> }
+export namespace ComboboxCollection { export type Props<Item = unknown> = ComboboxCollectionProps<Item>; export type State = Record<string, never> }
+export namespace ComboboxEmpty { export type Props = ComboboxEmptyProps; export type State = Record<string, never> }
+export namespace ComboboxClear { export type Props = ComboboxClearProps; export type State = { open: boolean; disabled: boolean; visible: boolean; transitionStatus: "starting" | "ending" | "idle" } }
+export namespace ComboboxSeparator { export type Props = ComboboxSeparatorProps; export type State = { orientation: "horizontal" | "vertical" } }
+export namespace Combobox {
+  export import Root = ComboboxRoot
+  export import Label = ComboboxLabel
+  export import Value = ComboboxValue
+  export import Input = ComboboxInput
+  export import InputGroup = ComboboxInputGroup
+  export import Trigger = ComboboxTrigger
+  export import List = ComboboxList
+  export import Status = ComboboxStatus
+  export import Portal = ComboboxPortal
+  export import Backdrop = ComboboxBackdrop
+  export import Positioner = ComboboxPositioner
+  export import Popup = ComboboxPopup
+  export import Arrow = ComboboxArrow
+  export import Icon = ComboboxIcon
+  export import Group = ComboboxGroup
+  export import GroupLabel = ComboboxGroupLabel
+  export import Item = ComboboxItem
+  export import ItemIndicator = ComboboxItemIndicator
+  export import Chips = ComboboxChips
+  export import Chip = ComboboxChip
+  export import ChipRemove = ComboboxChipRemoveButton
+  export import Row = ComboboxRow
+  export import Collection = ComboboxCollection
+  export import Empty = ComboboxEmpty
+  export import Clear = ComboboxClear
+  export import Separator = ComboboxSeparator
+  export const createItems = createComboboxItems
+  export const useFilter = useComboboxFilter
+  export const useFilteredItems = useFilteredComboboxItems
 }
