@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { access, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises"
+import { access, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
@@ -426,16 +426,17 @@ test("Bun builds native CSS modules and receives GPUIX build defaults", async ()
 
   try {
     const entry = path.join(fixture, "entry.ts")
+    await mkdir(path.join(fixture, "src/styles"), { recursive: true })
     await writeFile(entry, 'import styles from "./panel.module.css"\nexport default styles.panel\n')
     // `gpuix()` takes no PostCSS plugins, so imported tokens and `var()` only
     // compile here if the transform carries them by default.
     await writeFile(
-      path.join(fixture, "tokens.css"),
+      path.join(fixture, "src/styles/tokens.css"),
       ":root {\n  --panel-band: #123456;\n  --panel-space: 4px;\n}\n",
     )
     await writeFile(
       path.join(fixture, "panel.module.css"),
-      '@import "./tokens.css";\n\n.panel { background-color: var(--panel-band); padding: var(--panel-space); }\n',
+      '@import "./src/styles/tokens.css";\n\n.panel { background-color: var(--panel-band); padding: var(--panel-space); }\n',
     )
 
     const result = await Bun.build({
@@ -494,25 +495,42 @@ test("Bun dev plugin loads native CSS modules at runtime", async () => {
 
   try {
     const entry = path.join(fixture, "entry.ts")
+    await mkdir(path.join(fixture, "src/styles"), { recursive: true })
+    await writeFile(
+      path.join(fixture, "package.json"),
+      JSON.stringify({ imports: { "#styles/*": "./src/styles/*" } }),
+    )
+    const exportedPackage = path.join(fixture, "node_modules/style-package")
+    await mkdir(exportedPackage, { recursive: true })
+    await writeFile(
+      path.join(exportedPackage, "package.json"),
+      JSON.stringify({ name: "style-package", exports: { "./card.module.css": "./card.module.css" } }),
+    )
+    await writeFile(path.join(exportedPackage, "card.module.css"), ".card { color: green; }\n")
     // Imported tokens and `var()`, so the fixture fails without the default
     // PostCSS plugins the preload entry has no way to be handed.
     await writeFile(
-      path.join(fixture, "tokens.css"),
+      path.join(fixture, "src/styles/tokens.css"),
       ":root {\n  --panel-ink: #123456;\n  --panel-space: 4px;\n}\n",
     )
     await writeFile(
-      path.join(fixture, "panel.module.css"),
+      path.join(fixture, "src/styles/panel.module.css"),
       '@import "./tokens.css";\n\n.panel { color: var(--panel-ink); padding: var(--panel-space); }\n',
     )
     await writeFile(
       entry,
-      'import styles from "./panel.module.css"\nexport default styles.panel\n',
+      'import relative from "./src/styles/panel.module.css"\nimport aliased from "#styles/panel.module.css"\nimport exported from "style-package/card.module.css"\nexport default { relative: relative.panel, aliased: aliased.panel, exported: exported.card }\n',
     )
 
     Bun.plugin(gpuixDev())
     const result = await import(pathToFileURL(entry).href)
 
-    expect(result.default).toEqual({
+    expect(result.default.aliased).toEqual(result.default.relative)
+    expect(result.default.exported).toEqual({ color: "green" })
+    expect(Object.getOwnPropertySymbols(result.default.exported)).toContain(
+      Symbol.for("gpuix.compiledStyle"),
+    )
+    expect(result.default.relative).toEqual({
       color: "#123456",
       paddingTop: 4,
       paddingRight: 4,
@@ -520,13 +538,73 @@ test("Bun dev plugin loads native CSS modules at runtime", async () => {
       paddingLeft: 4,
     })
     expect(
-      Object.getOwnPropertySymbols(result.default).includes(Symbol.for("gpuix.compiledStyle")),
+      Object.getOwnPropertySymbols(result.default.relative).includes(Symbol.for("gpuix.compiledStyle")),
     ).toBe(true)
   } finally {
     Bun.plugin.clearAll()
     await rm(fixture, { recursive: true, force: true })
   }
 })
+
+test("Bun dev reload behaviour matches for relative and package-import CSS modules", async () => {
+  const packageRoot = fileURLToPath(new URL("../", import.meta.url))
+  const preload = path.join(packageRoot, "dist/preload.js")
+
+  for (const mode of ["--hot", "--watch"] as const) {
+    const outcomes: string[] = []
+
+    for (const importPath of ["relative", "package"] as const) {
+      const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-bun-css-watch-parity-"))
+      const output = path.join(fixture, "style.json")
+      let child: ReturnType<typeof Bun.spawn> | undefined
+
+      try {
+        await mkdir(path.join(fixture, "src/styles"), { recursive: true })
+        await writeFile(
+          path.join(fixture, "package.json"),
+          JSON.stringify({ imports: { "#styles/*": "./src/styles/*" } }),
+        )
+        const modulePath = path.join(fixture, "src/styles/card.module.css")
+        await writeFile(modulePath, ".card { color: red; }\n")
+        const specifier = importPath === "relative"
+          ? "./src/styles/card.module.css"
+          : "#styles/card.module.css"
+        await writeFile(
+          path.join(fixture, "entry.ts"),
+          `import styles from ${JSON.stringify(specifier)}\n` +
+            `await Bun.write(${JSON.stringify(output)}, JSON.stringify(styles.card))\n` +
+            "setInterval(() => {}, 1000)\n",
+        )
+
+        child = Bun.spawn([process.execPath, mode, "--preload", preload, path.join(fixture, "entry.ts")], {
+          stdout: "ignore",
+          stderr: "pipe",
+        })
+        const waitFor = async (expected: string) => {
+          const deadline = Date.now() + 8_000
+          while (Date.now() < deadline) {
+            if ((await readFile(output, "utf8").catch(() => "")) === expected) return
+            if (child!.exitCode !== null) throw new Error(`Bun ${mode} exited with ${child!.exitCode}`)
+            await new Promise((resolve) => setTimeout(resolve, 40))
+          }
+          throw new Error(`Bun ${mode} did not write ${expected}`)
+        }
+
+        await waitFor('{"color":"red"}')
+        await writeFile(modulePath, ".card { color: blue; }\n")
+        await new Promise((resolve) => setTimeout(resolve, 1_200))
+        outcomes.push(await readFile(output, "utf8"))
+      } finally {
+        child?.kill()
+        if (child) await child.exited
+        await rm(fixture, { recursive: true, force: true })
+      }
+    }
+
+    expect(outcomes).toEqual(['{"color":"red"}', '{"color":"red"}'])
+    expect(outcomes[1], `${mode} relative=${outcomes[0]} package=${outcomes[1]}`).toBe(outcomes[0])
+  }
+}, 30_000)
 
 test("Bun preload entry loads native CSS modules at runtime", async () => {
   const fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-bun-preload-css-module-"))
@@ -544,15 +622,15 @@ test("Bun preload entry loads native CSS modules at runtime", async () => {
     const packageLink = path.join(fixture, "node_modules/@gpuix/plugins")
     await mkdir(path.dirname(packageLink), { recursive: true })
     await symlink(packageRoot, packageLink, "dir")
-    await mkdir(path.join(fixture, "src/components"), { recursive: true })
     await mkdir(path.join(fixture, "src/styles"), { recursive: true })
+    await mkdir(path.join(fixture, "src/components"), { recursive: true })
     const themeDir = path.join(fixture, "node_modules/@fixture/theme")
     const stylePackageDir = path.join(fixture, "node_modules/style-package")
     await mkdir(themeDir, { recursive: true })
     await mkdir(stylePackageDir, { recursive: true })
     await writeFile(
       path.join(fixture, "package.json"),
-      JSON.stringify({ imports: { "#styles/tokens.css": "./src/styles/tokens.css" } }),
+      JSON.stringify({ imports: { "#styles/*": "./src/styles/*" } }),
     )
     await writeFile(path.join(fixture, "src/styles/tokens.css"), ":root { --panel-ink: #123456; }")
     await writeFile(
@@ -567,6 +645,19 @@ test("Bun preload entry loads native CSS modules at runtime", async () => {
     await writeFile(path.join(stylePackageDir, "index.js"), "export default 'not CSS'")
     await writeFile(path.join(stylePackageDir, "tokens.css"), ":root { --panel-band: #abcdef; }")
     await writeFile(
+      path.join(stylePackageDir, "card.module.css"),
+      ".card { color: green; }\n",
+    )
+    await writeFile(
+      path.join(stylePackageDir, "package.json"),
+      JSON.stringify({
+        name: "style-package",
+        main: "index.js",
+        style: "tokens.css",
+        exports: { "./card.module.css": "./card.module.css" },
+      }),
+    )
+    await writeFile(
       path.join(fixture, "src/components/plate.module.css"),
       ".plate { font-size: 11px; }\n",
     )
@@ -574,12 +665,12 @@ test("Bun preload entry loads native CSS modules at runtime", async () => {
     // Imported tokens and `var()`, so the fixture fails without the default
     // PostCSS plugins the preload entry has no way to be handed.
     await writeFile(
-      path.join(fixture, "src/components/panel.module.css"),
-      '@import "#styles/tokens.css";\n@import "@fixture/theme";\n@import "style-package";\n.panel { composes: plate from "./plate.module.css"; color: var(--panel-ink); background-color: var(--panel-band); padding: var(--panel-space); line-height: 1.5; }\n',
+      path.join(fixture, "src/styles/panel.module.css"),
+      '@import "#styles/tokens.css";\n@import "@fixture/theme";\n@import "style-package";\n.panel { composes: plate from "../components/plate.module.css"; color: var(--panel-ink); background-color: var(--panel-band); padding: var(--panel-space); line-height: 1.5; }\n',
     )
     await writeFile(
       entry,
-      'import styles from "./src/components/panel.module.css"\nconsole.log(JSON.stringify({ style: styles.panel, compiled: Object.getOwnPropertySymbols(styles.panel).includes(Symbol.for("gpuix.compiledStyle")) }))\n',
+      'import relative from "./src/styles/panel.module.css"\nimport aliased from "#styles/panel.module.css"\nimport exported from "style-package/card.module.css"\nconsole.log(JSON.stringify({ relative: relative.panel, aliased: aliased.panel, exported: exported.card, compiled: Object.getOwnPropertySymbols(aliased.panel).includes(Symbol.for("gpuix.compiledStyle")) }))\n',
     )
 
     const result = Bun.spawnSync([process.execPath, "--preload", "@gpuix/plugins/preload", entry], {
@@ -590,10 +681,14 @@ test("Bun preload entry loads native CSS modules at runtime", async () => {
 
     expect(result.exitCode, result.stderr.toString()).toBe(0)
     const loaded = JSON.parse(result.stdout.toString()) as {
-      style: Record<string, unknown>
+      relative: Record<string, unknown>
+      aliased: Record<string, unknown>
+      exported: Record<string, unknown>
       compiled: boolean
     }
-    expect(loaded.style).toEqual({
+    expect(loaded.aliased).toEqual(loaded.relative)
+    expect(loaded.exported).toEqual({ color: "green" })
+    expect(loaded.relative).toEqual({
       color: "#123456",
       backgroundColor: "#abcdef",
       fontSize: 11,

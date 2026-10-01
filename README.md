@@ -1428,8 +1428,12 @@ resolves it to a class name, and a GPUIX build compiles the file into the
 styles the renderer applies. Combine classes with `cn` from `@gpuix/react/cn`,
 which joins them on the web and merges the compiled styles on GPUIX. See the
 [`@gpuix/plugins` README](packages/plugins/README.md) for what the transform
-accepts. Bun's runtime watcher does not currently re-run files handled by
-custom `onLoad` plugins, so restart the process after changing a CSS module.
+accepts. JavaScript imports can use relative paths, package `imports`
+specifiers such as `#styles/utilities.module.css`, and exported package
+subpaths. Bun does not re-run plugin-loaded CSS modules under `--hot` or
+`--watch`; Vite also keeps the current styles until the importer is reloaded.
+This behaviour is the same for relative and package imports, so restart the
+Bun process or reload the Vite importer after editing a CSS module.
 
 ### 4. Save the file
 
