@@ -5732,6 +5732,14 @@ enough.
 | Windows | DirectX | Yes |
 | Linux | Not yet | Waiting for GPUI's wgpu headless renderer |
 
+Some integration tests launch a real native app instead of using
+`TestGpuixRenderer`. Set `GPU-IX_TEST_DISABLE_WINDOW_ACTIVATION=1` in that
+app's environment to keep its windows from activating the process. On macOS,
+those windows are shown behind other windows; on Windows, hidden windows are
+shown without activation. A Linux window manager may still focus a window when
+it opens. The variable is unset by default, so normal app behaviour is
+unchanged.
+
 ### Consuming an unpublished checkout
 
 Use packed tarballs, not a directory `file:` or `link:` dependency. Bun installs
