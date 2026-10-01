@@ -22,7 +22,7 @@ const BLOCKER_READY = 'MENU_FALLBACK_BLOCKER ready'
 const FALLBACK_BOUND_MS = 500
 const TEST_ENV = {
   ...process.env,
-  'GPU-IX_TEST_DISABLE_WINDOW_ACTIVATION': '1',
+  GPUIX_TEST_DISABLE_WINDOW_ACTIVATION: '1',
 }
 
 const describeLive =

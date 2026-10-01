@@ -39,7 +39,7 @@ function runFirstFrame(env: Record<string, string>): FirstFrame {
     cwd: CWD,
     env: {
       ...process.env,
-      'GPU-IX_TEST_DISABLE_WINDOW_ACTIVATION': '1',
+      GPUIX_TEST_DISABLE_WINDOW_ACTIVATION: '1',
       ...env,
     },
     encoding: 'utf8',
