@@ -217,12 +217,20 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Setup bun
         uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: false
+          rustflags: ""
 
       - name: Download macOS arm64 artifact
         uses: actions/download-artifact@v4
@@ -262,6 +270,85 @@ jobs:
       - name: Typecheck the example app
         run: bun run typecheck
         working-directory: example-app
+
+  test-linux:
+    name: test-linux
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && contains(inputs.targets, 'linux')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: false
+          rustflags: ""
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            gcc g++ clang \
+            libfontconfig-dev \
+            libwayland-dev \
+            libxkbcommon-x11-dev \
+            libx11-xcb-dev \
+            libssl-dev \
+            libzstd-dev \
+            libvulkan1 \
+            vulkan-validationlayers \
+            xvfb xauth
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Download Linux x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-x86_64-unknown-linux-gnu
+          path: packages/native/
+
+      - name: Run React tests
+        # These suites construct TestGpuixRenderer, which the Linux binding omits
+        # because wgpu cannot read rendered images back yet. The remaining React
+        # tests do not need GPU image readback and still run on Linux.
+        run: |
+          bun run build
+          bun run typecheck:test
+          bun run vitest run \
+            --exclude src/__tests__/canvas-wpt.test.tsx \
+            --exclude 'src/__tests__/{baseline-layout.test.tsx,border-box-sizing.test.tsx,bun-preload-hover-group.test.ts,code.test.tsx,diff-native.test.tsx,frame-clock.test.tsx,globals.test.tsx,grid-layout.test.tsx,highlight.test.tsx,intrinsic-and-viewport-lengths.test.tsx,markdown.test.tsx,resolved-style.test.tsx,satisfactory-focus-within-repro.test.tsx,scroll-percentage-layout.test.tsx,selection-layout.test.tsx,selection.test.tsx,showcase.test.tsx,spacing-percentage-layout.test.tsx,style-coverage.test.tsx,testing-per-file-isolation.test.tsx,virtual-list.test.tsx}'
+        working-directory: packages/react
+
+      - name: Run example tests
+        run: bun run test
+        working-directory: examples
+
+      # GPUI's test target does not compile on Linux at the pinned Zed revision; see #828.
+
+  test-gpui-macos:
+    name: test-gpui-macos
+    if: github.event_name == 'workflow_dispatch' && contains(inputs.targets, 'macos')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: false
+          rustflags: ""
+
+      - name: Test GPUI
+        run: cargo test -p gpui
+        working-directory: zed
 
   test-windows:
     name: test-windows
