@@ -307,7 +307,23 @@ function renderPart<State>(
   const resolved: ReactElement<Record<string, unknown>> | undefined = typeof render === "function"
     ? render({ ...elementProps, children }, state) as ReactElement<Record<string, unknown>>
     : render as ReactElement<Record<string, unknown>> | undefined
-  if (resolved) return cloneElement(resolved, { ...elementProps, ...resolved.props, children: resolved.props.children ?? children } as Props)
+  if (resolved) {
+    const mergedProps: Record<string, unknown> = { ...elementProps, ...resolved.props }
+    for (const [key, renderHandler] of Object.entries(resolved.props)) {
+      const componentHandler = (elementProps as Record<string, unknown>)[key]
+      if (key.startsWith("on") && renderHandler !== componentHandler && typeof renderHandler === "function" && typeof componentHandler === "function") {
+        mergedProps[key] = (...args: unknown[]) => {
+          renderHandler(...args)
+          componentHandler(...args)
+        }
+      }
+    }
+    mergedProps.children = resolved.props.children ?? children
+    if (elementProps.ref && resolved.props.ref && elementProps.ref !== resolved.props.ref) {
+      mergedProps.ref = (value: PublicInstance | null) => setRefs(value, resolved.props.ref as React.Ref<PublicInstance> | undefined, elementProps.ref as React.Ref<PublicInstance> | undefined)
+    }
+    return cloneElement(resolved, mergedProps as Props)
+  }
   return React.createElement(type, elementProps, children) as ReactElement
 }
 

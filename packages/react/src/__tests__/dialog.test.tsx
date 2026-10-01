@@ -272,6 +272,35 @@ describeNative("Dialog", () => {
     expect(changes.at(-1)).toEqual({ open: false, reason: "close-press" })
   })
 
+  it("composes handlers from Trigger and Close render elements", () => {
+    const trigger = React.createRef<PublicInstance>()
+    const renderedClicks: string[] = []
+    screen.render(
+      <Dialog.Root>
+        <Dialog.Trigger
+          ref={trigger}
+          render={<button ariaLabel="Open dialog" onClick={() => renderedClicks.push("trigger")} />}
+        />
+        <Dialog.Portal>
+          <Dialog.Popup>
+            <Dialog.Title>Rendered dialog</Dialog.Title>
+            <Dialog.Close render={<button ariaLabel="Close dialog" onClick={() => renderedClicks.push("close")} />} />
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>,
+    )
+
+    screen.renderer.focusElement(trigger.current!.id)
+    screen.renderer.simulateKeystrokes("enter")
+    expect(renderedClicks).toEqual(["trigger"])
+    expect(screen.getByRole("dialog", { name: "Rendered dialog" })).toBeDefined()
+
+    screen.renderer.focusElement(screen.getByRole("button", { name: "Close dialog" }).id)
+    screen.renderer.simulateKeystrokes("enter")
+    expect(renderedClicks).toEqual(["trigger", "close"])
+    expect(screen.queryByRole("dialog", { name: "Rendered dialog" })).toBeNull()
+  })
+
   it("dispatches keyboard button activation as a bubbling click event", () => {
     const button = React.createRef<PublicInstance>()
     const events: string[] = []
