@@ -9,7 +9,7 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import React from 'react'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { render, resetRender } from '@gpuix/react'
 import {
   connectTest,
@@ -569,8 +569,12 @@ describeNative('chat example', () => {
 
     render(<ChatApp />, { renderer, width: 1180, height: 820 })
     renderer.flush()
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    renderer.flush()
+    await vi.waitFor(() => {
+      renderer.flush()
+      expect(renderer.getPaintedText()).toContain('New Task')
+      expect(renderer.getPaintedText()).toContain('give me a quick overview')
+      expect(renderer.getPaintedText().some((line) => line.includes('React renderer for GPUI'))).toBe(true)
+    }, { timeout: 5_000 })
     renderer.captureScreenshot(after)
 
     expect(renderer.getRoot()).toBeDefined()

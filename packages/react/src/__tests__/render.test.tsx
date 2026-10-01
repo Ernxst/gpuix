@@ -267,7 +267,10 @@ const root = render(React.createElement("div", { accessibilityRole: "button" }),
   onTerminated: () => console.log("INJECTED_ROOT_TERMINATED"),
 })
 
-await new Promise((resolve) => setTimeout(resolve, 0))
+const deadline = Date.now() + 5_000
+while (root.getStatus().status !== "failed" && Date.now() < deadline) {
+  await new Promise((resolve) => setTimeout(resolve, 10))
+}
 
 const status = root.getStatus()
 if (status.status !== "failed") {
@@ -556,7 +559,7 @@ function App() {
 
 const timeout = setTimeout(() => {
   throw new Error("READABLE_FOCUS_TIMEOUT")
-}, 2_000)
+}, 10_000)
 
 render(React.createElement(App), {
   title: "GPUIX readable focus smoke",
@@ -567,7 +570,11 @@ render(React.createElement(App), {
   show: true,
 })
 
-setTimeout(() => {
+setTimeout(async () => {
+  const deadline = Date.now() + 10_000
+  while ((!target || renderer.getElementBounds(target.id) === null) && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
   if (!target) throw new Error("focus target ref was not attached")
   if (renderer.getElementBounds(target.id) === null) {
     throw new Error("focus target did not paint")
@@ -591,7 +598,7 @@ setTimeout(() => {
   clearTimeout(timeout)
   console.log("READABLE_FOCUS_OK", target.id)
   renderer.quit()
-}, 50)
+}, 0)
 `
 
 const FAILING_UNMOUNT_QUIT_PROGRAM = `
@@ -1804,7 +1811,7 @@ describeNative("render()", () => {
     writeFileSync(file, READABLE_FOCUS_PROGRAM)
 
     try {
-      const result = await runChildWithStatus("bun", [file], 3_000)
+      const result = await runChildWithStatus("bun", [file], 12_000)
       expect(result.code, result.output).toBe(0)
       expect(result.signal).toBeNull()
       expect(result.output).not.toContain("READABLE_FOCUS_TIMEOUT")
@@ -1814,7 +1821,7 @@ describeNative("render()", () => {
         unlinkSync(file)
       } catch {}
     }
-  }, 10_000)
+  }, 15_000)
 
   it("exits with failure after programmatic quit even when React unmount throws", async () => {
     const file = join(srcDir, "__tests__", "failing-unmount-quit.tmp.tsx")

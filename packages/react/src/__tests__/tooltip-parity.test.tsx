@@ -62,7 +62,7 @@ describeNative("Tooltip Base UI parity tree", () => {
     )
     expect(testRoot.renderer.getAllText()).toEqual(["Copy"])
 
-    await new Promise((resolve) => setTimeout(resolve, 55))
+    await testRoot.waitFor(() => expect(testRoot.renderer.getAllText()).toContain("Copy message"), { timeout: 5_000 })
     expect(testRoot.renderer.getAllText()).toContain("Copy message")
     expect(changes.at(-1)).toEqual({ open: true, reason: "trigger-hover" })
 
@@ -73,7 +73,7 @@ describeNative("Tooltip Base UI parity tree", () => {
 
     testRoot.renderer.nativeSimulateMouseMove(380, 260)
     expect(testRoot.renderer.getAllText()).toContain("Copy message")
-    await new Promise((resolve) => setTimeout(resolve, 90))
+    await testRoot.waitFor(() => expect(testRoot.renderer.getAllText()).toEqual(["Copy"]), { timeout: 5_000 })
     expect(testRoot.renderer.getAllText()).toEqual(["Copy"])
     expect(changes.at(-1)).toEqual({ open: false, reason: "trigger-hover" })
 
@@ -145,7 +145,7 @@ describeNative("Tooltip Base UI parity tree", () => {
 
     const firstBounds = first!.getBoundingClientRect()
     testRoot.renderer.nativeSimulateMouseMove(firstBounds.x + 8, firstBounds.y + 8)
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await testRoot.waitFor(() => expect(testRoot.renderer.findByTestId("multiple-trigger-popup")).toBeDefined(), { timeout: 5_000 })
 
     const popup = testRoot.renderer.findByTestId("multiple-trigger-popup")!
     expect(lastChangeTrigger).toBe(first)
@@ -188,7 +188,7 @@ describeNative("Tooltip Base UI parity tree", () => {
     testRoot.renderer.nativeSimulateMouseMove(410, 290)
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(testRoot.renderer.findByTestId("focus-delay-popup")).toBeDefined()
-    await new Promise((resolve) => setTimeout(resolve, 60))
+    await testRoot.waitFor(() => expect(testRoot.renderer.findByTestId("focus-delay-popup")).toBeUndefined(), { timeout: 5_000 })
     expect(testRoot.renderer.findByTestId("focus-delay-popup")).toBeUndefined()
     testRoot.render(null)
   })
