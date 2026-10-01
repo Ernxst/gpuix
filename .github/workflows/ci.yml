@@ -271,10 +271,6 @@ jobs:
         run: bun run typecheck
         working-directory: example-app
 
-      - name: Test GPUI
-        run: cargo test -p gpui
-        working-directory: zed
-
   test-linux:
     name: test-linux
     needs: build
@@ -333,8 +329,25 @@ jobs:
         run: bun run test
         working-directory: examples
 
+      # GPUI's test target does not compile on Linux at the pinned Zed revision; see #828.
+
+  test-gpui-macos:
+    name: test-gpui-macos
+    if: github.event_name == 'workflow_dispatch' && contains(inputs.targets, 'macos')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: false
+          rustflags: ""
+
       - name: Test GPUI
-        run: xvfb-run -a cargo test -p gpui
+        run: cargo test -p gpui
         working-directory: zed
 
   test-windows:
