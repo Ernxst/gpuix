@@ -1,6 +1,6 @@
 # Canvas map-scale benchmark verdict
 
-Issue: Ernxst/gpuix#84, wave C3
+Issue: galaxiajs/gpuix#84, wave C3
 
 Measured: 2026-08-27
 

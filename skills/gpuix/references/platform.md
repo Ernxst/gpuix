@@ -27,16 +27,16 @@
 
 ## Install
 
-Pin the three tarballs from a release on https://github.com/Ernxst/gpuix/releases and override `@gpuix/native`:
+Pin the three tarballs from a release on https://github.com/galaxiajs/gpuix/releases and override `@gpuix/native`:
 
 ```json
 {
   "dependencies": {
-    "@gpuix/react": "https://github.com/Ernxst/gpuix/releases/download/<tag>/gpuix-react-<version>.tgz",
-    "@gpuix/plugins": "https://github.com/Ernxst/gpuix/releases/download/<tag>/gpuix-plugins-<version>.tgz"
+    "@gpuix/react": "https://github.com/galaxiajs/gpuix/releases/download/<tag>/gpuix-react-<version>.tgz",
+    "@gpuix/plugins": "https://github.com/galaxiajs/gpuix/releases/download/<tag>/gpuix-plugins-<version>.tgz"
   },
   "overrides": {
-    "@gpuix/native": "https://github.com/Ernxst/gpuix/releases/download/<tag>/gpuix-native-<version>.tgz"
+    "@gpuix/native": "https://github.com/galaxiajs/gpuix/releases/download/<tag>/gpuix-native-<version>.tgz"
   }
 }
 ```

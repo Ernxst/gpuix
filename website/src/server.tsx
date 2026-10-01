@@ -12,7 +12,7 @@ const chatHtml = chatExampleHtml
 
 export const app = new Spiceflow()
   .get('/gh', () => {
-    return Response.redirect('https://github.com/Ernxst/gpuix', 302)
+    return Response.redirect('https://github.com/galaxiajs/gpuix', 302)
   })
   .get('/chat-example', ({ request }) => {
     if (!new URL(request.url).pathname.endsWith('/')) {

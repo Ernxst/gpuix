@@ -98,7 +98,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Ernxst/gpuix.git"
+    "url": "git+https://github.com/galaxiajs/gpuix.git"
   },
   "scripts": {
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuix/react locally. CI is the only release path. See AGENTS.md.'); process.exit(1) }\"",
