@@ -19433,7 +19433,7 @@ fn to_gpui_window_options(
 
 /// Disable process and window activation for tests that create windows.
 fn test_window_activation_disabled() -> bool {
-    std::env::var_os("GPU-IX_TEST_DISABLE_WINDOW_ACTIVATION").is_some()
+    std::env::var_os("GPUIX_TEST_DISABLE_WINDOW_ACTIVATION").is_some()
 }
 
 fn effective_window_min_size(options: &WindowOptions) -> Option<gpui::WindowMinSize> {

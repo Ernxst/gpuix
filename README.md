@@ -5735,7 +5735,7 @@ enough.
 | Linux | Not yet | Waiting for GPUI's wgpu headless renderer |
 
 Some integration tests launch a real native app instead of using
-`TestGpuixRenderer`. Set `GPU-IX_TEST_DISABLE_WINDOW_ACTIVATION=1` in that
+`TestGpuixRenderer`. Set `GPUIX_TEST_DISABLE_WINDOW_ACTIVATION=1` in that
 app's environment to keep its windows from activating the process. On macOS,
 those windows are shown behind other windows; on Windows, hidden windows are
 shown without activation. On Wayland, the variable prevents GPU-IX from
