@@ -62,6 +62,20 @@ describeNative("render element props", () => {
     expect(refs).toEqual(["render", "part", "forwarded"])
   })
 
+  it("calls a shared part and forwarded ref only once", () => {
+    const refs: string[] = []
+    const sharedRef = () => refs.push("shared")
+    const merged = renderSlot({
+      asChild: true,
+      children: <a ref={() => refs.push("render")} />,
+      props: { ref: sharedRef },
+      ref: sharedRef,
+    })
+
+    ;(merged.props.ref as (value: PublicInstance) => void)({} as PublicInstance)
+    expect(refs).toEqual(["render", "shared"])
+  })
+
   it("matches the installed Base UI className and style merge order", () => {
     const merged = mergeProps(
       { className: "part", style: { color: "red", backgroundColor: "green" } },

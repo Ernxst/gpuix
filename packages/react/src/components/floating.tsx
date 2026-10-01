@@ -268,8 +268,9 @@ export function setRefs<T>(value: T, ...refs: Array<Ref<T> | undefined>): void {
 }
 
 function mergeRefs<T>(...refs: Array<Ref<T> | undefined>): (value: T) => void {
+  const uniqueRefs = [...new Set(refs)]
   return (value) => {
-    for (const ref of refs) {
+    for (const ref of uniqueRefs) {
       if (typeof ref === "function") {
         ref(value)
       } else if (ref) {
