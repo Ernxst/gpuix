@@ -80,7 +80,8 @@ function elementTypeUnion(hostTypes: string): string | undefined {
 test("reads supported elements from CRLF host types", async () => {
   const hostTypes = await readFile(path.join(repoRoot, "packages/react/src/types/host.ts"), "utf8")
   const crlfHostTypes = hostTypes.replace(/\r\n|\n/g, "\r\n")
-  expect(elementTypeUnion(crlfHostTypes)?.replace(/\r\n/g, "\n")).toEqual(elementTypeUnion(hostTypes))
+  const normalize = (union: string | undefined) => union?.replace(/\r\n/g, "\n")
+  expect(normalize(elementTypeUnion(crlfHostTypes))).toEqual(normalize(elementTypeUnion(hostTypes)))
 })
 
 test("the elements reference lists every supported intrinsic element", async () => {
