@@ -448,6 +448,35 @@ function alignmentOverflow(
   return Math.max(min - start, 0) + Math.max(start + size - max, 0)
 }
 
+function sideOverflow(
+  side: PositionerSide,
+  anchor: Pick<DOMRect, "left" | "right" | "top" | "bottom">,
+  positioner: Pick<DOMRect, "width" | "height">,
+  boundary: PositionerRect,
+  padding: { top: number; right: number; bottom: number; left: number },
+  offset: number
+): number {
+  const resolvedSide = physicalSide(side)
+  if (resolvedSide === "top") {
+    const bottom = anchor.top - offset
+    return Math.max(boundary.y + padding.top - (bottom - positioner.height), 0) +
+      Math.max(bottom - (boundary.y + boundary.height - padding.bottom), 0)
+  }
+  if (resolvedSide === "bottom") {
+    const top = anchor.bottom + offset
+    return Math.max(boundary.y + padding.top - top, 0) +
+      Math.max(top + positioner.height - (boundary.y + boundary.height - padding.bottom), 0)
+  }
+  if (resolvedSide === "left") {
+    const right = anchor.left - offset
+    return Math.max(boundary.x + padding.left - (right - positioner.width), 0) +
+      Math.max(right - (boundary.x + boundary.width - padding.right), 0)
+  }
+  const left = anchor.right + offset
+  return Math.max(boundary.x + padding.left - left, 0) +
+    Math.max(left + positioner.width - (boundary.x + boundary.width - padding.right), 0)
+}
+
 /** A renderer-neutral positioner contract shared by floating controls. */
 export const FloatingPositioner = forwardRef<PublicInstance, PositionerProps>(
   function FloatingPositioner(
@@ -515,6 +544,9 @@ export const FloatingPositioner = forwardRef<PublicInstance, PositionerProps>(
         current.positioner.height === nextDimensions.positioner.height
         ? current
         : nextDimensions)
+      const padding = typeof collisionPadding === "number"
+        ? { top: collisionPadding, right: collisionPadding, bottom: collisionPadding, left: collisionPadding }
+        : { top: collisionPadding?.top ?? 5, right: collisionPadding?.right ?? 5, bottom: collisionPadding?.bottom ?? 5, left: collisionPadding?.left ?? 5 }
       let resolvedSide: PositionerSide = side
       const sideAvoidance = collisionAvoidance?.side ?? "flip"
       if (sideAvoidance === "flip") {
@@ -528,11 +560,26 @@ export const FloatingPositioner = forwardRef<PublicInstance, PositionerProps>(
         else if (popupRect.left >= anchorRect.right) resolvedSide = "right"
         else if (popupRect.top < anchorRect.top && popupRect.bottom <= anchorRect.bottom + 1) resolvedSide = "top"
         else if (popupRect.left < anchorRect.left && popupRect.right <= anchorRect.right + 1) resolvedSide = "left"
+        if (boundaryRect) {
+          const oppositeSide: PositionerSide = side === "top" ? "bottom"
+            : side === "bottom" ? "top"
+              : side === "left" ? "right"
+                : side === "right" ? "left"
+                  : side === "inline-start" ? "inline-end" : "inline-start"
+          const offsetFor = (candidateSide: PositionerSide) => typeof sideOffset === "number"
+            ? sideOffset
+            : sideOffset({
+              side: candidateSide,
+              align,
+              anchor: nextDimensions.anchor,
+              positioner: nextDimensions.positioner,
+            })
+          const requestedOverflow = sideOverflow(side, anchorRect, popupRect, boundaryRect, padding, offsetFor(side))
+          const oppositeOverflow = sideOverflow(oppositeSide, anchorRect, popupRect, boundaryRect, padding, offsetFor(oppositeSide))
+          if (requestedOverflow > oppositeOverflow) resolvedSide = oppositeSide
+        }
       }
       let resolvedAlign: PositionerAlign = align
-      const padding = typeof collisionPadding === "number"
-        ? { top: collisionPadding, right: collisionPadding, bottom: collisionPadding, left: collisionPadding }
-        : { top: collisionPadding?.top ?? 5, right: collisionPadding?.right ?? 5, bottom: collisionPadding?.bottom ?? 5, left: collisionPadding?.left ?? 5 }
       if (boundaryRect && collisionAvoidance?.align === "flip" && (align === "start" || align === "end")) {
         const oppositeAlign = align === "start" ? "end" : "start"
         const currentOverflow = alignmentOverflow(resolvedSide, align, anchorRect, popupRect, boundaryRect, padding)
@@ -563,8 +610,16 @@ export const FloatingPositioner = forwardRef<PublicInstance, PositionerProps>(
         const top = boundaryRect.y + padding.top
         const right = boundaryRect.x + boundaryRect.width - padding.right
         const bottom = boundaryRect.y + boundaryRect.height - padding.bottom
-        const dx = popupRect.left < left ? left - popupRect.left : popupRect.right > right ? right - popupRect.right : 0
-        const dy = popupRect.top < top ? top - popupRect.top : popupRect.bottom > bottom ? bottom - popupRect.bottom : 0
+        const verticalSide = physicalSide(resolvedSide) === "top" || physicalSide(resolvedSide) === "bottom"
+        let dx = popupRect.left < left ? left - popupRect.left : popupRect.right > right ? right - popupRect.right : 0
+        let dy = popupRect.top < top ? top - popupRect.top : popupRect.bottom > bottom ? bottom - popupRect.bottom : 0
+        // After a side flip, the main-axis measurement still describes the old
+        // side. Keep only the cross-axis correction until native layout reflects
+        // the newly resolved side.
+        if (resolvedSide !== side) {
+          if (verticalSide) dy = 0
+          else dx = 0
+        }
         if (requestedPosition && (dx !== 0 || dy !== 0)) {
           const base = sameRequest ? measuredPlacement.position ?? requestedPosition : requestedPosition
           nextPosition = { x: base.x + dx, y: base.y + dy }

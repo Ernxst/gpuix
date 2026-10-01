@@ -193,6 +193,37 @@ describeNative("Select.Positioner", () => {
     expect(screen.getByTestId("popup")).toHaveAttribute("data-align", "start")
   })
 
+  it("flips sides when only the opposite side fits a custom boundary", () => {
+    screen.render(
+      <Select.Root defaultOpen>
+        <Select.Trigger data-testid="trigger" aria-label="Fruit" style={{ position: "absolute", left: 100, top: 120, width: 60, height: 24 }}>
+          <Select.Value placeholder="Choose" />
+        </Select.Trigger>
+        <Select.Portal>
+          <Select.Positioner
+            data-testid="positioner"
+            side="bottom"
+            align="start"
+            collisionBoundary={{ x: 0, y: 0, width: 320, height: 180 }}
+            collisionPadding={0}
+            collisionAvoidance={{ side: "flip", align: "none" }}
+          >
+            <Select.Popup data-testid="popup" style={{ width: 120, height: 80 }}>
+              <Select.List><Select.Item value="apple">Apple</Select.Item></Select.List>
+            </Select.Popup>
+          </Select.Positioner>
+        </Select.Portal>
+      </Select.Root>
+    )
+
+    const trigger = screen.getByTestId("trigger").getBoundingClientRect()
+    const popup = screen.getByTestId("popup").getBoundingClientRect()
+    expect(trigger.bottom + popup.height).toBeLessThan(240)
+    expect(screen.getByTestId("positioner")).toHaveAttribute("data-side", "top")
+    expect(screen.getByTestId("popup")).toHaveAttribute("data-side", "top")
+    expect(popup.bottom).toBeLessThanOrEqual(trigger.top)
+  })
+
   it("flips alignment when only the opposite alignment fits the viewport", () => {
     screen.render(
       <Select.Root defaultOpen>
