@@ -1979,8 +1979,11 @@ async fn run_ui_commands(
                 let origin = animation_frame_origin(&timestamp_origin, requested_timestamp_origin);
                 window.on_next_frame(move |_window, cx| {
                     let timestamp = animation_frame_timestamp_ms(origin, web_time::Instant::now());
-                    // on_next_frame runs inside handle.update, so enqueue JS until it returns.
-                    cx.spawn(async move |_cx| {
+                    // Foreground tasks can be drained re-entrantly by Windows' nested message
+                    // pump while a draw still holds the App borrow. Call the N-API thread-safe
+                    // function from a background worker so JavaScript runs on its own event loop
+                    // after that foreground message pump unwinds.
+                    cx.background_executor().spawn(async move {
                         dispatch_animation_frame_callback(callback, timestamp);
                     })
                     .detach();
