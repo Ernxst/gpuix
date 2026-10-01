@@ -266,7 +266,7 @@ describe("frame loop", () => {
       { frameMs: 2 },
     )
 
-    await new Promise((resolve) => setTimeout(resolve, 18))
+    await vi.waitFor(() => expect(idleTicks).toBeGreaterThanOrEqual(2), { timeout: 5_000 })
     loop.stop()
     expect(idleTicks).toBeGreaterThanOrEqual(2)
     expect(frameTicks).toBe(0)
@@ -301,6 +301,7 @@ describe("frame loop", () => {
     let frameRequest: (() => void) | null = null
     let quitCalls = 0
     let unrecoverableErrors = 0
+    let idlePumps = 0
     const loop = startFrameLoop(
       {
         capabilities: frameClockCapabilities({
@@ -311,7 +312,10 @@ describe("frame loop", () => {
         tick: () => {
           throw new Error("injected native frame failure")
         },
-        tickIdle: () => true,
+        tickIdle: () => {
+          idlePumps += 1
+          return true
+        },
         quit: () => {
           quitCalls += 1
         },
@@ -331,12 +335,17 @@ describe("frame loop", () => {
 
     const request = frameRequest
     for (let attempt = 0; attempt < 3; attempt += 1) {
+      const idlePumpsBeforeRequest = idlePumps
       request?.()
-      await new Promise((resolve) => setTimeout(resolve, 5))
+      if (attempt < 2) {
+        await vi.waitFor(() => expect(idlePumps).toBeGreaterThan(idlePumpsBeforeRequest), { timeout: 5_000 })
+      }
     }
 
-    expect(quitCalls).toBe(1)
-    expect(unrecoverableErrors).toBe(1)
+    await vi.waitFor(() => {
+      expect(quitCalls).toBe(1)
+      expect(unrecoverableErrors).toBe(1)
+    }, { timeout: 5_000 })
     loop.stop()
   })
 

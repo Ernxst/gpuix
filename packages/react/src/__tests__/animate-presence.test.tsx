@@ -69,7 +69,7 @@ describeNative("AnimatePresence", () => {
   })
 
   it("removes a child without an exit target", async () => {
-    const { render, renderer } = createTestRoot()
+    const { render, renderer, waitFor } = createTestRoot()
 
     function App({ show }: { show: boolean }) {
       return (
@@ -85,8 +85,7 @@ describeNative("AnimatePresence", () => {
 
     render(<App show />)
     render(<App show={false} />)
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    renderer.flush()
+    await waitFor(() => expect(renderer.getAllText()).toEqual([]), { timeout: 5_000 })
 
     expect(renderer.getAllText()).toEqual([])
   })
@@ -466,7 +465,7 @@ describeNative("AnimatePresence", () => {
   })
 
   it("ignores safeToRemove after its participant unregisters", async () => {
-    const { render, renderer } = createTestRoot()
+    const { render, renderer, waitFor } = createTestRoot()
     let staleRemove: (() => void) | undefined
 
     function Participant() {
@@ -496,8 +495,7 @@ describeNative("AnimatePresence", () => {
     render(<App show replace />)
     staleRemove?.()
     render(<App show={false} replace />)
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    renderer.flush()
+    await waitFor(() => expect(renderer.getAllText()).toEqual([]), { timeout: 5_000 })
 
     expect(renderer.getAllText()).toEqual([])
   })
