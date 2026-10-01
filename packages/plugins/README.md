@@ -24,11 +24,10 @@ Bun.plugin(gpuixDev())
 The preload must run before the application imports any CSS modules. CSS module
 imports are resolved by the plugin, including package `imports` specifiers such
 as `#styles/utilities.module.css` and exported package subpaths such as
-`style-pkg/utilities.module.css`. Bun's runtime watcher does not currently
-re-run CSS modules handled by custom `onLoad` plugins, under either `--hot` or
-`--watch`; restart the process after changing one. Vite also keeps the current
-compiled styles until the importer is reloaded, for both relative and package
-imports. JavaScript and TypeScript changes continue to use Bun's hot reload.
+`style-pkg/utilities.module.css`. Vite reloads JavaScript importers when an
+imported CSS module changes, including relative and package specifiers. Bun's
+plugin API does not let a plugin register additional files for `--hot` or
+`--watch` to track, so restart the process after changing a CSS module under Bun.
 
 ## Bun build
 

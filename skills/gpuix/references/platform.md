@@ -123,7 +123,7 @@ render(<App />, { title: "My App", width: 1000, height: 700 })
 bun --hot --preload @gpuix/plugins/preload app.tsx
 ```
 
-The preload registers the CSS module plugin before the app imports any `.module.css`. A saved `.tsx` remounts React in the same window and GPU context. An edited CSS module needs a restart. A new native binary needs a restart too.
+The preload registers the CSS module plugin before the app imports any `.module.css`. A saved `.tsx` remounts React in the same window and GPU context. Bun's watch modes do not track CSS files loaded by plugins, so an edited CSS module needs a restart. A new native binary needs a restart too.
 
 ## Building a binary
 

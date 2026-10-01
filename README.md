@@ -1431,9 +1431,9 @@ which joins them on the web and merges the compiled styles on GPUIX. See the
 accepts. JavaScript imports can use relative paths, package `imports`
 specifiers such as `#styles/utilities.module.css`, and exported package
 subpaths. Bun does not re-run plugin-loaded CSS modules under `--hot` or
-`--watch`; Vite also keeps the current styles until the importer is reloaded.
-This behaviour is the same for relative and package imports, so restart the
-Bun process or reload the Vite importer after editing a CSS module.
+`--watch` because its plugin API cannot register extra files for those modes to
+track. Restart the Bun process after editing a CSS module. Vite reloads the
+JavaScript importer after edits for relative and package imports.
 
 ### 4. Save the file
 

@@ -1,8 +1,8 @@
-import { existsSync, readFileSync, statSync } from "node:fs"
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import type { BunPlugin } from "bun"
-import type { Plugin } from "vite"
+import type { HmrContext, Plugin, ViteDevServer } from "vite"
 import type { AcceptedPlugin } from "postcss"
 import {
   exports as resolvePackageExports,
@@ -19,6 +19,15 @@ export const CSS_MODULE_VIRTUAL_RE = /^\0gpuix:css-module:/
 
 export function cleanId(id: string): string {
   return id.split(/[?#]/, 1)[0]
+}
+
+function cssFileKey(id: string): string {
+  const resolved = path.resolve(cleanId(id))
+  try {
+    return realpathSync.native(resolved).replaceAll("\\", "/")
+  } catch {
+    return resolved.replaceAll("\\", "/")
+  }
 }
 
 export function isCssModule(id: string): boolean {
@@ -239,11 +248,49 @@ async function compileCssModuleCode(
  * module compilation.
  */
 export const gpuixCssUnplugin = createUnplugin<CssModulesOptions, false>((userOptions, meta) => {
+  const cssModulesByDependency = new Map<string, Set<string>>()
+  const cssModuleIdsBySource = new Map<string, string>()
+  let viteServer: ViteDevServer | undefined
+
   return {
     name: "gpuix-css-modules",
     // Resolve before Vite's own CSS plugin, which would otherwise claim the
     // file and hand back a stylesheet the native renderer cannot use.
-    vite: { enforce: "pre" },
+    vite: {
+      enforce: "pre",
+      config(config) {
+        // Vite ignores node_modules by default. CSS modules can be imported
+        // through package exports, so let its watcher see those files while
+        // keeping the rest of node_modules excluded.
+        if (config.server?.watch === null) return
+        const watch = config.server?.watch
+        const ignored = watch?.ignored
+        config.server ??= {}
+        config.server.watch ??= {}
+        config.server.watch.ignored = [
+          ...(Array.isArray(ignored) ? ignored : ignored === undefined ? [] : [ignored]),
+          "!**/node_modules/**/*.module.css",
+        ]
+      },
+      configureServer(server) {
+        viteServer = server
+      },
+      handleHotUpdate({ file, server }: HmrContext) {
+        const changedFile = cssFileKey(file)
+        const affectedSources = new Set([
+          changedFile,
+          ...(cssModulesByDependency.get(changedFile) ?? []),
+        ])
+        const modules = [...affectedSources]
+          .map((source) =>
+            server.moduleGraph.getModuleById(
+              cssModuleIdsBySource.get(source) ?? cssModuleId(source),
+            ),
+          )
+          .filter((module) => module !== undefined)
+        return modules.length > 0 ? modules : undefined
+      },
+    },
     resolveId: {
       filter: { id: CSS_MODULE_RESOLVE_RE },
       handler(id, importer) {
@@ -253,7 +300,35 @@ export const gpuixCssUnplugin = createUnplugin<CssModulesOptions, false>((userOp
     load: {
       filter: { id: CSS_MODULE_VIRTUAL_RE },
       handler(id) {
-        return loadCssModule(this, id, userOptions.plugins)
+        const context = this as ViteLoadContext
+        const sourceId = sourceIdFromCssModuleId(id)
+        const sourceKey = cssFileKey(sourceId)
+        cssModuleIdsBySource.set(sourceKey, id)
+        for (const [dependency, dependents] of cssModulesByDependency) {
+          dependents.delete(sourceKey)
+          if (dependents.size === 0) cssModulesByDependency.delete(dependency)
+        }
+        return loadCssModule(
+          {
+            resolve: context.resolve?.bind(context),
+            addWatchFile(file: string) {
+              context.addWatchFile(file)
+              if (file.replaceAll("\\", "/").includes("/node_modules/")) {
+                // Vite's addWatchFile helper skips files inside root, while
+                // its root watcher ignores node_modules. Add imported CSS
+                // modules directly so Chokidar can watch the file itself.
+                viteServer?.watcher.add(file)
+              }
+              const dependency = cssFileKey(file)
+              if (dependency === sourceKey) return
+              const dependents = cssModulesByDependency.get(dependency) ?? new Set<string>()
+              dependents.add(sourceKey)
+              cssModulesByDependency.set(dependency, dependents)
+            },
+          },
+          id,
+          userOptions.plugins,
+        )
       },
     },
   }
