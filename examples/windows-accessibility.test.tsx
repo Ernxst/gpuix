@@ -121,6 +121,8 @@ describeLive('Windows accessibility adapter order', () => {
 
       const root = createRoot(renderer)
       flushSync(() => root.render(<Tree />))
+      // init defers showing the window until AccessKit is ready. Unlike
+      // render(), createRoot() does not start the native pump that reveals it.
       const frameLoop = startFrameLoop(renderer)
 
       try {
