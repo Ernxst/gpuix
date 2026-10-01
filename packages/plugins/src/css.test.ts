@@ -85,23 +85,6 @@ test("Vite imports CSS modules through package imports like relative imports", a
   )
 
   const cssPlugin = gpuixCssModules()
-  let packageHotUpdate: { file: string; modules: string[]; virtualModules: string[] } | undefined
-  const handleHotUpdate = cssPlugin.handleHotUpdate
-  if (handleHotUpdate) {
-    cssPlugin.handleHotUpdate = async function (context) {
-      const modules = await handleHotUpdate.call(this, context)
-      if (context.file.includes("style-package")) {
-        packageHotUpdate = {
-          file: context.file,
-          modules: modules?.map((module) => module.id) ?? [],
-          virtualModules: [...context.server.moduleGraph.idToModuleMap.keys()].filter((id) =>
-            id.startsWith("\0gpuix:css-module:"),
-          ),
-        }
-      }
-      return modules
-    }
-  }
   server = await createServer({
     appType: "custom",
     configFile: false,
@@ -140,7 +123,7 @@ test("Vite imports CSS modules through package imports like relative imports", a
     if (JSON.stringify(updated.exported) === JSON.stringify({ display: "grid" })) break
     await new Promise((resolve) => setTimeout(resolve, 30))
   }
-  expect(updated?.exported, JSON.stringify(packageHotUpdate)).toEqual({ display: "grid" })
+  expect(updated?.exported).toEqual({ display: "grid" })
 })
 
 test("Vitest imports CSS modules through package imports like relative imports", async () => {
