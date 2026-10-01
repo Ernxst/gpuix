@@ -1,6 +1,7 @@
 import React from "react"
 import { beforeEach, describe, expect, it } from "vitest"
 import * as Select from "../components/select"
+import { Select as NamedSelect } from "../components/select"
 import { createTestRoot, isNativeTestRendererAvailable, type TestRoot } from "../testing.js"
 import { gpuixMatchers, type GpuixMatchers } from "../testing-expect.js"
 
@@ -46,5 +47,26 @@ describeNative("Select Root", () => {
     screen.render(<Fruit />)
 
     expect(screen.getByTestId("trigger").parentElement).toBe(screen.getByTestId("row"))
+  })
+
+  it("opens through the named Select part tree", () => {
+    screen.render(
+      <NamedSelect.Root>
+        <NamedSelect.Trigger data-testid="named-trigger" ariaLabel="Fruit">
+          <NamedSelect.Value placeholder="Choose" />
+        </NamedSelect.Trigger>
+        <NamedSelect.Positioner>
+          <NamedSelect.Popup>
+            <NamedSelect.List>
+              <NamedSelect.Item value="apple">Apple</NamedSelect.Item>
+            </NamedSelect.List>
+          </NamedSelect.Popup>
+        </NamedSelect.Positioner>
+      </NamedSelect.Root>
+    )
+
+    screen.renderer.nativeSimulateClick(30, 25)
+
+    expect(screen.getByRole("listbox")).toBeInTheDocument()
   })
 })

@@ -3,10 +3,9 @@
   "compilerOptions": {
     "baseUrl": "../..",
     "paths": {
-      "@base-ui/react/combobox": ["dist/components/combobox.d.ts"],
       "@gpuix/react/jsx-runtime": ["jsx-runtime.d.ts"]
     }
   },
-  "files": ["./combobox-parity.tsx"],
-  "include": ["./combobox-parity.tsx"]
+  "files": ["./select-parity.types.tsx"],
+  "include": ["./select-parity.types.tsx"]
 }

@@ -10,6 +10,8 @@ GPU-IX renders a React tree with GPUI, Zed's GPU UI framework, on Metal, DirectX
 
 Before writing code that relies on a browser behaviour, check it in the reference file for that area. Each file lists its traps first. The skill describes the fork's `main` branch. If the installed release disagrees, the installed package's types (`node_modules/@gpuix/react/dist/types/host.d.ts`) and README are the authority for that version.
 
+For built-in compound controls, use the documented named namespace imports and their parts (for example, `import { Select } from "@gpuix/react/select"` and `<Select.Root>`); the component reference lists each control's available parts and differences from Base UI.
+
 ## Reference files
 
 | Read | When |

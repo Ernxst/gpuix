@@ -20,14 +20,12 @@
   "files": [
     "src/__tests__/exact-optional.types.ts",
     "src/__tests__/dialog-parity.types.tsx",
-    "type-tests/select-parity/select-parity.types.tsx",
     "type-tests/tooltip-parity/tooltip-parity.types.tsx",
     "type-tests/floating-positioner-parity/floating-positioner-parity.types.tsx"
   ],
   "include": [
     "src/__tests__/exact-optional.types.ts",
     "src/__tests__/dialog-parity.types.tsx",
-    "type-tests/select-parity/select-parity.types.tsx",
     "type-tests/tooltip-parity/tooltip-parity.types.tsx",
     "type-tests/floating-positioner-parity/floating-positioner-parity.types.tsx"
   ]

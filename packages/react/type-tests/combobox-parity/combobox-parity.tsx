@@ -1,5 +1,5 @@
 import React from "react"
-import { Combobox } from "@combobox"
+import { Combobox } from "@base-ui/react/combobox"
 
 type Person = { id: number; name: string }
 const people: Person[] = [{ id: 1, name: "Ada Lovelace" }]

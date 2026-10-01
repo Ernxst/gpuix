@@ -2,7 +2,7 @@
 
 GPU-IX ships its own headless Dialog, Select, Combobox and Tooltip (`packages/react/src/components/`), a shared floating layer (`packages/react/src/floating.ts`), file pickers (`dialogs.ts`), `motion`/`AnimatePresence` and a few hooks. The controls follow Base UI part names and behaviour where supported. Use these rather than relying on full DOM support from a third-party headless library; some Base UI components work in tested cases (`events-and-dom.md`).
 
-Each component is importable two ways: as a namespace from its subpath (`import * as Select from "@gpuix/react/select"`, then `Select.Root`, `Select.Item`, `Select.ItemText`), or as prefixed names from `@gpuix/react` (`Select`, `SelectItem`, `SelectItemText`; likewise `Combobox*` and `Tooltip*`).
+Use the documented named namespace import for compound components: `import { Select } from "@gpuix/react/select"`, then `Select.Root`, `Select.Item`, and `Select.ItemText`. Select keeps the direct `<Select>` root and module-level part aliases for existing imports. The package root also exports prefixed names such as `Select`, `SelectItem`, and `SelectItemText` (likewise `Combobox*` and `Tooltip*`).
 
 ## Contents
 
@@ -121,7 +121,7 @@ The namespace follows Base UI 1.8.0: `Root`, `Label`, `Trigger`, `Value`, `Icon`
 Parts: `Root`, `Label`, `Value`, `Input`, `InputGroup`, `Trigger`, `List`, `Status`, `Portal`, `Backdrop`, `Positioner`, `Popup`, `Arrow`, `Icon`, `Group`, `GroupLabel`, `Item`, `ItemIndicator`, `Chips`, `Chip`, `ChipRemove`, `Row`, `Collection`, `Empty`, `Clear`, `Separator`, plus `useFilter`, `useFilteredItems`, and `createItems`.
 
 ```tsx
-import * as Combobox from "@gpuix/react/combobox"
+import { Combobox } from "@gpuix/react/combobox"
 
 <Combobox.Root items={frameworks}>
   <Combobox.Input placeholder="Framework" />
