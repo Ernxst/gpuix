@@ -2251,7 +2251,7 @@ export function ChatApp({
     renderer.scrollToItem(id, Math.max(0, rowCount - 1))
   }, [renderer, rowCount, tailTick])
 
-  // scripts/app-bench.ts opt-in marker. Off by default so this fixture's
+  // examples/bench/app-bench.ts opt-in marker. Off by default so this fixture's
   // normal behaviour never changes; see examples/bench/README.md.
   useEffect(() => {
     if (process.env.GPUIX_BENCH !== '1') return

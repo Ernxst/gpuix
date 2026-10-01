@@ -1,10 +1,10 @@
-//! Native-GPUI baseline for `scripts/app-bench.ts`.
+//! Native-GPUI baseline for `examples/bench/app-bench.ts`.
 //!
 //! Same shape as `examples/bench/hello-gpuix.tsx` — one window, one line of
 //! text, 400x300 — built with our GPUI checkout directly, no JS, no napi
 //! bridge. Prints the same `GPUIX_BENCH` marker line, from the same point
 //! (the frame after the window's second presented frame), so
-//! `scripts/app-bench.ts` parses both fixtures identically.
+//! `examples/bench/app-bench.ts` parses both fixtures identically.
 //!
 //! Run with: cargo run -p gpuix-native --release --example hello_bench
 

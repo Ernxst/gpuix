@@ -2,12 +2,11 @@
  * Repeatable benchmark harness for GPUIX apps.
  *
  * Measures bundle size, cold startup, idle memory, and build/rebuild time for
- * the fixtures in `examples/bench/`, against a plain
- * GPUI baseline built from the same GPUI checkout. See
- * `examples/bench/README.md` for what each metric means and why it is
- * measured the way it is.
+ * the fixtures beside it, against a plain GPUI baseline built from the same
+ * GPUI checkout. See `README.md` in this folder for what each metric means
+ * and why it is measured the way it is.
  *
- * Run: `bun scripts/app-bench.ts [--runs N]` (default 10).
+ * Run: `bun examples/bench/app-bench.ts [--runs N]` (default 10).
  *
  * Opens real windows — GUI window creation panics inside the Bash sandbox
  * ("Attempted to create a NULL object" from system-configuration). Run this
@@ -15,8 +14,7 @@
  *
  * Requires, already built in this checkout:
  *   bun install --frozen-lockfile
- *   bun run build:native   # produces packages/native/*.node
- *   bun run build:react    # produces packages/react/dist
+ *   bun run build          # the native addon and packages/react/dist
  * and, once, the GPUI baseline binary:
  *   cd packages/native && cargo build --release --example hello_bench
  */
@@ -27,7 +25,7 @@ import os from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..")
 const BENCH_DIR = path.join(ROOT, "examples", "bench")
 const NATIVE_DIR = path.join(ROOT, "packages", "native")
 const EXAMPLES_DIR = path.join(ROOT, "examples")

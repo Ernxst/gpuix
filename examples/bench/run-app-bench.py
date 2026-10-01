@@ -59,7 +59,7 @@ def run_app_attempt(destination: Path, attempt: int) -> bool:
         writer = csv.writer(load_output)
         writer.writerow(("epoch_seconds", "load_1m"))
         process = subprocess.Popen(
-            ["bun", "scripts/app-bench.ts", "--runs", "5"],
+            ["bun", "examples/bench/app-bench.ts", "--runs", "5"],
             cwd=ROOT,
             stdout=output,
             stderr=subprocess.STDOUT,

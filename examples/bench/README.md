@@ -1,18 +1,17 @@
 # App benchmarks
 
-Fixtures and a harness (`scripts/app-bench.ts`) for measuring what a GPUIX
+Fixtures and a harness (`app-bench.ts`) for measuring what a GPUIX
 app costs to ship, start, and build — the same numbers Jamon Holmgren
 published for 21 Mac app frameworks, measured the same way every time.
 
-Run: `bun scripts/app-bench.ts [--runs N]` (default 10) from the repository
+Run: `bun examples/bench/app-bench.ts [--runs N]` (default 10) from the repository
 root, with the sandbox disabled — GPUI panics opening a window inside it
 ("Attempted to create a NULL object" from `system-configuration`). Before the
 first run:
 
 ```
 bun install --frozen-lockfile
-bun run build:native
-bun run build:react
+bun run build
 cd packages/native && cargo build --release --example hello_bench
 ```
 
@@ -115,7 +114,7 @@ written to `tmp/app-bench/<timestamp>.json`.
 
 ## Quiet-host frame comparison
 
-After the builds above, run `python3 scripts/perf/run-app-bench.py <output-directory>`
+After the builds above, run `python3 examples/bench/run-app-bench.py <output-directory>`
 from the repository root. It waits for a five-minute interval with one-minute
 host load below four, then retains five complete invocations of `app-bench`.
 It records load throughout each invocation and discards one if load reaches
@@ -131,7 +130,7 @@ whole update cycle, including React work in the animation phase, native calls
 and Metal command submission. Neither metric includes GPU execution, so
 interpret it alongside an Instruments trace when investigating that cost.
 
-When a live display is unavailable, `python3 scripts/perf/run-app-bench.py
+When a live display is unavailable, `python3 examples/bench/run-app-bench.py
 <output-directory> --frame-only` keeps the same quiet-host gate and five valid
 invocations for the offscreen frame fixture. Startup and memory need a live,
 unlocked desktop and are not measured by this mode.
