@@ -17,7 +17,7 @@ Use Bun and the checked-in lockfile. In a new checkout, install with `bun instal
 
 - React build: `bun run build:react` from the repository root. Examples load `packages/react/dist`, so source-only test results do not establish that an example uses the change.
 - React tests: `bun run test` in `packages/react`; target the affected tests when appropriate.
-- Native build: `bun run build:native` from the repository root. This produces the release binary with `test-support`. Restart the app after rebuilding; hot reload cannot replace a loaded native binary.
+- Native build: `bun run build:native` from the repository root before running the React or examples tests. It uses Turbo's shared local task cache or builds with `test-support`, with Rust, Zed, toolchain, target, feature, and SDK inputs in the task hash. Release packing continues to use the direct native package build and does not restore a cached test-support binding. Restart the app after rebuilding; hot reload cannot replace a loaded native binary.
 - Browser build: `bun run web:wasm` from the repository root.
 - Target directory: don't set `CARGO_TARGET_DIR` or pass `--target-dir`, including for one-off review builds. Cargo runs through mbx, which already gives each checkout its own target directory and deletes it when unused; a custom target directory bypasses mbx and is never cleaned up. Before the first native build in a new checkout, run `mkdir -p packages/native/target && mbx adopt packages/native`. Otherwise `napi build` creates `target/` as a plain directory before Cargo runs, and mbx stops the build in a terminal to ask whether to move it, which an unattended run cannot answer.
 
