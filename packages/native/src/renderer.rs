@@ -1926,7 +1926,7 @@ fn settle_ui_layout_for_bounds_read(
         }
         gpui::AnyWindowHandle::from(window).update(cx, |_view, window, cx| {
             window.draw(cx).clear(cx);
-            Ok(true)
+            true
         })
     })
 }
@@ -1977,11 +1977,16 @@ async fn run_ui_commands(
                 requested_timestamp_origin,
             } => window.update(cx, move |_view, window, _cx| {
                 let origin = animation_frame_origin(&timestamp_origin, requested_timestamp_origin);
-                window.on_next_frame(move |_window, _cx| {
-                    dispatch_animation_frame_callback(
-                        callback,
-                        animation_frame_timestamp_ms(origin, web_time::Instant::now()),
-                    );
+                window.on_next_frame(move |_window, cx| {
+                    let timestamp = animation_frame_timestamp_ms(origin, web_time::Instant::now());
+                    // Foreground tasks can be drained re-entrantly by Windows' nested message
+                    // pump while a draw still holds the App borrow. Call the N-API thread-safe
+                    // function from a background worker so JavaScript runs on its own event loop
+                    // after that foreground message pump unwinds.
+                    cx.background_executor().spawn(async move {
+                        dispatch_animation_frame_callback(callback, timestamp);
+                    })
+                    .detach();
                 });
             }),
             UiCommand::SetMenus { menus, response } => {
@@ -5976,7 +5981,8 @@ impl GpuixRenderer {
         {
             let (response, receiver) = sync_channel(1);
             self.send_ui_command(UiCommand::GetElementBounds { id, response })?;
-            return recv_ui_response(receiver, "the GPUI element bounds query");
+            return Ok(recv_ui_response(receiver, "the GPUI element bounds query")?
+                .map(ElementBounds::from_painted));
         }
 
         #[cfg(not(any(
