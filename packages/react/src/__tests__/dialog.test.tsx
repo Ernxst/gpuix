@@ -1,7 +1,7 @@
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { Button } from "../components/button.js"
-import { Dialog, DialogPopup, DialogPortal, DialogTrigger, DialogTitle } from "../components/dialog.js"
+import { AlertDialog, Dialog, DialogPopup, DialogPortal, DialogTitle, DialogTrigger } from "../components/dialog.js"
 import { Select, SelectItem, SelectPopup, SelectTrigger } from "../components/select.js"
 import { Combobox, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup } from "../components/combobox.js"
 import { createTestRoot, isNativeTestRendererAvailable, type TestRoot } from "../testing.js"
@@ -21,24 +21,34 @@ describeNative("Dialog", () => {
   it("cycles Tab and Shift+Tab within a modal popup", () => {
     const first = React.createRef<PublicInstance>()
     const last = React.createRef<PublicInstance>()
+    const close = React.createRef<PublicInstance>()
     screen.render(
-      <Dialog defaultOpen>
-        <DialogPortal>
-          <DialogPopup>
-            <DialogTitle>Confirm</DialogTitle>
-            <button ref={first} ariaLabel="First" />
-            <button ref={last} ariaLabel="Last" />
-          </DialogPopup>
-        </DialogPortal>
-      </Dialog>
+      <Dialog.Root defaultOpen modal="trap-focus">
+        <Dialog.Trigger ariaLabel="Open confirm dialog" />
+        <Dialog.Portal>
+          <Dialog.Backdrop />
+          <Dialog.Viewport>
+            <Dialog.Popup>
+              <Dialog.Title>Confirm</Dialog.Title>
+              <Dialog.Description>Confirm this action.</Dialog.Description>
+              <button ref={first} ariaLabel="First" />
+              <button ref={last} ariaLabel="Last" />
+              <Dialog.Close ref={close}>Close</Dialog.Close>
+            </Dialog.Popup>
+          </Dialog.Viewport>
+        </Dialog.Portal>
+      </Dialog.Root>
     )
 
     expect(screen.renderer.getActiveElement()).toBeDefined()
     screen.renderer.focusElement(last.current!.id)
     screen.renderer.simulateKeystrokes("tab")
-    expect(screen.renderer.getActiveElement()).toBe(first.current!.id)
+    expect(screen.renderer.getActiveElement()).toBe(close.current!.id)
     screen.renderer.simulateKeystrokes("shift-tab")
     expect(screen.renderer.getActiveElement()).toBe(last.current!.id)
+    screen.renderer.focusElement(first.current!.id)
+    screen.renderer.simulateKeystrokes("shift-tab")
+    expect(screen.renderer.getActiveElement()).toBe(close.current!.id)
   })
 
   it("keeps focus on an empty modal popup for Tab and Shift+Tab", () => {
@@ -92,6 +102,66 @@ describeNative("Dialog", () => {
     screen.renderer.simulateKeystrokes("shift-tab")
     expect(screen.renderer.getActiveElement()).toBe(innerLast.current!.id)
     expect(screen.renderer.getActiveElement()).not.toBe(outerFirst.current!.id)
+  })
+
+  it("reports nested Dialog state and nested open descendants", () => {
+    const outerNestedDialogOpen: boolean[] = []
+    const innerNested: boolean[] = []
+    const outerNestedAttributes: unknown[] = []
+    const innerNestedAttributes: unknown[] = []
+    const changes: Array<{ open: boolean; nested: boolean }> = []
+    screen.render(
+      <Dialog.Root defaultOpen>
+        <Dialog.Portal>
+          <Dialog.Viewport>
+            <Dialog.Popup
+              className={(state) => {
+                outerNestedDialogOpen.push(state.nestedDialogOpen)
+                return "outer-popup"
+              }}
+              render={(props) => {
+                outerNestedAttributes.push(props["data-nested-dialog-open"])
+                return <div {...props} />
+              }}
+            >
+              <Dialog.Title>Outer dialog</Dialog.Title>
+              <Dialog.Root
+                defaultOpen
+                onOpenChange={(open, details) => changes.push({ open, nested: details.nested })}
+              >
+                <Dialog.Portal>
+                  <Dialog.Viewport>
+                    <Dialog.Popup
+                      className={(state) => {
+                        innerNested.push(state.nested)
+                        return "inner-popup"
+                      }}
+                      render={(props) => {
+                        innerNestedAttributes.push(props["data-nested"])
+                        return <div {...props} />
+                      }}
+                    >
+                      <Dialog.Title>Inner dialog</Dialog.Title>
+                    </Dialog.Popup>
+                  </Dialog.Viewport>
+                </Dialog.Portal>
+              </Dialog.Root>
+            </Dialog.Popup>
+          </Dialog.Viewport>
+        </Dialog.Portal>
+      </Dialog.Root>,
+    )
+
+    expect(innerNested).toContain(true)
+    expect(innerNestedAttributes).toContain("")
+    expect(outerNestedDialogOpen).toContain(true)
+    expect(outerNestedAttributes).toContain("")
+
+    screen.renderer.simulateKeystrokes("escape")
+
+    expect(changes).toEqual([{ open: false, nested: true }])
+    expect(outerNestedDialogOpen.at(-1)).toBe(false)
+    expect(outerNestedAttributes.at(-1)).toBeUndefined()
   })
 
   it("moves to unrendered virtual rows at the Dialog focus boundary", () => {
@@ -155,24 +225,177 @@ describeNative("Dialog", () => {
     expect(screen.renderer.getActiveElement()).toBe(after.current!.id)
   })
 
-  it("opens a Dialog.Trigger with Enter and Space", () => {
+  it("opens a Dialog.Trigger with Enter and Space", async () => {
     const trigger = React.createRef<PublicInstance>()
-    screen.render(
-      <Dialog>
-        <DialogTrigger ref={trigger} ariaLabel="Open dialog" />
-        <DialogPortal>
-          <DialogPopup><DialogTitle>Keyboard dialog</DialogTitle></DialogPopup>
-        </DialogPortal>
-      </Dialog>
-    )
+    const changes: Array<{ open: boolean; reason: string }> = []
+    function ControlledDialog() {
+      const [open, setOpen] = React.useState(false)
+      return (
+        <Dialog.Root
+          open={open}
+          onOpenChange={(nextOpen, details) => {
+            changes.push({ open: nextOpen, reason: details.reason })
+            setOpen(nextOpen)
+          }}
+        >
+          <Dialog.Trigger ref={trigger} ariaLabel="Open dialog" />
+          <Dialog.Portal>
+            <Dialog.Backdrop />
+            <Dialog.Viewport>
+              <Dialog.Popup>
+                <Dialog.Title>Keyboard dialog</Dialog.Title>
+                <Dialog.Description>Opened from the trigger.</Dialog.Description>
+                <Dialog.Close>Close dialog</Dialog.Close>
+              </Dialog.Popup>
+            </Dialog.Viewport>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )
+    }
+
+    screen.render(<ControlledDialog />)
 
     screen.renderer.focusElement(trigger.current!.id)
     screen.renderer.simulateKeystrokes("enter")
     expect(screen.getByRole("dialog", { name: "Keyboard dialog" })).toBeDefined()
+    expect(changes.at(-1)).toEqual({ open: true, reason: "trigger-press" })
     screen.renderer.simulateKeystrokes("escape")
+    expect(changes.at(-1)).toEqual({ open: false, reason: "escape-key" })
+    await screen.waitFor(() => expect(screen.queryByRole("dialog", { name: "Keyboard dialog" })).toBeNull())
+    expect(screen.renderer.getActiveElement()).toBe(trigger.current!.id)
     screen.renderer.focusElement(trigger.current!.id)
     screen.renderer.simulateKeystrokes("space")
     expect(screen.getByRole("dialog", { name: "Keyboard dialog" })).toBeDefined()
+    screen.renderer.focusElement(screen.getByRole("button", { name: "Close dialog" }).id)
+    screen.renderer.simulateKeystrokes("enter")
+    await screen.waitFor(() => expect(screen.queryByRole("dialog", { name: "Keyboard dialog" })).toBeNull())
+    expect(changes.at(-1)).toEqual({ open: false, reason: "close-press" })
+  })
+
+  it("composes handlers from Trigger and Close render elements", async () => {
+    const trigger = React.createRef<PublicInstance>()
+    const renderedClicks: string[] = []
+    screen.render(
+      <Dialog.Root>
+        <Dialog.Trigger
+          ref={trigger}
+          render={<button ariaLabel="Open dialog" onClick={() => renderedClicks.push("trigger")} />}
+        />
+        <Dialog.Portal>
+          <Dialog.Popup>
+            <Dialog.Title>Rendered dialog</Dialog.Title>
+            <Dialog.Close render={<button ariaLabel="Close dialog" onClick={() => renderedClicks.push("close")} />} />
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>,
+    )
+
+    screen.renderer.focusElement(trigger.current!.id)
+    screen.renderer.simulateKeystrokes("enter")
+    expect(renderedClicks).toEqual(["trigger"])
+    expect(screen.getByRole("dialog", { name: "Rendered dialog" })).toBeDefined()
+
+    screen.renderer.focusElement(screen.getByRole("button", { name: "Close dialog" }).id)
+    screen.renderer.simulateKeystrokes("enter")
+    expect(renderedClicks).toEqual(["trigger", "close"])
+    await screen.waitFor(() => expect(screen.queryByRole("dialog", { name: "Rendered dialog" })).toBeNull())
+  })
+
+  it("supports Base UI change detail controls and retained Portal content", () => {
+    const detailsSeen: Array<{ open: boolean; event: unknown; trigger: PublicInstance | undefined }> = []
+    let cancelFirstClose = true
+    let retainNextClose = true
+    screen.render(
+      <Dialog.Root
+        onOpenChange={(open, details) => {
+          detailsSeen.push({ open, event: details.event, trigger: details.trigger })
+          expect(details.isCanceled).toBe(false)
+          if (open) {
+            details.allowPropagation()
+            expect(details.isPropagationAllowed).toBe(true)
+          } else if (cancelFirstClose) {
+            details.cancel()
+            expect(details.isCanceled).toBe(true)
+            cancelFirstClose = false
+          } else if (retainNextClose) {
+            details.preventUnmountOnClose()
+            retainNextClose = false
+          }
+        }}
+      >
+        <Dialog.Trigger ariaLabel="Open controlled dialog" />
+        <Dialog.Portal>
+          <Dialog.Popup>
+            <Dialog.Title>Retained dialog</Dialog.Title>
+            <Dialog.Close>Close</Dialog.Close>
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>,
+    )
+
+    const trigger = screen.getByRole("button", { name: "Open controlled dialog" })
+    const triggerId = trigger.id
+    screen.renderer.focusElement(trigger.id)
+    screen.renderer.simulateKeystrokes("enter")
+    expect(screen.getByRole("dialog", { name: "Retained dialog" })).toBeDefined()
+
+    const close = screen.getByRole("button", { name: "Close" })
+    screen.renderer.focusElement(close.id)
+    screen.renderer.simulateKeystrokes("enter")
+    expect(screen.getByRole("dialog", { name: "Retained dialog" })).toBeDefined()
+
+    screen.renderer.focusElement(screen.getByRole("button", { name: "Close" }).id)
+    screen.renderer.simulateKeystrokes("enter")
+    expect(screen.getByRole("dialog", { name: "Retained dialog" })).toBeDefined()
+
+    expect(detailsSeen.map(({ open }) => open)).toEqual([true, false, false])
+    expect(detailsSeen.every(({ event }) => event != null)).toBe(true)
+    expect(detailsSeen[0]?.trigger?.id).toBe(triggerId)
+  })
+
+  it("lets change details restore propagation for an outside press", async () => {
+    const bubbled: string[] = []
+    screen.render(
+      <Dialog.Root
+        defaultOpen
+        onOpenChange={(_open, details) => details.allowPropagation()}
+      >
+        <Dialog.Portal>
+          <div onMouseDown={() => bubbled.push("parent")}>
+            <Dialog.Backdrop data-testid="backdrop" />
+            <Dialog.Popup><Dialog.Title>Outside press</Dialog.Title></Dialog.Popup>
+          </div>
+        </Dialog.Portal>
+      </Dialog.Root>,
+    )
+
+    await screen.userEvent.click(screen.getByTestId("backdrop"))
+    expect(bubbled).toEqual(["parent"])
+  })
+
+  it("reports starting and ending transition states to parts and data attributes", () => {
+    const trigger = React.createRef<PublicInstance>()
+    const states: string[] = []
+    screen.render(
+      <Dialog.Root>
+        <Dialog.Trigger ref={trigger} ariaLabel="Open transitions" />
+        <Dialog.Portal>
+          <Dialog.Popup className={(state) => { states.push(state.transitionStatus); return undefined }}>
+            <Dialog.Title>Transitions</Dialog.Title>
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>,
+    )
+
+    screen.renderer.focusElement(trigger.current!.id)
+    screen.renderer.simulateKeystrokes("enter")
+    expect(states).toContain("starting")
+    expect(screen.getByRole("dialog", { name: "Transitions" }).customProps?.["data-starting-style"]).toBe("")
+
+    screen.renderer.focusElement(screen.getByRole("dialog", { name: "Transitions" }).id)
+    screen.renderer.simulateKeystrokes("escape")
+    expect(states).toContain("ending")
+    expect(screen.getByRole("dialog", { name: "Transitions" }).customProps?.["data-ending-style"]).toBe("")
   })
 
   it("dispatches keyboard button activation as a bubbling click event", () => {
@@ -213,7 +436,7 @@ describeNative("Dialog", () => {
     }
   })
 
-  it("closes only the topmost open layer on Escape", () => {
+  it("closes only the topmost open layer on Escape", async () => {
     const selectPopup = React.createRef<PublicInstance>()
     screen.render(
       <Dialog defaultOpen>
@@ -236,10 +459,10 @@ describeNative("Dialog", () => {
     expect(screen.getByRole("dialog", { name: "Outer" })).toBeDefined()
     expect(screen.queryByRole("option", { name: "One" })).toBeNull()
     screen.renderer.simulateKeystrokes("escape")
-    expect(screen.queryByRole("dialog", { name: "Outer" })).toBeNull()
+    await screen.waitFor(() => expect(screen.queryByRole("dialog", { name: "Outer" })).toBeNull())
   })
 
-  it("closes a Combobox before its containing Dialog on Escape", () => {
+  it("closes a Combobox before its containing Dialog on Escape", async () => {
     const input = React.createRef<PublicInstance>()
     screen.render(
       <Dialog defaultOpen>
@@ -263,10 +486,10 @@ describeNative("Dialog", () => {
     expect(screen.getByRole("dialog", { name: "Outer" })).toBeDefined()
     expect(screen.renderer.getAllText()).not.toContain("Alpha")
     screen.renderer.simulateKeystrokes("escape")
-    expect(screen.queryByRole("dialog", { name: "Outer" })).toBeNull()
+    await screen.waitFor(() => expect(screen.queryByRole("dialog", { name: "Outer" })).toBeNull())
   })
 
-  it("restores focus to a nested dialog trigger when the top layer closes", () => {
+  it("restores focus to a nested dialog trigger when the top layer closes", async () => {
     const nestedTrigger = React.createRef<PublicInstance>()
     const nestedPopup = React.createRef<PublicInstance>()
     screen.render(
@@ -290,9 +513,9 @@ describeNative("Dialog", () => {
 
     expect(screen.renderer.getActiveElement()).toBe(nestedPopup.current!.id)
     screen.renderer.simulateKeystrokes("escape")
-    expect(screen.queryByRole("dialog", { name: "Nested" })).toBeNull()
-    expect(screen.getByRole("dialog", { name: "Outer" })).toBeDefined()
     expect(screen.renderer.getActiveElement()).toBe(nestedTrigger.current!.id)
+    await screen.waitFor(() => expect(screen.queryByRole("dialog", { name: "Nested" })).toBeNull())
+    expect(screen.getByRole("dialog", { name: "Outer" })).toBeDefined()
   })
 
   it("focuses initialFocus and restores finalFocus", () => {
@@ -319,6 +542,37 @@ describeNative("Dialog", () => {
     expect(screen.renderer.getActiveElement()).toBe(initial.current!.id)
     screen.render(<Fixture open={false} />)
     expect(screen.renderer.getActiveElement()).toBe(final.current!.id)
+  })
+
+  it("keeps an AlertDialog open on Escape and closes it through Close", async () => {
+    const close = React.createRef<PublicInstance>()
+    const changes: Array<{ open: boolean; reason: string }> = []
+    screen.render(
+      <AlertDialog
+        defaultOpen
+        onOpenChange={(open, details) => changes.push({ open, reason: details.reason })}
+      >
+        <AlertDialog.Trigger>Open alert</AlertDialog.Trigger>
+        <AlertDialog.Portal>
+          <AlertDialog.Backdrop />
+          <AlertDialog.Viewport>
+            <AlertDialog.Popup>
+              <AlertDialog.Title>Delete file?</AlertDialog.Title>
+              <AlertDialog.Description>This cannot be undone.</AlertDialog.Description>
+              <AlertDialog.Close ref={close}>Cancel</AlertDialog.Close>
+            </AlertDialog.Popup>
+          </AlertDialog.Viewport>
+        </AlertDialog.Portal>
+      </AlertDialog>,
+    )
+
+    expect(screen.getByRole("alertdialog", { name: "Delete file?" })).toBeDefined()
+    screen.renderer.simulateKeystrokes("escape")
+    expect(screen.getByRole("alertdialog", { name: "Delete file?" })).toBeDefined()
+    screen.renderer.focusElement(close.current!.id)
+    screen.renderer.simulateKeystrokes("enter")
+    await screen.waitFor(() => expect(screen.queryByRole("alertdialog", { name: "Delete file?" })).toBeNull())
+    expect(changes).toEqual([{ open: false, reason: "close-press" }])
   })
 
   it("exposes modal semantics in the accessibility tree", () => {
