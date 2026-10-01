@@ -52,7 +52,7 @@ const baseFixture = (
           sticky
           arrowPadding={4}
           disableAnchorTracking
-          style={(state) => state.open ? { opacity: 1 } : { opacity: 0 }}
+          style={(state) => state.open && state.instant !== "dismiss" ? { opacity: 1 } : { opacity: 0 }}
         >
           <BaseTooltip.Viewport>
             <BaseTooltip.Popup render={(props, state) => <div {...props} data-state={state.transitionStatus} />}>
@@ -111,7 +111,7 @@ const gpuixFixture = (
           sticky
           arrowPadding={4}
           disableAnchorTracking
-          style={(state) => state.open ? { opacity: 1 } : { opacity: 0 }}
+          style={(state) => state.open && state.instant !== "dismiss" ? { opacity: 1 } : { opacity: 0 }}
         >
           <GpuixTooltip.Viewport>
             <GpuixTooltip.Popup render={(props, state) => <div {...props} data-state={state.transitionStatus} />}>

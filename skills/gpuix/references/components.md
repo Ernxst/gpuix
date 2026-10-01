@@ -166,7 +166,7 @@ import { Tooltip } from "@gpuix/react/tooltip"
 | `Arrow` | `render`, state-based `className` and `style` | Exposes open/closed, side, align, instant and `uncentered` state. |
 | `Viewport` | `render`, state-based `className` and `style` | Provides the Base UI state shape for optional content transitions. |
 
-The Trigger, Positioner, Popup and Arrow emit Base UI open/closed and placement attributes where those parts expose them. Native Portal `container` and `keepMounted` are accepted but do not change the retained tree. `trackCursorAxis` is accepted but has no native cursor-tracking effect. Detached Handle triggers are not implemented; Popup transitions and Arrow centring are not measured, so their transition status stays idle and `uncentered` stays false. `disableHoverableContent` remains as a deprecated Provider alias for older GPU-IX callers.
+The Trigger, Positioner, Popup and Arrow emit Base UI open/closed and placement attributes where those parts expose them. Native Portal `container` and `keepMounted` are accepted but do not change the retained tree. `trackCursorAxis` is accepted but has no native cursor-tracking effect. Popup transitions and Arrow centring are not measured, so their transition status stays idle and `uncentered` stays false. `disableHoverableContent` remains as a deprecated Provider alias for older GPU-IX callers.
 
 ## File pickers (`@gpuix/react/dialogs`)
 

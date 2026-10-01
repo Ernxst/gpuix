@@ -9,6 +9,7 @@ const describeNative = isNativeTestRendererAvailable() ? describe : describe.ski
 describeNative("Tooltip Base UI parity tree", () => {
   it("applies provider delays, reports controlled changes, and positions the full popup tree", async () => {
     const testRoot = createTestRoot()
+    const tooltipHandle = Tooltip.createTooltipHandle()
     let trigger: PublicInstance | null = null
     const changes: Array<{ open: boolean; reason: string }> = []
 
@@ -19,18 +20,12 @@ describeNative("Tooltip Base UI parity tree", () => {
           <Tooltip.Provider delay={40} closeDelay={70} timeout={400}>
             <Tooltip.Root
               open={open}
+              handle={tooltipHandle}
               onOpenChange={(nextOpen, details) => {
                 changes.push({ open: nextOpen, reason: details.reason })
                 setOpen(nextOpen)
               }}
             >
-              <Tooltip.Trigger
-                id="copy-trigger"
-                ref={(instance) => { trigger = instance }}
-                style={{ width: 120, height: 32, backgroundColor: "#334155" }}
-              >
-                Copy
-              </Tooltip.Trigger>
               <Tooltip.Portal>
                 <Tooltip.Positioner side="top" align="center" sideOffset={6}>
                   <Tooltip.Viewport>
@@ -42,6 +37,15 @@ describeNative("Tooltip Base UI parity tree", () => {
                 </Tooltip.Positioner>
               </Tooltip.Portal>
             </Tooltip.Root>
+            <Tooltip.Trigger
+              id="copy-trigger"
+              handle={tooltipHandle}
+              payload={{ source: "clipboard" }}
+              ref={(instance) => { trigger = instance }}
+              style={{ width: 120, height: 32, backgroundColor: "#334155" }}
+            >
+              Copy
+            </Tooltip.Trigger>
           </Tooltip.Provider>
         </div>
       )

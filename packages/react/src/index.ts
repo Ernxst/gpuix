@@ -287,6 +287,7 @@ export type {
   TooltipPortalProps,
   TooltipPortalState,
   TooltipPositionerProps,
+  TooltipPositionerState,
   TooltipArrowProps,
   TooltipArrowState,
   TooltipViewportProps,
