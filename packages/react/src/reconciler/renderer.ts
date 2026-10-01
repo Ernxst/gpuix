@@ -607,7 +607,9 @@ function showRuntimeErrorOverlay(
   let overlayRoot!: Root
   overlayRoot = createRoot(host, {
     onUncaughtError: ({ error: overlayError }) => {
-      queueMicrotask(() => {
+      // Let GPUI release the native event callback's window borrow before
+      // tearing down the failed overlay root.
+      setImmediate(() => {
         if (slot.root !== overlayRoot || slot.fatal) return
         terminateFatally(slot, overlayError, "runtime error overlay")
       })
@@ -657,9 +659,13 @@ function installProcessTerminationGuards(slot: RenderSlot): void {
   const uncaughtException = (
     error: Error,
     origin: NodeJS.UncaughtExceptionOrigin
-  ): void => handleFatalRenderError(slot, error, origin)
-  const unhandledRejection = (reason: unknown): void =>
-    handleFatalRenderError(slot, reason, "unhandledRejection")
+  ): void => {
+    // A microtask can run before GPUI releases the native callback's borrow.
+    setImmediate(() => handleFatalRenderError(slot, error, origin))
+  }
+  const unhandledRejection = (reason: unknown): void => {
+    setImmediate(() => handleFatalRenderError(slot, reason, "unhandledRejection"))
+  }
   process.on("uncaughtException", uncaughtException)
   process.on("unhandledRejection", unhandledRejection)
   slot.processHandlers = { uncaughtException, unhandledRejection }
@@ -763,7 +769,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
       if (injected) return
       // React 19 reports this from its commit path instead of rethrowing it,
       // so neither flushSync's catch nor the process guards can observe it.
-      queueMicrotask(() => {
+      setImmediate(() => {
         if (slot.root !== root) return
         handleFatalRenderError(slot, error, "uncaught React root error", componentStack)
       })
