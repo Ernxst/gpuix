@@ -195,6 +195,7 @@ export declare class GpuixRenderer {
   /** Enter or exit native fullscreen. */
   toggleFullscreen(): void
   setWindowTitle(title: string): void
+  getWindowTitle(): string
   /**
    * Move focus to an element. `preventScroll` mirrors the `FocusOptions`
    * member of `HTMLElement.focus()`: focus without revealing the element

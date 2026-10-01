@@ -200,6 +200,168 @@ describeNative("render", () => {
     expect(screen.renderer.getWindowTitle()).toBe("GPUIX Test")
   })
 
+  it("sets, updates, and restores titles rendered by title elements", () => {
+    const screen = render(<text>Route with default title</text>)
+    const baseTitle = screen.renderer.getWindowTitle()
+    screen.rerender(<title>Settings</title>)
+    expect(screen.renderer.getWindowTitle()).toBe("Settings")
+    expect(screen.renderer.getAllText()).toEqual([])
+
+    screen.rerender(<title>Preferences</title>)
+    expect(screen.renderer.getWindowTitle()).toBe("Preferences")
+
+    screen.rerender(<text>Route without a title</text>)
+    expect(screen.renderer.getWindowTitle()).toBe(baseTitle)
+  })
+
+  it("restores the last directly set window title after the final title unmounts", () => {
+    const screen = render(<text>Title base</text>)
+    screen.renderer.setWindowTitle("Explicit base")
+    screen.rerender(<title>Route title</title>)
+    expect(screen.renderer.getWindowTitle()).toBe("Route title")
+    screen.renderer.setWindowTitle("Updated explicit base")
+    expect(screen.renderer.getWindowTitle()).toBe("Route title")
+    screen.rerender(<text>Route without a title</text>)
+    expect(screen.renderer.getWindowTitle()).toBe("Updated explicit base")
+  })
+
+  it("uses the most recently mounted title and restores earlier titles", () => {
+    const screen = render(<text>Initial route</text>)
+    const baseTitle = screen.renderer.getWindowTitle()
+    screen.rerender(<div><title key="first">First</title></div>)
+    expect(screen.renderer.getWindowTitle()).toBe("First")
+    screen.rerender(
+      <div>
+        <title key="first">First</title>
+        <title key="second">Second</title>
+      </div>
+    )
+    expect(screen.renderer.getWindowTitle()).toBe("Second")
+
+    screen.rerender(
+      <div>
+        <title key="first">First</title>
+      </div>
+    )
+    expect(screen.renderer.getWindowTitle()).toBe("First")
+
+    screen.rerender(<text>Route without a title</text>)
+    expect(screen.renderer.getWindowTitle()).toBe(baseTitle)
+
+    screen.rerender(
+      <div>
+        <title key="second">Second</title>
+      </div>
+    )
+    expect(screen.renderer.getWindowTitle()).toBe("Second")
+    screen.rerender(
+      <div>
+        <title key="second">Second</title>
+        <title key="first">First</title>
+      </div>
+    )
+    expect(screen.renderer.getWindowTitle()).toBe("First")
+    screen.rerender(
+      <div>
+        <title key="second">Second</title>
+      </div>
+    )
+    expect(screen.renderer.getWindowTitle()).toBe("Second")
+    screen.rerender(<text>Route without a title</text>)
+    expect(screen.renderer.getWindowTitle()).toBe(baseTitle)
+  })
+
+  it("stringifies a numeric child", () => {
+    const screen = render(<title>{42}</title>)
+    expect(screen.renderer.getWindowTitle()).toBe("42")
+  })
+
+  it("supports a title inside flowing text without rendering it", () => {
+    const screen = render(
+      <text>
+        Current route
+        <title>Settings</title>
+      </text>
+    )
+    expect(screen.renderer.getWindowTitle()).toBe("Settings")
+    expect(screen.renderer.getAllText()).toEqual(["Current route"])
+  })
+
+  it("sets the title from a route that is conditionally rendered", () => {
+    function Route({ active }: { active: boolean }): React.ReactElement {
+      return active ? <title>Details</title> : <text>Home</text>
+    }
+
+    const screen = render(<Route active={false} />)
+    const baseTitle = screen.renderer.getWindowTitle()
+    screen.rerender(<Route active />)
+    expect(screen.renderer.getWindowTitle()).toBe("Details")
+    screen.rerender(<Route active={false} />)
+    expect(screen.renderer.getWindowTitle()).toBe(baseTitle)
+  })
+
+  it("clears a removed title that was the sole root before rendering visible content", () => {
+    const screen = render(<text>Initial content</text>)
+    const baseTitle = screen.renderer.getWindowTitle()
+    screen.rerender(<title>Temporary root title</title>)
+    expect(screen.renderer.getWindowTitle()).toBe("Temporary root title")
+
+    screen.rerender(null)
+    expect(screen.renderer.getWindowTitle()).toBe(baseTitle)
+
+    screen.rerender(<text>Visible route content</text>)
+    expect(screen.renderer.getWindowTitle()).toBe(baseTitle)
+    expect(screen.renderer.getAllText()).toEqual(["Visible route content"])
+
+    screen.rerender(<title>Next route title</title>)
+    expect(screen.renderer.getWindowTitle()).toBe("Next route title")
+  })
+
+  it("accepts suppressHydrationWarning and updates the title", () => {
+    const screen = render(<title suppressHydrationWarning>First</title>)
+    expect(screen.renderer.getWindowTitle()).toBe("First")
+    screen.rerender(<title suppressHydrationWarning>Second</title>)
+    expect(screen.renderer.getWindowTitle()).toBe("Second")
+  })
+
+  it("updates a real browser document title and restores its previous value", () => {
+    const previousDocument = Reflect.get(globalThis, "document")
+    const browserDocument = { title: "Browser default" }
+    Reflect.set(globalThis, "document", browserDocument)
+    try {
+      const screen = render(<title>Browser route</title>)
+      expect(browserDocument.title).toBe("Browser route")
+      screen.rerender(<title>Next route</title>)
+      expect(browserDocument.title).toBe("Next route")
+      screen.rerender(<text>Route without a title</text>)
+      expect(browserDocument.title).toBe("Browser default")
+    } finally {
+      if (previousDocument === undefined) Reflect.deleteProperty(globalThis, "document")
+      else Reflect.set(globalThis, "document", previousDocument)
+    }
+  })
+
+  it("sets an empty title for an element child without warning", () => {
+    const warn = vi.spyOn(console, "error").mockImplementation(() => {})
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const screen = render(
+      <div>
+        <title><span>Nested</span></title>
+      </div>
+    )
+    expect(screen.renderer.getWindowTitle()).toBe("")
+    screen.rerender(
+      <div>
+        <title>First {42}</title>
+      </div>
+    )
+    expect(screen.renderer.getWindowTitle()).toBe("")
+    expect(warn).not.toHaveBeenCalled()
+    expect(warning).not.toHaveBeenCalled()
+    warn.mockRestore()
+    warning.mockRestore()
+  })
+
   it("flushes passive effects before render, rerender and unmount return", () => {
     registrationCleanups.length = 0
 

@@ -35,8 +35,88 @@ The intrinsic elements are the `ElementType` union in `packages/react/src/types/
 
 ## Element table
 
+Supported intrinsic elements (`ElementType`):
+
+<!-- skill-check:supported-elements -->
+```text
+title
+div
+text
+main
+header
+footer
+nav
+section
+article
+aside
+h1
+h2
+h3
+h4
+h5
+h6
+p
+span
+strong
+em
+ul
+ol
+li
+a
+button
+kbd
+abbr
+address
+b
+blockquote
+cite
+del
+dfn
+figure
+figcaption
+i
+ins
+mark
+menu
+pre
+s
+samp
+small
+sub
+sup
+time
+u
+var
+label
+form
+hr
+dl
+dt
+dd
+search
+table
+caption
+thead
+tbody
+tfoot
+tr
+th
+td
+img
+svg
+canvas
+input
+textarea
+anchored
+code
+diff
+markdown
+virtual-list
+```
+
 | Element | Children | Notes |
 |---|---|---|
+| `title` | one string or number | Sets the native window title or browser `document.title`; it renders no visible content. Last mounted title wins; unmount restores the previous title, then the configured window title or last `setWindowTitle()` value. Other child shapes set an empty title, matching React DOM. Accepts `suppressHydrationWarning` for shared router head output. |
 | `div` | yes | Block by default; `display: "flex"` or `"grid"` for flex or grid. |
 | `text` | strings and `<text>` | The only element that shapes text. Raw strings directly inside a `div` also become text nodes and inherit text styles. |
 | `main header footer nav section article aside h1`–`h6` `p span strong em ul ol li a kbd abbr address b blockquote cite del dfn figure figcaption i ins mark menu pre s samp small sub sup time u var dl dt dd search hr` | yes, except `hr` | Drawn as `div` with the tag's implicit role; no user-agent styles. `dl`, `dt`, `dd` and `search` retain their description-list and landmark roles. `hr` is a horizontal separator, has no default line, and needs an authored style; it rejects children. |

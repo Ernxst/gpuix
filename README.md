@@ -1137,8 +1137,24 @@ function Reveal() {
 
 Outside React, call it on the renderer that `createRenderer()` returned.
 
-Change the renderer window title after launch with `setWindowTitle()`. It is
-available on native and browser renderers and does not add a `<title>` element:
+Render `<title>` anywhere in the React tree to set the current view's window
+title. The last mounted title wins; when it unmounts, the preceding title is
+restored. When the last title unmounts, the renderer returns to its configured
+title or the most recent `setWindowTitle()` call. The browser renderer also
+updates `document.title`. A title accepts one string or number child; other child
+shapes produce an empty title, matching React DOM:
+
+```tsx
+function SearchRoute() {
+  return <title>Search</title>
+}
+```
+
+The native renderer exposes `getWindowTitle()` to read the current window title.
+`suppressHydrationWarning` is accepted on `<title>` for shared router head output.
+
+Call `setWindowTitle()` when you need to change the title imperatively, outside
+the rendered tree. It is available on native and browser renderers:
 
 ```tsx
 function RenameWindow() {
@@ -3494,10 +3510,10 @@ draws. `render()` and an explicit `renderer.flush()` establish the rendered
 state boundary; reads and action injection use that last snapshot and its
 installed listeners until the next explicit draw. This is not a parallel
 reconstruction from React props.
-`renderer.getWindowTitle()` reads the window title from that same last-drawn
-accessibility frame, or returns `null` when the frame has no title. After a test
-component calls `useGpuixRequired().setWindowTitle(title)`, the test renderer's
-`getWindowTitle()` returns that title. Read it from the `render()` result:
+The test renderer's `renderer.getWindowTitle()` reads the title from that same
+last-drawn accessibility frame, or returns `null` when the frame has no title.
+After a test component calls `useGpuixRequired().setWindowTitle(title)`, it
+returns that title. Read it from the `render()` result:
 
 ```tsx
 const screen = render(<App />)
@@ -4307,6 +4323,7 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 
 | Element         | Description                                      |
 |-----------------|--------------------------------------------------|
+| `title`         | Sets the native window title or browser `document.title`; renders no visible content |
 | `div`           | Container with flexbox layout                    |
 | `text`          | Text content, selectable                         |
 | `code`          | Syntax-highlighted code block                    |
@@ -4321,6 +4338,14 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `svg`           | Tintable monochrome SVG icons from source or disk |
 | `anchored`      | Positioned overlay                               |
 | `canvas`        | Immediate-mode 2D paths, fills, strokes, transforms, and images |
+
+`<title>` takes one string or number child. Updating it updates the current
+window title; when several are mounted, the last mounted title wins, and
+unmounting it restores the title mounted before it. Removing the final title
+restores the window's configured title or the last value passed to
+`renderer.setWindowTitle()`. On the browser target it updates `document.title`.
+Other child shapes, including an element child, set an empty title, matching
+React DOM. `suppressHydrationWarning` is accepted for shared router head output.
 
 HTML aliases support the same layout, style, event, ref, and accessibility
 surface as `div`: `main`, `header`, `footer`, `nav`, `section`, `article`,

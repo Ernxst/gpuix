@@ -72,3 +72,12 @@ test("the skill lists every package entry point", async () => {
   ]
   expect(entryPoints.toSorted()).toEqual(exported.toSorted())
 })
+
+test("the elements reference lists every supported intrinsic element", async () => {
+  const elements = await listed("references/elements.md", "supported-elements")
+  const hostTypes = await readFile(path.join(repoRoot, "packages/react/src/types/host.ts"), "utf8")
+  const typeUnion = /export type ElementType\s*=([\s\S]*?)\n\n\/\/ ──/.exec(hostTypes)?.[1]
+  if (typeUnion === undefined) throw new Error("ElementType union was not found")
+  const supported = [...typeUnion.matchAll(/"([^"]+)"/g)].map((match) => match[1]!)
+  expect(elements.toSorted()).toEqual(supported.toSorted())
+})
