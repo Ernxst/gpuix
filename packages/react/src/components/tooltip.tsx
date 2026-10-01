@@ -585,7 +585,10 @@ const TooltipTriggerInRoot = forwardRef<PublicInstance, TooltipTriggerProps>(fun
     },
     onFocus: (event: GpuixSyntheticEvent) => {
       onFocus?.(event as never)
-      if (!disabled) context.openNow("trigger-focus", event, triggerId, payload)
+      if (!disabled) {
+        context.setCloseDelay(closeDelay ?? provider.closeDelay)
+        context.openNow("trigger-focus", event, triggerId, payload)
+      }
     },
     onBlur: (event: GpuixSyntheticEvent) => {
       onBlur?.(event as never)
@@ -593,7 +596,6 @@ const TooltipTriggerInRoot = forwardRef<PublicInstance, TooltipTriggerProps>(fun
     },
     onMouseDown: (event: GpuixSyntheticEvent) => {
       onMouseDown?.(event as never)
-      if (closeOnClick && isOpen) context.close("trigger-press", event)
     },
     onClick: (event: GpuixSyntheticEvent) => {
       onClick?.(event as never)
@@ -675,7 +677,10 @@ const TooltipTriggerWithHandle = forwardRef<PublicInstance, TooltipTriggerProps>
     },
     onFocus: (event: GpuixSyntheticEvent) => {
       onFocus?.(event as never)
-      if (!disabled) activateTooltipHandle(activeHandle, triggerId, payload, "trigger-focus", event)
+      if (!disabled) {
+        setTooltipHandleCloseDelay(activeHandle, closeDelay ?? provider.closeDelay)
+        activateTooltipHandle(activeHandle, triggerId, payload, "trigger-focus", event)
+      }
     },
     onBlur: (event: GpuixSyntheticEvent) => {
       onBlur?.(event as never)
@@ -683,7 +688,6 @@ const TooltipTriggerWithHandle = forwardRef<PublicInstance, TooltipTriggerProps>
     },
     onMouseDown: (event: GpuixSyntheticEvent) => {
       onMouseDown?.(event as never)
-      if (closeOnClick && isOpen) closeTooltipHandleWithReason(activeHandle, "trigger-press", event)
     },
     onClick: (event: GpuixSyntheticEvent) => {
       onClick?.(event as never)
@@ -816,6 +820,12 @@ export const TooltipPopup = forwardRef<PublicInstance, TooltipPopupProps>(functi
     },
     onMouseDownOutside: (event) => {
       onMouseDownOutside?.(event)
+      if (event.x !== undefined && event.y !== undefined) {
+        for (const trigger of context.triggerRefs.current.values()) {
+          const bounds = trigger.getBoundingClientRect()
+          if (event.x >= bounds.left && event.x <= bounds.right && event.y >= bounds.top && event.y <= bounds.bottom) return
+        }
+      }
       context.close("outside-press", event)
     },
   }

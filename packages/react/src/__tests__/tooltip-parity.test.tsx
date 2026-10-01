@@ -152,4 +152,82 @@ describeNative("Tooltip Base UI parity tree", () => {
     expect(popup.getBoundingClientRect().bottom).toBeLessThanOrEqual(firstBounds.top)
     testRoot.render(null)
   })
+
+  it.each(["in-Root", "detached Handle"] as const)("uses Trigger.closeDelay after focus opens a %s tooltip", async (mode) => {
+    const testRoot = createTestRoot()
+    const detached = mode === "detached Handle"
+    const tooltipHandle = Tooltip.createTooltipHandle()
+    let trigger: PublicInstance | null = null
+
+    testRoot.render(
+      <div style={{ width: 420, height: 300, padding: 16 }}>
+        <Tooltip.Provider closeDelay={0}>
+          <Tooltip.Root handle={detached ? tooltipHandle : undefined}>
+            <Tooltip.Positioner side="top">
+              <Tooltip.Popup data-testid="focus-delay-popup" style={{ width: 150, height: 28 }}>Tip</Tooltip.Popup>
+            </Tooltip.Positioner>
+            {!detached && (
+              <Tooltip.Trigger id="focus-trigger" ref={(instance) => { trigger = instance }} closeDelay={60}>
+                Focus trigger
+              </Tooltip.Trigger>
+            )}
+          </Tooltip.Root>
+          {detached && (
+            <Tooltip.Trigger id="focus-trigger" handle={tooltipHandle} ref={(instance) => { trigger = instance }} closeDelay={60}>
+              Focus trigger
+            </Tooltip.Trigger>
+          )}
+        </Tooltip.Provider>
+      </div>
+    )
+
+    testRoot.renderer.focusElement(trigger!.id)
+    expect(testRoot.renderer.findByTestId("focus-delay-popup")).toBeDefined()
+    const popupBounds = testRoot.renderer.findByTestId("focus-delay-popup")!.getBoundingClientRect()
+    testRoot.renderer.nativeSimulateMouseMove(popupBounds.x + 8, popupBounds.y + 8)
+    testRoot.renderer.nativeSimulateMouseMove(410, 290)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(testRoot.renderer.findByTestId("focus-delay-popup")).toBeDefined()
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(testRoot.renderer.findByTestId("focus-delay-popup")).toBeUndefined()
+    testRoot.render(null)
+  })
+
+  it("fires one controlled close callback for a trigger press in either trigger mode", () => {
+    const testRoot = createTestRoot()
+    const rootChanges: Array<{ open: boolean; reason: string }> = []
+    testRoot.render(
+      <div style={{ width: 320, height: 200 }}>
+        <Tooltip.Root open triggerId="root-press-trigger" onOpenChange={(open, details) => rootChanges.push({ open, reason: details.reason })}>
+          <Tooltip.Positioner><Tooltip.Popup>Root tooltip</Tooltip.Popup></Tooltip.Positioner>
+          <Tooltip.Trigger id="root-press-trigger" data-testid="root-press-trigger">Root trigger</Tooltip.Trigger>
+        </Tooltip.Root>
+      </div>
+    )
+    const rootTrigger = testRoot.renderer.findByTestId("root-press-trigger")!
+    const rootBounds = rootTrigger.getBoundingClientRect()
+    testRoot.renderer.nativeSimulateClick(rootBounds.x + 8, rootBounds.y + 8)
+    expect(rootChanges).toEqual([{ open: false, reason: "trigger-press" }])
+
+    testRoot.render(null)
+    const tooltipHandle = Tooltip.createTooltipHandle()
+    const handleChanges: Array<{ open: boolean; reason: string }> = []
+    testRoot.render(
+      <div style={{ width: 320, height: 200 }}>
+        <Tooltip.Provider>
+          <Tooltip.Root open handle={tooltipHandle} onOpenChange={(open, details) => handleChanges.push({ open, reason: details.reason })}>
+            <Tooltip.Positioner><Tooltip.Popup>Handle tooltip</Tooltip.Popup></Tooltip.Positioner>
+          </Tooltip.Root>
+          <Tooltip.Trigger id="handle-press-trigger" handle={tooltipHandle} data-testid="handle-press-trigger">Handle trigger</Tooltip.Trigger>
+        </Tooltip.Provider>
+      </div>
+    )
+    tooltipHandle.open("handle-press-trigger")
+    handleChanges.length = 0
+    const handleTrigger = testRoot.renderer.findByTestId("handle-press-trigger")!
+    const handleBounds = handleTrigger.getBoundingClientRect()
+    testRoot.renderer.nativeSimulateClick(handleBounds.x + 8, handleBounds.y + 8)
+    expect(handleChanges).toEqual([{ open: false, reason: "trigger-press" }])
+    testRoot.render(null)
+  })
 })
