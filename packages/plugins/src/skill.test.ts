@@ -73,10 +73,20 @@ test("the skill lists every package entry point", async () => {
   expect(entryPoints.toSorted()).toEqual(exported.toSorted())
 })
 
+function elementTypeUnion(hostTypes: string): string | undefined {
+  return /export type ElementType\s*=([\s\S]*?)\r?\n\r?\n\/\/ ──/.exec(hostTypes)?.[1]
+}
+
+test("reads supported elements from CRLF host types", async () => {
+  const hostTypes = await readFile(path.join(repoRoot, "packages/react/src/types/host.ts"), "utf8")
+  const crlfHostTypes = hostTypes.replace(/\r\n|\n/g, "\r\n")
+  expect(elementTypeUnion(crlfHostTypes)?.replace(/\r\n/g, "\n")).toEqual(elementTypeUnion(hostTypes))
+})
+
 test("the elements reference lists every supported intrinsic element", async () => {
   const elements = await listed("references/elements.md", "supported-elements")
   const hostTypes = await readFile(path.join(repoRoot, "packages/react/src/types/host.ts"), "utf8")
-  const typeUnion = /export type ElementType\s*=([\s\S]*?)\n\n\/\/ ──/.exec(hostTypes)?.[1]
+  const typeUnion = elementTypeUnion(hostTypes)
   if (typeUnion === undefined) throw new Error("ElementType union was not found")
   const supported = [...typeUnion.matchAll(/"([^"]+)"/g)].map((match) => match[1]!)
   expect(elements.toSorted()).toEqual(supported.toSorted())
