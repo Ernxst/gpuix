@@ -1002,22 +1002,27 @@ describeNative("custom element: img", { timeout: 28_000 }, () => {
 
     testRoot.renderer.advanceAsyncClock(1_100)
     const successScreenshot = `${SHOTS_DIR}/gpuix-image-retry-success.png`
+    const image = testRoot.renderer.findByType("img")[0]!
+    const failureBytes = fs.readFileSync(failureScreenshot)
     for (let frame = 0; frame < 100; frame++) {
       testRoot.renderer.flush()
       testRoot.renderer.captureScreenshot(successScreenshot)
       if (
         retryRequestCount >= 2 &&
-        !testRoot.renderer.getPaintedText().join(" ").includes("img:")
+        testRoot.renderer.getImageLoadState(image.id)?.status === "loaded" &&
+        !testRoot.renderer.getPaintedText().join(" ").includes("img:") &&
+        bufferSimilarity(failureBytes, fs.readFileSync(successScreenshot)) < 0.99
       ) {
         break
       }
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
     expect(retryRequestCount).toBeGreaterThanOrEqual(2)
+    expect(testRoot.renderer.getImageLoadState(image.id)).toMatchObject({ status: "loaded" })
     expect(testRoot.renderer.getPaintedText().join(" ")).not.toContain("img:")
     expect(
       bufferSimilarity(
-        fs.readFileSync(failureScreenshot),
+        failureBytes,
         fs.readFileSync(successScreenshot)
       )
     ).toBeLessThan(0.99)
