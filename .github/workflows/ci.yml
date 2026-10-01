@@ -20,8 +20,10 @@ jobs:
   typecheck:
     name: Typecheck
     # Waits for the build so the native binding's types come from the cache.
+    # Runs on macOS because those types include the test renderer, which the
+    # Linux build leaves out.
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     permissions:
       contents: read
     env:
@@ -41,8 +43,8 @@ jobs:
       - name: Setup rust
         uses: ./.github/actions/rust
 
-      - name: Setup linux
-        uses: ./.github/actions/linux
+      - name: Setup macos
+        uses: ./.github/actions/macos
 
       - name: Typecheck
         run: bun run typecheck
@@ -84,16 +86,24 @@ jobs:
         uses: ./.github/actions/linux
 
       - name: Build
+        if: runner.os != 'Linux'
         run: bun run build
+
+      # `test-support` does not compile on Linux until wgpu image readback
+      # lands, so Linux checks that the addon builds without it.
+      - name: Build the native addon without test-support
+        if: runner.os == 'Linux'
+        working-directory: packages/native
+        run: bun run build:release
 
   test:
     name: Test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
+        # No Linux: its addon has no test renderer.
         os:
           - macos-latest
-          - ubuntu-latest
           - windows-latest
     runs-on: ${{ matrix.os }}
     env:
@@ -118,9 +128,5 @@ jobs:
         if: runner.os == 'macOS'
         uses: ./.github/actions/macos
 
-      - name: Setup linux
-        if: runner.os == 'Linux'
-        uses: ./.github/actions/linux
-
-      - name: Test plugins package
+      - name: Test
         run: bun run test

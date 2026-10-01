@@ -23,7 +23,7 @@ Use Bun and the checked-in lockfile. In a new checkout, install with `bun instal
 - Browser build: `bun scripts/web.ts --build-only` from the repository root.
 - Target directory: don't set `CARGO_TARGET_DIR` or pass `--target-dir`, including for one-off review builds. Cargo runs through mbx, which already gives each checkout its own target directory and deletes it when unused; a custom target directory bypasses mbx and is never cleaned up. Before the first native build in a new checkout, run `mkdir -p packages/native/target && mbx adopt packages/native`. Otherwise `napi build` creates `target/` as a plain directory before Cargo runs, and mbx stops the build in a terminal to ask whether to move it, which an unattended run cannot answer.
 
-The CI workflow is enabled. Pushes to `main` and pull requests build and test on macOS, Linux and Windows, and typecheck on Linux. A branch with no pull request gets a run only from `workflow_dispatch`. Do not disable the workflow.
+The CI workflow is enabled. Pushes to `main` and pull requests build on macOS, Linux and Windows, then test on macOS and Windows and typecheck on macOS. Linux only checks that the native addon compiles without `test-support`, so a Linux change is not covered by tests. A branch with no pull request gets a run only from `workflow_dispatch`. Do not disable the workflow.
 
 Verify the target changed: TypeScript checks do not compile Rust, and native checks do not validate the browser renderer. Consult the relevant package scripts or CI job for additional checks required by the change.
 
