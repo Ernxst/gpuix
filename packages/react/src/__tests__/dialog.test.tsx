@@ -104,6 +104,66 @@ describeNative("Dialog", () => {
     expect(screen.renderer.getActiveElement()).not.toBe(outerFirst.current!.id)
   })
 
+  it("reports nested Dialog state and nested open descendants", () => {
+    const outerNestedDialogOpen: boolean[] = []
+    const innerNested: boolean[] = []
+    const outerNestedAttributes: unknown[] = []
+    const innerNestedAttributes: unknown[] = []
+    const changes: Array<{ open: boolean; nested: boolean }> = []
+    screen.render(
+      <Dialog.Root defaultOpen>
+        <Dialog.Portal>
+          <Dialog.Viewport>
+            <Dialog.Popup
+              className={(state) => {
+                outerNestedDialogOpen.push(state.nestedDialogOpen)
+                return "outer-popup"
+              }}
+              render={(props) => {
+                outerNestedAttributes.push(props["data-nested-dialog-open"])
+                return <div {...props} />
+              }}
+            >
+              <Dialog.Title>Outer dialog</Dialog.Title>
+              <Dialog.Root
+                defaultOpen
+                onOpenChange={(open, details) => changes.push({ open, nested: details.nested })}
+              >
+                <Dialog.Portal>
+                  <Dialog.Viewport>
+                    <Dialog.Popup
+                      className={(state) => {
+                        innerNested.push(state.nested)
+                        return "inner-popup"
+                      }}
+                      render={(props) => {
+                        innerNestedAttributes.push(props["data-nested"])
+                        return <div {...props} />
+                      }}
+                    >
+                      <Dialog.Title>Inner dialog</Dialog.Title>
+                    </Dialog.Popup>
+                  </Dialog.Viewport>
+                </Dialog.Portal>
+              </Dialog.Root>
+            </Dialog.Popup>
+          </Dialog.Viewport>
+        </Dialog.Portal>
+      </Dialog.Root>,
+    )
+
+    expect(innerNested).toContain(true)
+    expect(innerNestedAttributes).toContain("")
+    expect(outerNestedDialogOpen).toContain(true)
+    expect(outerNestedAttributes).toContain("")
+
+    screen.renderer.simulateKeystrokes("escape")
+
+    expect(changes).toEqual([{ open: false, nested: true }])
+    expect(outerNestedDialogOpen.at(-1)).toBe(false)
+    expect(outerNestedAttributes.at(-1)).toBeUndefined()
+  })
+
   it("moves to unrendered virtual rows at the Dialog focus boundary", () => {
     screen.render(
       <>

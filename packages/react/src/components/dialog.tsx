@@ -68,6 +68,8 @@ export interface DialogContextValue {
   open: boolean
   modal: DialogModal
   alert: boolean
+  nested: boolean
+  nestedDialogOpen: boolean
   disablePointerDismissal: boolean
   setOpen(open: boolean, reason?: DialogChangeEventDetails["reason"], nativeEvent?: GpuixSyntheticEvent): void
   triggerRef: React.MutableRefObject<PublicInstance | null>
@@ -76,6 +78,7 @@ export interface DialogContextValue {
   isTopLayer(event?: GpuixSyntheticEvent): boolean
   triggerId: string | null
   setTriggerId(id: string | null): void
+  onNestedDialogCountChange(id: string, count: number): void
 }
 
 const DialogContext = createContext<DialogContextValue | null>(null)
@@ -123,7 +126,10 @@ function DialogRootImpl<Payload = unknown>({
   defaultTriggerId,
   alert = false,
 }: RootOptions<Payload>): ReactElement {
+  const parentContext = useContext(DialogContext)
+  const nested = parentContext !== null
   const [localOpen, setLocalOpen] = useState(defaultOpen)
+  const [nestedDialogCounts, setNestedDialogCounts] = useState<Record<string, number>>({})
   const open = openProp ?? localOpen
   const [triggerId, setTriggerIdState] = useState<string | null>(triggerIdProp ?? defaultTriggerId ?? null)
   const [payload, setPayload] = useState<Payload | undefined>(undefined)
@@ -135,6 +141,20 @@ function DialogRootImpl<Payload = unknown>({
   const triggerRef = useRef<PublicInstance | null>(null)
   const titleId = useId()
   const descriptionId = useId()
+  const nestedDialogId = useId()
+  const nestedDialogCount = Object.values(nestedDialogCounts).reduce((total, count) => total + count, 0)
+  const onNestedDialogCountChange = useCallback((id: string, count: number) => {
+    setNestedDialogCounts((current) => {
+      if (count === 0) {
+        if (!(id in current)) return current
+        const next = { ...current }
+        delete next[id]
+        return next
+      }
+      if (current[id] === count) return current
+      return { ...current, [id]: count }
+    })
+  }, [])
   const setTriggerId = useCallback((id: string | null) => {
     setTriggerIdState(id)
   }, [])
@@ -145,12 +165,12 @@ function DialogRootImpl<Payload = unknown>({
     const details: DialogChangeEventDetails = {
       reason,
       nativeEvent,
-      nested: false,
+      nested,
       triggerElement: triggerRef.current,
       preventUnmountOnClose() {},
     }
     onChangeRef.current?.(nextOpen, details)
-  }, [openProp])
+  }, [nested, openProp])
   const controller = useRef<HandleController<Payload> | null>(null)
   controller.current = {
     open: (id, nextPayload, hasPayload) => {
@@ -176,11 +196,19 @@ function DialogRootImpl<Payload = unknown>({
   useEffect(() => {
     if (triggerIdProp !== undefined) setTriggerIdState(triggerIdProp)
   }, [triggerIdProp])
+  useLayoutEffect(() => {
+    parentContext?.onNestedDialogCountChange(nestedDialogId, open ? nestedDialogCount + 1 : 0)
+  }, [nestedDialogCount, nestedDialogId, open, parentContext?.onNestedDialogCountChange])
+  useLayoutEffect(() => () => {
+    parentContext?.onNestedDialogCountChange(nestedDialogId, 0)
+  }, [nestedDialogId, parentContext?.onNestedDialogCountChange])
 
   const context: DialogContextValue = {
     open,
     modal,
     alert,
+    nested,
+    nestedDialogOpen: nestedDialogCount > 0,
     disablePointerDismissal,
     setOpen,
     triggerRef,
@@ -189,6 +217,7 @@ function DialogRootImpl<Payload = unknown>({
     isTopLayer,
     triggerId,
     setTriggerId,
+    onNestedDialogCountChange,
   }
   const content = typeof children === "function" ? children({ payload }) : children
   return <DialogContext.Provider value={context}><DismissLayerScope>{content}</DismissLayerScope></DialogContext.Provider>
@@ -207,9 +236,9 @@ export interface DialogPartState {
 export interface DialogTriggerState { disabled: boolean; open: boolean }
 export interface DialogCloseState { disabled: boolean }
 export interface DialogSimpleState {}
+export interface DialogPortalState {}
 export type DialogPopupState = DialogPartState
 export type DialogViewportState = DialogPartState
-export type DialogPortalState = { open: boolean }
 export type DialogBackdropState = { open: boolean; transitionStatus: DialogPartState["transitionStatus"] }
 export type DialogTitleState = DialogSimpleState
 export type DialogDescriptionState = DialogSimpleState
@@ -225,7 +254,12 @@ export interface DialogComponentProps<State> extends Omit<Props, "className" | "
 }
 
 function partState(context: DialogContextValue): DialogPartState {
-  return { open: context.open, transitionStatus: "none", nested: false, nestedDialogOpen: false }
+  return {
+    open: context.open,
+    transitionStatus: "none",
+    nested: context.nested,
+    nestedDialogOpen: context.nestedDialogOpen,
+  }
 }
 
 function stateAttributes(state: DialogPartState): Props {
@@ -236,6 +270,15 @@ function stateAttributes(state: DialogPartState): Props {
     "data-ending-style": undefined,
     "data-nested": state.nested ? "" : undefined,
     "data-nested-dialog-open": state.nestedDialogOpen ? "" : undefined,
+  }
+}
+
+function backdropStateAttributes(state: DialogBackdropState): Props {
+  return {
+    "data-open": state.open ? "" : undefined,
+    "data-closed": state.open ? undefined : "",
+    "data-starting-style": state.transitionStatus === "starting" ? "" : undefined,
+    "data-ending-style": state.transitionStatus === "ending" ? "" : undefined,
   }
 }
 
@@ -338,7 +381,7 @@ function resolveStyle<State>(value: DialogComponentProps<State>["style"], state:
 
 export const DialogTrigger = forwardRef<PublicInstance, DialogTriggerProps<unknown>>(DialogTriggerImpl)
 
-export interface DialogPortalProps extends DialogComponentProps<{ open: boolean }> {
+export interface DialogPortalProps extends DialogComponentProps<DialogPortalState> {
   container?: HTMLElement | ShadowRoot | RefObject<HTMLElement | ShadowRoot | null> | null | undefined
   keepMounted?: boolean | undefined
 }
@@ -348,7 +391,7 @@ export const DialogPortal = forwardRef<PublicInstance, DialogPortalProps>(functi
 ) {
   const context = useDialogContext("Dialog.Portal")
   if (!context.open && !keepMounted) return null
-  const state = { open: context.open }
+  const state: DialogPortalState = {}
   const resolvedStyle: StyleDesc = { display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "transparent", ...resolveStyle(style, state), pointerEvents: context.modal === true ? undefined : "none" }
   const portalProps = {
     ...props,
@@ -359,7 +402,6 @@ export const DialogPortal = forwardRef<PublicInstance, DialogPortalProps>(functi
     className,
     style: resolvedStyle,
     children,
-    ...stateAttributes({ ...partState(context), open: context.open }),
   }
   return renderPart("anchored", { ...portalProps, render }, state, ref)
 })
@@ -385,7 +427,7 @@ export const DialogBackdrop = forwardRef<PublicInstance, DialogBackdropProps>(fu
     children,
     render,
   }
-  return renderPart("div", { ...elementProps, ...stateAttributes(partState(context)) }, state, ref)
+  return renderPart("div", { ...elementProps, ...backdropStateAttributes(state) }, state, ref)
 })
 
 export interface DialogPopupProps extends DialogComponentProps<DialogPartState> {
