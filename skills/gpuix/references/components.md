@@ -93,13 +93,9 @@ from `/dialog` is a deprecated alias.
 
 Exports `FloatingLayer`, `FloatingPositioner`, `floatingRootStyle`, `mergeStyles`, `renderSlot`, `resolveStyle`, `setRefs`, and the shared `PositionerProps` and positioning types. Select uses `FloatingPositioner`; Combobox and Tooltip can reuse the component-agnostic contract.
 
-| `FloatingPopupProps` | Default | Meaning |
-|---|---|---|
-| `side` | `"bottom"` | `top`, `right`, `bottom`, `left` |
-| `align` | `"start"` | `start`, `center`, `end` |
-| `sideOffset` | 0 | Gap from the anchor box. |
-| `alignOffset` | 0 | Cross-axis offset. |
-| `collisionPadding` | 8 | Margin kept from the window edge when snapping inside it. |
+`PositionerProps` is shared by Select, Combobox, and Tooltip. It accepts `anchor`, `side` (including `inline-start`/`inline-end`), numeric or callback `sideOffset` and `alignOffset`, `align`, `collisionBoundary`, numeric or per-edge `collisionPadding`, and `collisionAvoidance`. Collision handling can flip sides, flip alignment, or shift the surface within the effective boundary; `anchorHidden` reports an anchor outside it. `collisionBoundary="clipping-ancestors"` means the native window viewport. GPU-IX also accepts an explicit `position` on its Positioner, which Base UI does not expose.
+
+The Positioner accepts `positionMethod`, `sticky`, `arrowPadding`, and `disableAnchorTracking` for Base UI type compatibility, but the native renderer does not implement those behaviours. Logical sides map to left/right without text-direction resolution, and `collisionAvoidance.fallbackAxisSide` has no native effect. Select's `alignItemWithTrigger` is a Popup prop and has no native effect.
 
 - The outer anchored surface takes only `visibility`, `opacity` and the border radii; everything else styles the inner content. Nested opacity is not multiplied.
 - An open Popup blocks clicks on controls behind it; a closed one does not. `pointerEvents: "none"` turns that off.
