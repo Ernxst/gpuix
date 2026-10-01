@@ -28,6 +28,22 @@ function countPixels(image: ReturnType<typeof decodePng>, bounds: { x: number; y
   return count
 }
 
+function expectHorizontalPixelRow(
+  image: ReturnType<typeof decodePng>,
+  bounds: { x: number; y: number; width: number; height: number },
+  colour: readonly [number, number, number],
+) {
+  const scale = image.width / 240
+  const left = Math.max(0, Math.floor(bounds.x * scale))
+  const right = Math.min(image.width, Math.ceil((bounds.x + bounds.width) * scale))
+  const y = Math.max(0, Math.min(image.height - 1, Math.floor((bounds.y + bounds.height / 2) * scale)))
+
+  for (let x = left; x < right; x++) {
+    const offset = (y * image.width + x) * 4
+    expect(Array.from(image.data.slice(offset, offset + 4))).toEqual([...colour, 255])
+  }
+}
+
 describe.skipIf(!isNativeTestRendererAvailable())("focused link underline", () => {
   it("paints the revealed underline with the focused link colour", async () => {
     const source = new URL("../../../plugins/src/css-modules.ts", import.meta.url).href
@@ -68,7 +84,7 @@ describe.skipIf(!isNativeTestRendererAvailable())("focused link underline", () =
       const screenshot = `${SHOTS_DIR}/link-underline-focus.png`
       renderer.captureScreenshot(screenshot)
       const image = decodePng(readFileSync(screenshot), screenshot)
-      expect(countPixels(image, bounds)).toBeGreaterThan(0)
+      expectHorizontalPixelRow(image, bounds, focusColour)
     } finally {
       root.unmount()
     }
@@ -144,7 +160,7 @@ describe.skipIf(!isNativeTestRendererAvailable())("focused link underline", () =
       const underlineBounds = root.renderer.getElementBounds(underline.id)!
       const screenshot = `${SHOTS_DIR}/link-underline-${state}.png`
       root.renderer.captureScreenshot(screenshot)
-      expect(countPixels(decodePng(readFileSync(screenshot), screenshot), underlineBounds)).toBeGreaterThan(0)
+      expectHorizontalPixelRow(decodePng(readFileSync(screenshot), screenshot), underlineBounds, focusColour)
     } finally {
       root.unmount()
     }
@@ -184,7 +200,7 @@ describe.skipIf(!isNativeTestRendererAvailable())("focused link underline", () =
       const bounds = root.renderer.getElementBounds(underline.id)!
       const screenshot = `${SHOTS_DIR}/ancestor-focus-link-underline.png`
       root.renderer.captureScreenshot(screenshot)
-      expect(countPixels(decodePng(readFileSync(screenshot), screenshot), bounds)).toBeGreaterThan(0)
+      expectHorizontalPixelRow(decodePng(readFileSync(screenshot), screenshot), bounds, focusColour)
     } finally {
       root.unmount()
     }
