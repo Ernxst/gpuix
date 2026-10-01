@@ -20,6 +20,14 @@ env:
         description: "Comma-separated OSes to build and test: macos, linux, windows"
         required: false
         default: "macos,linux,windows"
+      test_scope:
+        description: "Run full suites or only the Windows UIA and macOS image tests"
+        required: false
+        type: choice
+        options:
+          - full
+          - focused
+        default: full
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -231,21 +239,25 @@ jobs:
           path: packages/native/
 
       - name: Smoke test published test renderer without display discovery
+        if: inputs.test_scope != 'focused'
         run: bun scripts/test-renderer-smoke.ts
 
       - name: Download display-discovery fault-injection artifact
+        if: inputs.test_scope != 'focused'
         uses: actions/download-artifact@v4
         with:
           name: bindings-test-fault-aarch64-apple-darwin
           path: packages/native/test-fault-binding/
 
       - name: Smoke test catchable display-discovery failure
+        if: inputs.test_scope != 'focused'
         env:
           NAPI_RS_NATIVE_LIBRARY_PATH: ${{ github.workspace }}/packages/native/test-fault-binding/gpuix-native.darwin-arm64.node
         run: bun scripts/test-renderer-smoke.ts --fault-injection
 
       # Includes the GPU-backed default-main-menu and Cmd+Q action smoke.
       - name: Run React and macOS menu integration tests
+        if: inputs.test_scope != 'focused'
         run: bun run test
         working-directory: packages/react
 
@@ -253,13 +265,20 @@ jobs:
         run: bun run build
         working-directory: packages/react
 
+      - name: Run focused macOS image test
+        if: inputs.test_scope == 'focused'
+        run: bun run vitest run src/__tests__/img.test.tsx
+        working-directory: packages/react
+
       - name: Run example tests
+        if: inputs.test_scope != 'focused'
         run: bun run test
         working-directory: examples
 
       # Bun never typechecks. This step is what catches a broken public type,
       # such as `key` disappearing from every element.
       - name: Typecheck the example app
+        if: inputs.test_scope != 'focused'
         run: bun run typecheck
         working-directory: example-app
 
@@ -300,6 +319,7 @@ jobs:
         run: bun -e "const { statSync } = require('node:fs'); const { TestGpuixRenderer } = require('./packages/native'); const renderer = new TestGpuixRenderer(320, 200); renderer.applyBatch(JSON.stringify([['createElement',1,'text'],['setText',1,'Windows test renderer'],['setRoot',1]])); renderer.flush(); renderer.captureScreenshot('windows-test-renderer.png'); if (renderer.getAllText()[0] !== 'Windows test renderer' || statSync('windows-test-renderer.png').size === 0) throw new Error('TestGpuixRenderer did not render')"
 
       - name: Run React tests
+        if: inputs.test_scope != 'focused'
         run: bun run test
         working-directory: packages/react
 
@@ -308,5 +328,11 @@ jobs:
         working-directory: packages/react
 
       - name: Run example tests
+        if: inputs.test_scope != 'focused'
         run: bun run test
+        working-directory: examples
+
+      - name: Run focused Windows UI Automation test
+        if: inputs.test_scope == 'focused'
+        run: bun run vitest run windows-accessibility.test.tsx
         working-directory: examples
