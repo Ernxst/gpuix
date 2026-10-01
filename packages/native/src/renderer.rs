@@ -12481,7 +12481,8 @@ fn build_element_with_parent_layout(
         0
     } else if z_index.is_some_and(|z_index| z_index > 0) {
         3
-    } else if positioned || z_index.is_some() {
+    } else if positioned || z_index.is_some() || opacity_context {
+        // Opacity creates an atomic auto/zero-level context even without positioning.
         2
     } else {
         1
