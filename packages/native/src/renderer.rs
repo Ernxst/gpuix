@@ -1977,11 +1977,10 @@ async fn run_ui_commands(
                 requested_timestamp_origin,
             } => window.update(cx, move |_view, window, _cx| {
                 let origin = animation_frame_origin(&timestamp_origin, requested_timestamp_origin);
-                window.on_next_frame(move |_window, _cx| {
-                    dispatch_animation_frame_callback(
-                        callback,
-                        animation_frame_timestamp_ms(origin, web_time::Instant::now()),
-                    );
+                window.on_next_frame(move |_window, cx| {
+                    let timestamp = animation_frame_timestamp_ms(origin, web_time::Instant::now());
+                    // Defer JS recovery until GPUI returns this window to the app.
+                    cx.defer(move |_| dispatch_animation_frame_callback(callback, timestamp));
                 });
             }),
             UiCommand::SetMenus { menus, response } => {
