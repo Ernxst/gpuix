@@ -383,7 +383,8 @@ export function renderSlot({
   const merged = mergeRenderProps(props, childProps)
   if (props.tabIndex === undefined) merged.tabIndex = childProps.tabIndex
   const childRef = getElementRef(child)
-  if (childRef || ref) merged.ref = mergeRefs(childRef, ref)
+  const partRef = props.ref as Ref<PublicInstance> | undefined
+  if (childRef || partRef || ref) merged.ref = mergeRefs(childRef, partRef, ref)
   return cloneElement(child, merged)
 }
 

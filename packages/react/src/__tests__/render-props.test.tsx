@@ -48,6 +48,20 @@ describeNative("render element props", () => {
     expect(merged.props.className).toBe("navLink")
   })
 
+  it("preserves the render element, part, and forwarded refs", () => {
+    const refs: string[] = []
+    const instance = {} as PublicInstance
+    const merged = renderSlot({
+      asChild: true,
+      children: <a ref={() => refs.push("render")} />,
+      props: { ref: () => refs.push("part") },
+      ref: () => refs.push("forwarded"),
+    })
+
+    ;(merged.props.ref as (value: PublicInstance) => void)(instance)
+    expect(refs).toEqual(["render", "part", "forwarded"])
+  })
+
   it("matches the installed Base UI className and style merge order", () => {
     const merged = mergeProps(
       { className: "part", style: { color: "red", backgroundColor: "green" } },
