@@ -1,0 +1,15 @@
+name: Setup toolchain
+description: Install the pinned Bun version and restore locked dependencies.
+
+runs:
+  using: composite
+  steps:
+    # Reads the channel from rust-toolchain.toml, which must match zed's
+    # pin for the gpui revision in packages/native/Cargo.toml.
+    - name: Install Rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        cache: false
+        # the action defaults to RUSTFLAGS="-D warnings"; keep lint policy
+        # in the crate instead of letting CI deny every warning
+        rustflags: ""

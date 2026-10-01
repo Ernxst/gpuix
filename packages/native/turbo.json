@@ -1,0 +1,46 @@
+{
+  "$schema": "../../node_modules/turbo/schema.json",
+  "extends": [
+    "//"
+  ],
+  "tasks": {
+    "build": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/rust-toolchain.toml",
+        "$TURBO_ROOT$/zed/**"
+      ],
+      "outputs": [
+        "dist/*"
+      ],
+      "env": [
+        "CARGO*",
+        "RUST*",
+        "CC*",
+        "CXX*",
+        "AR*",
+        "CFLAGS*",
+        "CXXFLAGS*",
+        "CPPFLAGS*",
+        "LDFLAGS*",
+        "SDKROOT",
+        "MACOSX_*",
+        "IPHONEOS_*",
+        "DEVELOPER_DIR",
+        "VCTOOLS*",
+        "WINDOWSSDK*",
+        "WindowsSdkDir",
+        "WindowsSDKVersion",
+        "VCToolsVersion",
+        "INCLUDE",
+        "LIB",
+        "PKG_CONFIG*",
+        "VCPKG*",
+        "ZIG*",
+        "DEPLOYMENT_TARGET*",
+        "NAPI_RS_*",
+        "GPUI_FXC_PATH"
+      ]
+    }
+  }
+}

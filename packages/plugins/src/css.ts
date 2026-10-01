@@ -9,13 +9,13 @@ import {
   imports as resolvePackageImports,
   type Package,
 } from "resolve.exports"
-import { createUnplugin } from "unplugin"
+import { createUnplugin, type UnpluginInstance } from "unplugin"
 import { transformGpuixCssModule, type CssImportResolver } from "./css-modules.js"
 
 const CSS_MODULE_PREFIX = "\0gpuix:css-module:"
 
-export const CSS_MODULE_RESOLVE_RE = /\.module\.css(?:$|[?#])/
-export const CSS_MODULE_VIRTUAL_RE = /^\0gpuix:css-module:/
+export const CSS_MODULE_RESOLVE_RE: RegExp = /\.module\.css(?:$|[?#])/
+export const CSS_MODULE_VIRTUAL_RE: RegExp = /^\0gpuix:css-module:/
 
 export function cleanId(id: string): string {
   return id.split(/[?#]/, 1)[0]
@@ -247,7 +247,10 @@ async function compileCssModuleCode(
  * A Vite or Vitest project can use this plugin wherever it needs native CSS
  * module compilation.
  */
-export const gpuixCssUnplugin = createUnplugin<CssModulesOptions, false>((userOptions, meta) => {
+export const gpuixCssUnplugin: UnpluginInstance<CssModulesOptions, false> = createUnplugin<
+  CssModulesOptions,
+  false
+>((userOptions, meta) => {
   const cssModulesByDependency = new Map<string, Set<string>>()
   const cssModuleIdsBySource = new Map<string, string>()
   let viteServer: ViteDevServer | undefined

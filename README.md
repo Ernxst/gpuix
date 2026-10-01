@@ -335,7 +335,7 @@ if [ "$(uname -m)" != arm64 ]; then
 fi
 ADDON="gpuix-native.darwin-arm64.node"
 mkdir -p "$APP/Contents/Frameworks"
-cp "node_modules/@gpuix/native/$ADDON" "$APP/Contents/Frameworks/"
+cp "node_modules/@gpuix/native/dist/$ADDON" "$APP/Contents/Frameworks/"
 codesign --force --sign - "$APP/Contents/Frameworks/$ADDON"
 codesign --force --sign - "$APP"
 codesign --verify --deep --strict "$APP"

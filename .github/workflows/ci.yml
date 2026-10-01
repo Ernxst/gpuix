@@ -1,312 +1,119 @@
 name: CI
-env:
-  APP_NAME: gpuix-native
-  MACOSX_DEPLOYMENT_TARGET: "10.13"
-"on":
+
+on:
   push:
     branches:
       - main
-    tags-ignore:
-      - "**"
-    paths-ignore:
-      - "**/*.md"
-      - LICENSE
-      - "**/*.gitignore"
-      - docs/**
-  pull_request: null
+  pull_request:
   workflow_dispatch:
-    inputs:
-      targets:
-        description: "Comma-separated OSes to build and test: macos, linux, windows"
-        required: false
-        default: "macos,linux,windows"
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  MACOSX_DEPLOYMENT_TARGET: "10.13"
+
+permissions: {}
+
 jobs:
-  # push/PR builds Linux x64 and Windows x64; macOS is built and tested
-  # locally. workflow_dispatch builds and tests the OSes named by its `targets` input
-  # (all three by default). Computed in a plan job because job-level `if`
-  # cannot reference the matrix context.
-  # One target per OS, on the architecture that OS is mostly used on
-  # (upstream's set): `packages/native/package.json` `napi.targets` must
-  # list exactly the same set as the FULL matrix below.
-  plan:
+  typecheck:
+    name: Typecheck
     runs-on: ubuntu-latest
-    outputs:
-      settings: ${{ steps.set.outputs.settings }}
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAM: ${{ vars.TURBO_TEAM }}
     steps:
-      - id: set
-        env:
-          TARGETS: ${{ inputs.targets }}
-        run: |
-          # macOS (Metal): default features include test-support.
-          # Linux (Vulkan/wgpu): build:release disables test-support until wgpu image readback lands.
-          # Windows (Direct3D): test support includes TestGpuixRenderer and render_to_image.
-          FULL='[
-            {"os":"macos","host":"macos-latest","target":"aarch64-apple-darwin","bunTarget":"bun-darwin-arm64","build":"bun run build --target aarch64-apple-darwin"},
-            {"os":"linux","host":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","bunTarget":"bun-linux-x64","build":"bun run build:release --target x86_64-unknown-linux-gnu"},
-            {"os":"windows","host":"windows-latest","target":"x86_64-pc-windows-msvc","bunTarget":"bun-windows-x64","build":"bun run build --target x86_64-pc-windows-msvc"}
-          ]'
-          LINUX_WINDOWS=$(echo "$FULL" | jq -c 'map(select(.os != "macos"))')
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            CHOSEN=$(echo "$FULL" | jq -c --arg targets "$TARGETS" '
-              ($targets | gsub(" "; "") | ascii_downcase | split(",")) as $want
-              | map(select(.os as $os | $want | index($os)))')
-            if [ "$CHOSEN" = "[]" ]; then
-              echo "::error::targets '$TARGETS' selects no OS; use macos, linux or windows"
-              exit 1
-            fi
-          else
-            CHOSEN="$LINUX_WINDOWS"
-          fi
-          echo "settings=$(echo "$CHOSEN" | jq -c .)" >> "$GITHUB_OUTPUT"
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup bun
+        uses: ./.github/actions/bun
+
+      - name: Build
+        run: bun run build --exclude packages/native
+
+      - name: Typecheck
+        run: bun run typecheck
 
   build:
-    needs: plan
+    name: Build (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        settings: ${{ fromJSON(needs.plan.outputs.settings) }}
-    name: build - ${{ matrix.settings.target }}
-    runs-on: ${{ matrix.settings.host }}
-    defaults:
-      run:
-        working-directory: packages/native
+        os:
+          - macos-latest
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAM: ${{ vars.TURBO_TEAM }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: recursive
 
       - name: Setup bun
-        uses: oven-sh/setup-bun@v2
+        uses: ./.github/actions/bun
 
-      # Reads the channel from rust-toolchain.toml, which must match zed's
-      # pin for the gpui revision in packages/native/Cargo.toml.
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          target: ${{ matrix.settings.target }}
-          # this workflow caches cargo explicitly in the next step
-          cache: false
-          # the action defaults to RUSTFLAGS="-D warnings"; keep lint policy
-          # in the crate instead of letting CI deny every warning
-          rustflags: ""
+      - name: Setup rust
+        uses: ./.github/actions/rust
 
-      # gpui_apple compiles shaders with `metal`, which Xcode 26 no longer
-      # ships by default. Without this the build fails with
-      # "cannot execute tool 'metal' due to missing Metal Toolchain".
-      - name: Install Metal toolchain
-        if: contains(matrix.settings.target, 'apple-darwin')
-        run: xcodebuild -downloadComponent MetalToolchain
+      - name: Setup macos
+        if: runner.os == 'macOS'
+        uses: ./.github/actions/macos
 
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            packages/native/target/
-          key: ${{ matrix.settings.target }}-cargo-${{ hashFiles('packages/native/Cargo.lock') }}
-          restore-keys: |
-            ${{ matrix.settings.target }}-cargo-
+      - name: Setup linux
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/linux
 
-      # Linux system deps for GPUI (Vulkan, Wayland, X11, fonts)
-      # Based on longbridge/gpui-component and Zed's script/linux
-      - name: Install Linux dependencies
-        if: contains(matrix.settings.target, 'linux')
-        working-directory: .
-        run: |
-          sudo apt-get update && sudo apt-get install -y \
-            gcc g++ clang \
-            libfontconfig-dev \
-            libwayland-dev \
-            libxkbcommon-x11-dev \
-            libx11-xcb-dev \
-            libssl-dev \
-            libzstd-dev \
-            libvulkan1 \
-            vulkan-validationlayers
-
-      - name: Install dependencies
-        working-directory: .
-        run: bun install --frozen-lockfile
-
-      - name: Check all Rust targets without default features
-        if: contains(matrix.settings.target, 'linux')
-        run: RUST_FONTCONFIG_DLOPEN=1 cargo check --target x86_64-unknown-linux-gnu --no-default-features --all-targets
-
-      - name: Build native
-        run: ${{ matrix.settings.build }}
-        shell: bash
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-${{ matrix.settings.target }}
-          path: packages/native/${{ env.APP_NAME }}.*.node
-          if-no-files-found: error
-
-      - name: Build display-discovery fault-injection binding
-        if: matrix.settings.target == 'aarch64-apple-darwin'
-        run: bun run build:test-fault-injection --target aarch64-apple-darwin --output-dir test-fault-binding --no-js
-
-      - name: Upload display-discovery fault-injection binding
-        if: matrix.settings.target == 'aarch64-apple-darwin'
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-test-fault-aarch64-apple-darwin
-          path: packages/native/test-fault-binding/${{ env.APP_NAME }}.*.node
-          if-no-files-found: error
-
-      - name: Build React package
-        working-directory: packages/react
-        shell: bash
+      - name: Build
         run: bun run build
 
-      - name: Build plugins package
-        run: bun run build
-        working-directory: packages/plugins
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+    permissions:
+      contents: read
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Setup bun
+        uses: ./.github/actions/bun
+
+      - name: Setup rust
+        uses: ./.github/actions/rust
+
+      - name: Setup macos
+        if: runner.os == 'macOS'
+        uses: ./.github/actions/macos
+
+      - name: Setup linux
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/linux
 
       - name: Test plugins package
         run: bun run test
-        working-directory: packages/plugins
-
-      - name: Compile chat example
-        working-directory: examples
-        shell: bash
-        env:
-          COMPILE_OUT: example-chat-${{ matrix.settings.target }}
-          COMPILE_TARGET: ${{ matrix.settings.bunTarget }}
-          COMPILE_SKIP_ICONS: "1"
-          COMPILE_SKIP_APP: "1"
-        run: bun compile-chat.ts
-
-      # A release asset is served as raw bytes, so a download loses the
-      # executable bit and arrives with no extension: macOS and Linux users
-      # got a file the OS refused to open. `.tar.gz` keeps the mode and names
-      # itself. Windows already ships a `.exe`, which needs no unpacking.
-      - name: Package chat example
-        working-directory: examples/dist
-        shell: bash
-        env:
-          NAME: example-chat-${{ matrix.settings.target }}
-        run: |
-          if [ -f "$NAME.exe" ]; then
-            echo "$NAME.exe already carries an extension"
-            exit 0
-          fi
-          chmod +x "$NAME"
-          tar -czf "$NAME.tar.gz" "$NAME"
-          rm "$NAME"
-          ls -l
-
-      - name: Upload example artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: example-chat-${{ matrix.settings.target }}
-          path: examples/dist/example-chat-${{ matrix.settings.target }}.*
-          if-no-files-found: error
-
-  test:
-    name: test
-    needs: build
-    # Needs the macOS artifact, which only exists on dispatch runs that target macOS.
-    if: github.event_name == 'workflow_dispatch' && contains(inputs.targets, 'macos')
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Download macOS arm64 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: bindings-aarch64-apple-darwin
-          path: packages/native/
-
-      - name: Smoke test published test renderer without display discovery
-        run: bun scripts/test-renderer-smoke.ts
-
-      - name: Download display-discovery fault-injection artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: bindings-test-fault-aarch64-apple-darwin
-          path: packages/native/test-fault-binding/
-
-      - name: Smoke test catchable display-discovery failure
-        env:
-          NAPI_RS_NATIVE_LIBRARY_PATH: ${{ github.workspace }}/packages/native/test-fault-binding/gpuix-native.darwin-arm64.node
-        run: bun scripts/test-renderer-smoke.ts --fault-injection
-
-      # Includes the GPU-backed default-main-menu and Cmd+Q action smoke.
-      - name: Run React and macOS menu integration tests
-        run: bun run test
-        working-directory: packages/react
-
-      - name: Build React package
-        run: bun run build
-        working-directory: packages/react
-
-      - name: Run example tests
-        run: bun run test
-        working-directory: examples
-
-      # Bun never typechecks. This step is what catches a broken public type,
-      # such as `key` disappearing from every element.
-      - name: Typecheck the example app
-        run: bun run typecheck
-        working-directory: example-app
-
-  test-windows:
-    name: test-windows
-    needs: build
-    # Needs the Windows artifact, which only exists on dispatch runs that target Windows.
-    if: github.event_name == 'workflow_dispatch' && contains(inputs.targets, 'windows')
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Download Windows x64 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: bindings-x86_64-pc-windows-msvc
-          path: packages/native/
-
-      - name: Load native binding with Bun
-        run: bun -e "require('./packages/native'); console.log('Windows native binding OK (bun)')"
-
-      - name: Load native binding with Node
-        run: node -e "require('./packages/native'); console.log('Windows native binding OK (node)')"
-
-      - name: Verify Windows test renderer
-        shell: bash
-        run: bun -e "const { statSync } = require('node:fs'); const { TestGpuixRenderer } = require('./packages/native'); const renderer = new TestGpuixRenderer(320, 200); renderer.applyBatch(JSON.stringify([['createElement',1,'text'],['setText',1,'Windows test renderer'],['setRoot',1]])); renderer.flush(); renderer.captureScreenshot('windows-test-renderer.png'); if (renderer.getAllText()[0] !== 'Windows test renderer' || statSync('windows-test-renderer.png').size === 0) throw new Error('TestGpuixRenderer did not render')"
-
-      - name: Run React tests
-        run: bun run test
-        working-directory: packages/react
-
-      - name: Build React package
-        run: bun run build
-        working-directory: packages/react
-
-      - name: Run example tests
-        run: bun run test
-        working-directory: examples

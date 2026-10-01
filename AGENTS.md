@@ -29,7 +29,7 @@ The native renderer cannot start inside an agent sandbox: macOS denies it the wi
 
 ## Repository constraints
 
-- `packages/native/index.js`, `index.d.ts` and `*.node` are generated. Change Rust declarations and rebuild instead of editing generated output by hand.
+- `packages/native/dist` (`index.js`, `index.d.ts` and `*.node`) is generated and not committed. Change Rust declarations and rebuild instead of editing generated output by hand.
 - Update the relevant README API section for user-facing fixes or features.
 - Update `skills/gpuix/` in the same PR when a change alters user-facing behaviour: a supported element, prop, style, selector, event, export or DOM API, a known gap closing or opening, or a testing behaviour. `bun run test` in `packages/plugins` checks the listed CSS module properties and selectors against the source and compiler, and the listed entry points against package exports. It does not find newly supported selectors omitted from the lists, so review the selector surface for those changes.
 - This fork ships package tarballs attached to GitHub releases, stamped and packed by hand. Versions follow semver with a fixed `-fork` suffix. The three packages release in lockstep: React pins the exact native version, and plugins pins the exact React version. It does not publish the upstream package names to npm. Do not publish locally.
@@ -88,3 +88,14 @@ workflow instructions omitted.)":
 ## Consumer bug fixes
 
 When fixing a consumer-reported bug, read and execute [the surface-audit procedure](.agents/skills/audit-surface/SKILL.md) before declaring the fix complete. This is part of the fixing task; do not wait for a separate user request or skill invocation. Group reports touching the same behavior and implementation into one audit. Include the audit results and any verification gaps in the handoff.
+
+<!-- BEGIN:turborepo-agent-rules -->
+
+# This is NOT the Turborepo you know
+
+Turborepo configuration, task behavior, and CLI commands can vary between installed versions and may differ from your training data. Resolve the `turbo` package from this file's directory or relevant workspace; in monorepos, it may not be visible from the repository root. For example, run `node -p "require.resolve('turbo/package.json')"` from a workspace that depends on `turbo`.
+
+Read `docs/README.md` inside that installed package first, then read the relevant pages from its `docs/` directory before changing Turborepo configuration or commands. Heed deprecation notices. These bundled docs match the installed package version and are available without network access.
+
+This block is written and re-added by `turbo` before repository-scoped commands when an AI agent is detected. In the Turborepo source repository, its template is defined in `crates/turborepo-cli/src/cli/agent_guidance.rs`. Removing the managed block while updates are enabled means a later qualifying invocation will add it again. Set `"agentGuidance": false` in the root `turbo.json` or `turbo.jsonc` to opt out; this does not remove an existing block. Keep the block committed with your work to avoid an uncommitted change on the next agent invocation.
+<!-- END:turborepo-agent-rules -->

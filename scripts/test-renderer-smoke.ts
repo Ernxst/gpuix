@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 
 const nativeEntry = fileURLToPath(
-  new URL("../packages/native/index.js", import.meta.url)
+  new URL("../packages/native/dist/index.js", import.meta.url)
 )
 const env = {
   ...process.env,

@@ -1,0 +1,12 @@
+name: Setup toolchain
+description: Install the pinned Bun version and restore locked dependencies.
+
+runs:
+  using: composite
+  steps:
+    # gpui_apple compiles shaders with `metal`, which Xcode 26 no longer
+    # ships by default. Without this the build fails with
+    # "cannot execute tool 'metal' due to missing Metal Toolchain".
+    - name: Install Metal toolchain
+      if: runner.os == 'macOS'
+      run: xcodebuild -downloadComponent MetalToolchain

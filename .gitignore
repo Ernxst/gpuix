@@ -29,3 +29,6 @@ docs/agents/
 packages/native/*.tgz
 packages/react/*.tgz
 packages/plugins/*.tgz
+
+# Turborepo
+.turbo
