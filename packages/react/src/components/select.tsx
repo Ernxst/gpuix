@@ -19,6 +19,7 @@ import {
   DOCUMENT_POSITION_PRECEDING,
 } from "../dom-position.js"
 import type {
+  GpuixSyntheticEvent,
   GpuixKeyboardEvent,
   GpuixMouseEvent,
   GpuixScrollEvent,
@@ -34,6 +35,7 @@ import {
   setRefs,
   useControllableState,
   useDismissLayer,
+  usePositionerState,
 } from "./floating.js"
 import type { FloatingPopupProps, PositionerProps, PositionerState, StateStyle } from "./floating.js"
 
@@ -58,6 +60,7 @@ interface SelectContextValue {
   multiple: boolean
   disabled: boolean
   readOnly: boolean
+  highlightItemOnHover: boolean
   focused: boolean
   labels: Map<unknown, ReactNode>
   activeValue: unknown | null
@@ -70,15 +73,15 @@ interface SelectContextValue {
   triggerPressedWhileOpen: React.MutableRefObject<boolean>
   dismissedByOutsidePress: React.MutableRefObject<boolean>
   triggerRef: React.MutableRefObject<PublicInstance | null>
-  setOpen: (open: boolean, reason?: SelectChangeEventDetails["reason"]) => void
+  setOpen: (open: boolean, reason?: SelectChangeEventDetails["reason"], event?: GpuixSyntheticEvent) => void
   setActiveValue: (value: unknown | null) => void
   setListId: (id: string) => void
   setListMounted: (mounted: boolean) => void
   setScrollability: (up: boolean, down: boolean) => void
   setFocused: (focused: boolean) => void
-  typeahead: (character: string) => void
+  typeahead: (character: string, event?: GpuixSyntheticEvent) => void
   moveActive: (delta: number) => void
-  selectValue: (value: unknown, reason?: SelectChangeEventDetails["reason"]) => void
+  selectValue: (value: unknown, reason?: SelectChangeEventDetails["reason"], event?: GpuixSyntheticEvent) => void
   items: SelectItemRecord[]
   registerItem: (item: SelectItemRecord) => void
   unregisterItem: (value: unknown) => void
@@ -172,7 +175,8 @@ export interface SelectProps<Value = unknown, Multiple extends boolean | undefin
 
 export interface SelectChangeEventDetails {
   reason: "trigger-press" | "outside-press" | "item-press" | "escape-key" | "focus-out" | "list-navigation" | "cancel-open" | "window-resize" | "none"
-  event: Event
+  /** The originating GPU-IX event. Programmatic changes have no event. */
+  event: GpuixSyntheticEvent | undefined
   cancel: () => void
   allowPropagation: () => void
   isCanceled: boolean
@@ -180,12 +184,12 @@ export interface SelectChangeEventDetails {
   trigger: Element | undefined
 }
 
-function createSelectChangeDetails(reason: SelectChangeEventDetails["reason"], trigger?: Element): SelectChangeEventDetails {
+function createSelectChangeDetails(reason: SelectChangeEventDetails["reason"], trigger?: Element, event?: GpuixSyntheticEvent): SelectChangeEventDetails {
   let isCanceled = false
   let isPropagationAllowed = false
   return {
     reason,
-    event: new Event(reason),
+    event,
     cancel() { isCanceled = true },
     allowPropagation() { isPropagationAllowed = true },
     get isCanceled() { return isCanceled },
@@ -211,6 +215,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
   multiple = false as Multiple,
   disabled = false,
   readOnly = false,
+  highlightItemOnHover = true,
   isItemEqualToValue = Object.is,
 }: SelectProps<Value, Multiple>): ReactElement {
   const compareValues = isItemEqualToValue as (item: unknown, value: unknown) => boolean
@@ -304,9 +309,9 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     return next
   }, [itemsProp])
 
-  const setOpen = (nextOpen: boolean, reason: SelectChangeEventDetails["reason"] = "trigger-press") => {
+  const setOpen = (nextOpen: boolean, reason: SelectChangeEventDetails["reason"] = "trigger-press", event?: GpuixSyntheticEvent) => {
     if (open === nextOpen) return
-    const details = createSelectChangeDetails(reason, triggerRef.current as unknown as Element | undefined)
+    const details = createSelectChangeDetails(reason, triggerRef.current as unknown as Element | undefined, event)
     onOpenChange?.(nextOpen, details)
     if (details.isCanceled) return
     setOpenState(nextOpen)
@@ -323,7 +328,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     }
   }
 
-  const typeahead = (character: string) => {
+  const typeahead = (character: string, event?: GpuixSyntheticEvent) => {
     if (disabled || (!open && (readOnly || multiple)) || !character || character.length !== 1) return
     const now = Date.now()
     const lower = character.toLocaleLowerCase()
@@ -361,7 +366,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     if (!match) return
     typeaheadMatchIndex.current = wrappedMatchIndex
     if (open) setActiveValue(match.value)
-    else if (!readOnly && !multiple) selectValue(match.value, "list-navigation")
+    else if (!readOnly && !multiple) selectValue(match.value, "list-navigation", event)
   }
 
   const moveActive = (delta: number) => {
@@ -374,9 +379,9 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     setActiveValue(enabled[nextIndex].value)
   }
 
-  const selectValue = (nextValue: unknown, reason: SelectChangeEventDetails["reason"] = "item-press") => {
-    if (disabled) return
-    const item = items.find((candidate) => candidate.value === nextValue)
+  const selectValue = (nextValue: unknown, reason: SelectChangeEventDetails["reason"] = "item-press", event?: GpuixSyntheticEvent) => {
+    if (disabled || readOnly) return
+    const item = items.find((candidate) => compareValues(candidate.value, nextValue))
     if (!item || item.disabled) return
     if (multiple) {
       const selected = Array.isArray(value) ? value : []
@@ -384,20 +389,20 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
         selected.some((candidate) => compareValues(candidate, nextValue))
           ? selected.filter((candidate) => !compareValues(candidate, nextValue))
           : [...selected, nextValue]
-      const details = createSelectChangeDetails(reason, triggerRef.current as unknown as Element | undefined)
+      const details = createSelectChangeDetails(reason, triggerRef.current as unknown as Element | undefined, event)
       onValueChange?.(nextSelection as SelectValueFor<Value, Multiple>, details)
       if (!details.isCanceled) setValue(nextSelection)
       return
     }
     if (Object.is(value, nextValue)) {
-      setOpen(false, reason)
+      setOpen(false, reason, event)
       return
     }
-    const details = createSelectChangeDetails(reason, triggerRef.current as unknown as Element | undefined)
+    const details = createSelectChangeDetails(reason, triggerRef.current as unknown as Element | undefined, event)
     onValueChange?.(nextValue as SelectValueFor<Value, Multiple>, details)
     if (!details.isCanceled) {
       setValue(nextValue)
-      setOpen(false, reason)
+      setOpen(false, reason, event)
     }
   }
 
@@ -408,6 +413,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
       multiple: multiple === true,
       disabled,
       readOnly,
+      highlightItemOnHover,
       focused,
       items,
       labels,
@@ -559,26 +565,26 @@ export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
         }
         if (context.triggerPressedWhileOpen.current) {
           context.triggerPressedWhileOpen.current = false
-          context.setOpen(false)
+          context.setOpen(false, "trigger-press", event)
           return
         }
-        context.setOpen(!context.open)
+        context.setOpen(!context.open, "trigger-press", event)
       },
       onKeyDown: (event) => {
         onKeyDown?.(event)
         if (disabled) return
         if (event.key === "Escape") {
-          if (!event.defaultPrevented) context.setOpen(false, "escape-key")
+          if (!event.defaultPrevented) context.setOpen(false, "escape-key", event)
         } else if (event.key === "ArrowDown" || (event.key === "n" && event.modifiers?.ctrl)) {
-          if (!context.open) context.setOpen(true)
+          if (!context.open) context.setOpen(true, "trigger-press", event)
           context.moveActive(1)
         } else if (event.key === "ArrowUp" || (event.key === "p" && event.modifiers?.ctrl)) {
-          if (!context.open) context.setOpen(true)
+          if (!context.open) context.setOpen(true, "trigger-press", event)
           context.moveActive(-1)
         } else if (event.key === "Enter" || event.key === " ") {
-          context.setOpen(!context.open)
+          context.setOpen(!context.open, "trigger-press", event)
         } else if (event.key.length === 1 && !event.modifiers?.ctrl && !event.modifiers?.alt && !event.modifiers?.cmd) {
-          context.typeahead(event.key)
+          context.typeahead(event.key, event)
         }
       },
     }
@@ -643,13 +649,16 @@ export interface SelectPopupState {
 
 export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
   function SelectPopup(
-    { children, onMouseDownOutside, onKeyDown, onEscapeKeyDown, tabIndex = 0, className, style, side = "bottom", align = "start", ...props },
+    { children, onMouseDownOutside, onKeyDown, onEscapeKeyDown, tabIndex = 0, className, style, side = "bottom", align = "start", render, finalFocus: _finalFocus, ...props },
     forwardedRef
   ) {
     const context = useSelectContext("SelectPopup")
     const positioned = useContext(SelectPositionedContext)
+    const positionerState = usePositionerState()
     const dismissLayer = useDismissLayer(context.open)
-    const popupState: SelectPopupState = { side, align, open: context.open, transitionStatus: "idle" }
+    const resolvedSide = positioned && positionerState ? positionerState.side : side
+    const resolvedAlign = positioned && positionerState ? positionerState.align : align
+    const popupState: SelectPopupState = { side: resolvedSide, align: resolvedAlign, open: context.open, transitionStatus: "idle" }
     const resolvedPopupProps = {
       ...props,
       side,
@@ -657,6 +666,9 @@ export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
       className: resolveClassName(className, popupState),
       style: resolvePartStyle(style, popupState),
       position: context.popupPosition,
+      "data-open": context.open ? "" : undefined,
+      "data-side": resolvedSide,
+      "data-align": resolvedAlign,
     }
     // Children stay mounted while closed - like Radix's detached collection -
     // so SelectItem registers at mount time regardless of open state. Both
@@ -680,23 +692,23 @@ export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
             queueMicrotask(() => {
               context.dismissedByOutsidePress.current = false
             })
-            context.setOpen(false, "outside-press")
+            context.setOpen(false, "outside-press", event)
           },
           onKeyDown: (event: GpuixKeyboardEvent) => {
             onKeyDown?.(event)
             if (event.key.toLowerCase() === "escape") {
               if (dismissLayer(event)) {
                 onEscapeKeyDown?.(event)
-                if (!event.defaultPrevented) context.setOpen(false, "escape-key")
+                if (!event.defaultPrevented) context.setOpen(false, "escape-key", event)
               }
             } else if (event.key === "ArrowDown" || (event.key === "n" && event.modifiers?.ctrl)) {
               context.moveActive(1)
             } else if (event.key === "ArrowUp" || (event.key === "p" && event.modifiers?.ctrl)) {
               context.moveActive(-1)
             } else if ((event.key === "Enter" || event.key === " ") && context.activeValue) {
-              context.selectValue(context.activeValue, "item-press")
+              context.selectValue(context.activeValue, "item-press", event)
             } else if (event.key.length === 1 && !event.modifiers?.ctrl && !event.modifiers?.alt && !event.modifiers?.cmd) {
-              context.typeahead(event.key)
+              context.typeahead(event.key, event)
             }
           },
         }
@@ -706,11 +718,14 @@ export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
       ? <div
           {...Object.fromEntries(Object.entries(floatingProps).filter(([key]) => !["side", "align", "position", "render", "finalFocus"].includes(key)))}
           data-open={context.open ? "" : undefined}
-          data-side={side}
-          data-align={align}
+          data-side={resolvedSide}
+          data-align={resolvedAlign}
         >{children}</div>
       : <FloatingLayer {...floatingProps}>{children}</FloatingLayer>
-    return <SelectPopupSideContext.Provider value={side}>{popupContents}</SelectPopupSideContext.Provider>
+    const renderedPopup = positioned
+      ? renderPart({ tag: "div", render, props: { ...floatingProps, children }, state: popupState, children, ref: forwardedRef })
+      : popupContents
+    return <SelectPopupSideContext.Provider value={resolvedSide}>{renderedPopup}</SelectPopupSideContext.Provider>
   }
 )
 
@@ -799,11 +814,11 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
       className: resolveClassName(className, state),
       onMouseEnter: (event: GpuixMouseEvent) => {
         onMouseEnter?.(event)
-        if (!disabled && !context.disabled) context.setActiveValue(itemValue)
+        if (!disabled && !context.disabled && context.highlightItemOnHover) context.setActiveValue(itemValue)
       },
       onClick: (event: GpuixMouseEvent) => {
         onClick?.(event)
-        if (!disabled && !context.disabled) context.selectValue(itemValue)
+        if (!disabled && !context.disabled) context.selectValue(itemValue, "item-press", event)
       },
     }
     return (

@@ -3700,6 +3700,23 @@ direction. Home/End and PageUp/PageDown are not handled.
 Select parts accept `className` and `style` functions with state matching the
 corresponding Base UI part. `Root` renders no element and takes neither prop.
 
+Select positioning uses the native window viewport, anchor, side/alignment and
+offset options. A custom `collisionBoundary` may be a rectangle, host element,
+or array of boundaries (arrays use their intersection); object-valued
+`collisionPadding` is applied per edge. `anchorHidden` reports an anchor that
+falls outside the effective boundary. On the native renderer,
+`collisionBoundary="clipping-ancestors"` means the window viewport.
+
+The native renderer accepts but does not implement `positionMethod`, `sticky`,
+`arrowPadding`, `disableAnchorTracking`, `alignItemWithTrigger`,
+`collisionAvoidance.fallbackAxisSide`, Root `modal` and `actionsRef`, or Root
+form props (`name`, `form`, `required`, `autoComplete`, `inputRef`), Root
+`itemToStringLabel`/`itemToStringValue`, or logical side direction resolution
+(`inline-start`/`inline-end` map to left/right). These options currently have
+no native effect. Select change details carry the
+originating GPU-IX event in `event`; programmatic changes have `event` set to
+`undefined`. Calling `details.cancel()` prevents the associated state update.
+
 Set `multiple` on `Select` to keep the popup open while items are toggled. The
 controlled and uncontrolled values are string arrays, and `onValueChange`
 receives the complete selected array after each toggle:

@@ -123,6 +123,34 @@ describeNative("Select typeahead", () => {
     expect(screen.getByTestId("trigger")).toHaveTextContent("Choose")
   })
 
+  it("allows browsing a read-only Select but blocks click and keyboard commits", () => {
+    const onValueChange = vi.fn()
+    screen.render(
+      <Select.Root readOnly onValueChange={onValueChange}>
+        <Select.Trigger data-testid="trigger" ariaLabel="Fruit" style={{ width: 180, height: 36 }}>
+          <Select.Value placeholder="Choose" />
+        </Select.Trigger>
+        <Select.Popup style={{ width: 180 }}>
+          <Select.List>
+            <Select.Item value="Apple" data-testid="Apple" style={{ height: 32 }}>Apple</Select.Item>
+            <Select.Item value="Banana" data-testid="Banana" style={{ height: 32 }}>Banana</Select.Item>
+          </Select.List>
+        </Select.Popup>
+      </Select.Root>
+    )
+    screen.renderer.nativeSimulateClick(30, 25)
+    screen.renderer.simulateKeystrokes("down")
+    expect(screen.getByTestId("Apple")).toHaveAttribute("data-highlighted", "")
+    screen.renderer.simulateKeystrokes("enter")
+    expect(onValueChange).not.toHaveBeenCalled()
+    expect(screen.getByTestId("trigger")).toHaveTextContent("Choose")
+
+    const banana = screen.getByTestId("Banana").getBoundingClientRect()
+    screen.renderer.nativeSimulateClick(banana.left + 4, banana.top + 4)
+    expect(onValueChange).not.toHaveBeenCalled()
+    expect(screen.getByTestId("trigger")).toHaveTextContent("Choose")
+  })
+
   it("does not select by typeahead while closed in read-only mode", () => {
     screen.render(<Fruit readOnly />)
     screen.renderer.nativeSimulateClick(30, 25)

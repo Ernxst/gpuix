@@ -110,6 +110,8 @@ The namespace follows Base UI 1.8.0: `Root`, `Label`, `Trigger`, `Value`, `Icon`
 - **ARIA**: Trigger `role="combobox"`, `ariaExpanded`, `ariaHasPopup="listbox"` and `ariaControls` pointing to its List; List `role="listbox"`; Item `role="option"`, `ariaSelected`.
 - **Typeahead and scrolling**: Typing highlights a matching item and scrolls it into view. Scroll arrows appear only when the list can scroll further in their direction.
 - Positioner state exposes `open`, resolved `side`/`align`, and `anchorHidden`; its `className` and `style` callbacks receive that state. Positioning options share the component-agnostic `PositionerProps` contract from `@gpuix/react/floating`.
+- Native positioning uses the trigger/anchor, `position`, side and alignment offsets, window collision correction, custom `collisionBoundary` rectangles/elements (arrays use their intersection), asymmetric `collisionPadding`, and side/alignment flip or shift. `anchorHidden` reports anchors outside that boundary. `collisionBoundary="clipping-ancestors"` means the native window viewport.
+- These Base UI options are accepted but have no native effect: `positionMethod`, `sticky`, `arrowPadding`, `disableAnchorTracking`, `alignItemWithTrigger`, `collisionAvoidance.fallbackAxisSide`, `inline-start`/`inline-end` direction resolution (they map to left/right), Root `modal` and `actionsRef`, Root form props (`name`, `form`, `required`, `autoComplete`, `inputRef`), and Root `itemToStringLabel`/`itemToStringValue`. GPU-IX events in `eventDetails.event` are the originating GPU-IX event; programmatic changes have `undefined` there. `details.cancel()` prevents the corresponding state update.
 
 ## Combobox (`@gpuix/react/combobox`)
 
