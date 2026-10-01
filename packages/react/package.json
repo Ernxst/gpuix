@@ -51,6 +51,11 @@
       "import": "./dist/components/dialog.js",
       "default": "./dist/components/dialog.js"
     },
+    "./alert-dialog": {
+      "types": "./dist/components/alert-dialog.d.ts",
+      "import": "./dist/components/alert-dialog.js",
+      "default": "./dist/components/alert-dialog.js"
+    },
     "./combobox": {
       "types": "./dist/components/combobox.d.ts",
       "import": "./dist/components/combobox.js",
@@ -100,7 +105,8 @@
     "build": "tsc",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "typecheck": "tsc --noEmit && bun run typecheck:test && bun run typecheck:webgpu",
-    "typecheck:test": "tsc --project tsconfig.test.json && tsc --project tsconfig.exact-optional.json",
+    "typecheck:test": "tsc --project tsconfig.test.json && tsc --project tsconfig.exact-optional.json && bun run typecheck:combobox-parity",
+    "typecheck:combobox-parity": "tsc --project type-tests/combobox-parity/tsconfig.base-ui.json && tsc --project type-tests/combobox-parity/tsconfig.gpuix.json",
     "typecheck:webgpu": "tsc --project tsconfig.webgpu-globals.json && tsc --project tsconfig.webgpu-types.json && tsc --project type-tests/webgpu/tsconfig.json && tsc --project type-tests/webgpu/tsconfig.with-types.json",
     "dev": "tsc --watch",
     "test": "bun run build && bun run typecheck:test && vitest run --exclude src/__tests__/canvas-wpt.test.tsx",

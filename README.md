@@ -3506,8 +3506,8 @@ kind and options.
 
 ### Headless Dialog
 
-`@gpuix/react/dialog` provides Base UI-shaped `Root`, `Trigger`, `Portal`,
-`Backdrop`, `Popup`, `Title`, `Description`, and `Close` parts. The same parts
+`@gpuix/react/dialog` provides the Base UI 1.8.0 `Dialog` namespace and part
+tree, including `Viewport` and the `Handle`/`createHandle` APIs. The same parts
 are exported with a `Dialog` prefix from `@gpuix/react`.
 
 ```tsx
@@ -3526,13 +3526,32 @@ import * as Dialog from "@gpuix/react/dialog"
 </Dialog.Root>
 ```
 
-`Root` supports `open`, `defaultOpen`, `onOpenChange`, and `modal` (true by
-default). A modal Popup reports `aria-modal`, traps Tab and Shift+Tab among its
-painted tab stops, and focuses the Popup on open. Set `initialFocus` and
-`finalFocus` on Popup to use a host ref or numeric host element ID; by default,
+`Root` supports `onOpenChange(open, eventDetails)`, `onOpenChangeComplete`,
+`actionsRef`, trigger IDs, render-function children, handles, and `modal` values
+`true`, `false`, and `"trap-focus"`. The native renderer traps focus for both
+modal modes; only `true` blocks interaction behind the full-window portal.
+`Portal` accepts Base UI's `container` prop for shared source compatibility;
+the prop is a no-op because native portals always fill the GPU-IX window. Parts
+accept Base UI's `render`, state-function `className` and `style`, and
+state/data attributes. Popup and Viewport expose `transitionStatus` and
+`data-starting-style`/`data-ending-style` during the native opening or closing
+frame; `onOpenChangeComplete` runs when that frame completes.
+
+A modal Popup reports `aria-modal`, traps Tab and Shift+Tab among painted tab
+stops, and focuses the Popup on open. Set `initialFocus` and `finalFocus` on
+Popup to use a host ref, numeric host element ID, or callback; by default,
 focus returns to the Trigger, or to the element focused before the dialog.
 Escape dismisses the topmost open Dialog, Select, Combobox, or Tooltip layer.
-`AlertDialog` uses the same parts with the Popup role set to `alertdialog`.
+
+### Headless Alert Dialog
+
+`@gpuix/react/alert-dialog` provides the Base UI `AlertDialog` namespace and
+part tree. Its Popup has the `alertdialog` role and cannot be dismissed by
+Escape or by pressing the Backdrop; include an `AlertDialog.Close` action so
+users can complete or cancel the prompt. `Dialog.Handle` and
+`AlertDialog.Handle` are handle classes created with each namespace's
+`createHandle()` method. The `AlertDialog` export from `/dialog` remains as a
+deprecated alias.
 
 `Dialog.Trigger` and `Dialog.Close` are keyboard-operable buttons. The root
 `Button` export gives a styled `div` button activation with Enter and Space; it
@@ -3564,7 +3583,7 @@ Each primitive has a dedicated namespace entry point:
 |---|---|
 | `@gpuix/react/dialog` | `Root`, `Trigger`, `Portal`, `Backdrop`, `Popup`, `Title`, `Description`, `Close` |
 | `@gpuix/react/select` | `Root`, `Label`, `Trigger`, `Value`, `Icon`, `Portal`, `Backdrop`, `Positioner`, `Popup`, `List`, `Item`, `ItemIndicator`, `ItemText`, `Arrow`, `ScrollUpArrow`, `ScrollDownArrow`, `Group`, `GroupLabel`, `Separator` |
-| `@gpuix/react/combobox` | `Root`, `Input`, `Popup`, `List`, `Item`, `Empty` |
+| `@gpuix/react/combobox` | `Root`, `Label`, `Value`, `Input`, `InputGroup`, `Trigger`, `List`, `Status`, `Portal`, `Backdrop`, `Positioner`, `Popup`, `Arrow`, `Icon`, `Group`, `GroupLabel`, `Item`, `ItemIndicator`, `Chips`, `Chip`, `ChipRemove`, `Row`, `Collection`, `Empty`, `Clear`, `Separator`, `useFilter`, `useFilteredItems`, `createItems` |
 | `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Portal`, `Positioner`, `Popup`, `Arrow`, `Viewport`, `Handle`, `createHandle` |
 | `@gpuix/react/floating` | `FloatingLayer`, `PositionerProps`, `FloatingPositioner`, `renderSlot` |
 
@@ -3783,20 +3802,43 @@ The application still uses compound components, not one large configuration
 object:
 
 ```tsx
-<ComboboxPrimitive.Root items={['Next.js', 'SvelteKit', 'Astro']}>
-  <ComboboxPrimitive.Input style={{ width: 220, height: 36, padding: 8 }} />
-  <ComboboxPrimitive.Popup style={{ width: 220 }}>
-    <ComboboxPrimitive.Empty>No frameworks found.</ComboboxPrimitive.Empty>
-    <ComboboxPrimitive.List>
-      {(item) => (
-        <ComboboxPrimitive.Item key={item} value={item}>
-          {item}
-        </ComboboxPrimitive.Item>
-      )}
-    </ComboboxPrimitive.List>
-  </ComboboxPrimitive.Popup>
+const frameworks = ['Next.js', 'SvelteKit', 'Astro']
+
+<ComboboxPrimitive.Root items={frameworks}>
+  <ComboboxPrimitive.InputGroup>
+    <ComboboxPrimitive.Label>Framework</ComboboxPrimitive.Label>
+    <ComboboxPrimitive.Input placeholder="Search frameworks" />
+    <ComboboxPrimitive.Trigger aria-label="Show frameworks" />
+    <ComboboxPrimitive.Clear aria-label="Clear selection" />
+  </ComboboxPrimitive.InputGroup>
+  <ComboboxPrimitive.Positioner>
+    <ComboboxPrimitive.Popup>
+      <ComboboxPrimitive.Status />
+      <ComboboxPrimitive.Empty>No frameworks found.</ComboboxPrimitive.Empty>
+      <ComboboxPrimitive.List>
+        {(framework) => (
+          <ComboboxPrimitive.Item key={framework} value={framework}>
+            {framework}
+            <ComboboxPrimitive.ItemIndicator>Selected</ComboboxPrimitive.ItemIndicator>
+          </ComboboxPrimitive.Item>
+        )}
+      </ComboboxPrimitive.List>
+    </ComboboxPrimitive.Popup>
+  </ComboboxPrimitive.Positioner>
 </ComboboxPrimitive.Root>
 ```
+
+`Combobox.Root` renders no wrapper. It filters `items` as the input changes,
+and its List function child receives each visible item. `Combobox.createItems`
+adds typed source items with derived primitive values and labels; `Combobox.Collection`
+renders grouped collections, and `Combobox.useFilter` supplies locale-aware
+matching. Parts accept state functions for `className` and `style`. Combobox uses
+the shared `/floating` Positioner used by Select. The input exposes the
+combobox/listbox relationship and each item exposes its selected, highlighted,
+and disabled state through ARIA and `data-*` attributes.
+The root `autoComplete` option controls the browser's form autofill hint. The input
+uses `aria-autocomplete="list"` by default and `"none"` while read-only,
+and `locale` sets the default filter's string comparison locale.
 
 ```tsx
 <TooltipPrimitive.Tooltip.Provider delay={350} closeDelay={80}>

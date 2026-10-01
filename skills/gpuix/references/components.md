@@ -33,7 +33,9 @@ Each component is importable two ways: as a namespace from its subpath (`import 
   | `SelectPositioner` | `{ open, side, align, anchorHidden }` |
   | `SelectSeparator` | `{ orientation }` |
 
-  `ComboboxTrigger` and `ComboboxInput` take plain styles; `Tooltip` parts expose state through Base UI-style state callbacks and attributes. `Select.Root` renders no wrapper element and does not accept `className` or `style`.
+  Combobox and Tooltip parts accept state functions. `Select.Root` and
+  `Combobox.Root` render no wrapper element; `Select.Root` does not accept
+  `className` or `style`.
 
   ```tsx
   <SelectItem value="a" style={({ highlighted, selected }) => ({ backgroundColor: highlighted ? "#2c2c2c" : "#1a1a1a", color: selected ? "#fff" : "#bbb" })}>
@@ -43,45 +45,49 @@ Each component is importable two ways: as a namespace from its subpath (`import 
 
 - **`render` customises Select parts.** It accepts an element or a function receiving host props and state. Other controls that use `asChild` still require one child that forwards its ref and host props.
 - **Select Root renders no wrapper element.** Its Popup is positioned against the Trigger.
-- **Select and Tooltip provide `Portal`, `Positioner`, and `Arrow`.** Select also provides `Backdrop`; its `Label` labels the field, while `GroupLabel` labels an item group.
+- **Select, Combobox, and Tooltip provide `Portal`, `Positioner`, and `Arrow`.** Select and Combobox also provide `Backdrop`; their labels associate with their input/trigger. Use `GroupLabel` for item groups. All positioners use the shared `/floating` positioning contract.
 - **Give Popup an opaque background.** It defaults to `#1A1A1A` when neither `style` nor a compiled `className` sets a background. A background supplied by either wins; a translucent colour lets the page show through.
-- **Combobox filtering and keyboard navigation need `items: string[]` on Root and a function child on `ComboboxList`.** Static `ComboboxItem` children are never filtered, and one is keyboard-highlighted only when its value is in `items` and passes the filter, and `ComboboxEmpty` shows whenever the filtered list is empty (always, without `items`). This is the opposite of Select, where `items` is optional.
+- **Combobox filtering and keyboard navigation use the mounted items.** Pass `items` to Root and use either the `List` function child or `Collection` for grouped data. `createItems` maps generic source objects to primitive selection values and labels. `filteredItems` supports externally filtered lists; `useFilter` provides locale-aware contains/startsWith/endsWith matching, and `useFilteredItems` reads the current results inside Root. `items` is optional when composing explicit Item children.
 - **A controlled Select cannot be cleared with `value={undefined}`**: `undefined` means uncontrolled. Use `value={null}` to clear single-select mode. Values can be generic objects or primitives, and multiple mode uses arrays.
 - **Select keyboard support is minimal**: typeahead, Up/Down, Ctrl+N/Ctrl+P, Enter, Space and Escape. Home/End and PageUp/PageDown are not handled.
-- **Combobox and Tooltip set no ARIA roles**; add `role`, `ariaExpanded` and `ariaSelected` yourself. Select sets them.
+- **Combobox sets its listbox semantics.** Input has the combobox role and expanded, controls, active-descendant, and autocomplete state; List and Item expose listbox/option roles and selected/disabled state. State is also available to `className` and `style` functions.
 - **Tooltip timers use wall time.** `advanceAsyncClock` in tests does not move Provider or Trigger delay timers.
 - **Combobox `autoHighlight` defaults to `false`**, so typing and pressing Enter selects nothing until an item is arrowed to. Pass `autoHighlight` for type-and-Enter.
-- **There is no Popover, Menu or message box.** `@gpuix/react/dialogs` is file pickers only (#572 for a message box). Dialog is available from `@gpuix/react/dialog`; it handles modal Tab focus, Escape dismissal, focus restoration and `aria-modal` in AccessKit.
+- **There is no Popover or Menu primitive.** `@gpuix/react/dialogs` provides native file pickers. Dialog and AlertDialog are available from `@gpuix/react/dialog` and `/alert-dialog`.
 
 ## Dialog (`@gpuix/react/dialog`)
 
-The parts follow Base UI names: `Root`, `Trigger`, `Portal`, `Backdrop`,
-`Popup`, `Title`, `Description`, and `Close`. The package root also exports
-`Dialog`, `DialogTrigger`, and the other prefixed parts. `Root` takes
-`open`/`defaultOpen`, `onOpenChange`, and `modal` (default `true`). `Popup` takes
-`initialFocus` and `finalFocus`, each a host ref, numeric host element ID, or
-`false` to skip that focus move.
+The parts follow Base UI 1.8.0: `Root`, `Trigger`, `Portal`, `Backdrop`,
+`Viewport`, `Popup`, `Title`, `Description`, `Close`, and `Handle`. The package
+root also exports `Dialog`, `DialogTrigger`, and the other prefixed parts.
+`Root` takes `open`/`defaultOpen`, `onOpenChange(open, eventDetails)`,
+`onOpenChangeComplete`, trigger IDs, actions and handles. `modal` accepts
+`true`, `false`, or `"trap-focus"`. Parts support `render`, state-function
+`className`/`style`, state attributes, and `data-*` props. `Popup` takes
+`initialFocus` and `finalFocus` refs or callbacks; native host refs and numeric
+host IDs are also accepted.
 
 Modal Popups expose `aria-modal`, focus the Popup when opened, trap Tab and
 Shift+Tab among painted descendants, and return focus to the Trigger or prior
-focused element when closed. Escape dismisses the highest open Dialog, Select,
-Combobox, or Tooltip. GPU-IX does not currently export a Popover primitive.
-`AlertDialog` shares the Dialog parts and renders its Popup with the
-`alertdialog` role. `Dialog.Trigger`, `Dialog.Close`, and the
-root `Button` export activate with Enter and Space; they add no default focus
-ring.
-
-The API follows the `@base-ui/react` Dialog shape but is not a full Base UI API
-match. Compared with Base UI 1.8.0, GPU-IX does not provide
-`Dialog.Viewport`, `onOpenChangeComplete`, `triggerId`, `actionsRef`, or a
-`Dialog.Root` render-function child. `modal` accepts only a boolean, so
-`'trap-focus'` is not available. `initialFocus` and `finalFocus` accept refs,
-numeric host IDs, or `false`; they do not accept `true` or callbacks. GPU-IX's
-`Portal` fills the window, so it does not need a separate `Viewport` part.
+focused element when closed. Both `true` and `"trap-focus"` trap focus; only
+`true` blocks pointer interaction behind the overlay. Escape dismisses the
+highest open Dialog, Select, Combobox, or Tooltip. `Dialog.Trigger`,
+`Dialog.Close`, and the root `Button` activate with Enter and Space; they add no
+default focus ring.
 
 `Portal` mounts a full-window deferred layer with `<anchored fill="window">`.
-All React children remain in the retained tree; this is a native overlay
-component, not a general DOM portal.
+Its `container` prop is accepted for Base UI source compatibility and is a
+no-op in the native renderer. All React children remain in the retained tree;
+this is a native overlay component, not a general DOM portal. Popup and
+Viewport expose `transitionStatus` and the `data-starting-style`/
+`data-ending-style` attributes through the native opening or closing frame.
+
+## AlertDialog (`@gpuix/react/alert-dialog`)
+
+AlertDialog has the same part tree and handle pattern as Dialog. Its Popup has
+the `alertdialog` role, and Escape or Backdrop presses do not dismiss it. Add an
+`AlertDialog.Close` action for an explicit response. The `AlertDialog` export
+from `/dialog` is a deprecated alias.
 
 ## Floating layer (`@gpuix/react/floating`)
 
@@ -116,26 +122,28 @@ The namespace follows Base UI 1.8.0: `Root`, `Label`, `Trigger`, `Value`, `Icon`
 
 ## Combobox (`@gpuix/react/combobox`)
 
-Parts: `Root`, `Input`, `Trigger`, `Value`, `Popup`, `List`, `Item`, `Empty`, `Group`, `Label`, `Separator` (the last three are plain `div`s).
+Parts: `Root`, `Label`, `Value`, `Input`, `InputGroup`, `Trigger`, `List`, `Status`, `Portal`, `Backdrop`, `Positioner`, `Popup`, `Arrow`, `Icon`, `Group`, `GroupLabel`, `Item`, `ItemIndicator`, `Chips`, `Chip`, `ChipRemove`, `Row`, `Collection`, `Empty`, `Clear`, `Separator`, plus `useFilter`, `useFilteredItems`, and `createItems`.
 
 ```tsx
 import * as Combobox from "@gpuix/react/combobox"
 
 <Combobox.Root items={frameworks}>
   <Combobox.Input placeholder="Framework" />
-  <Combobox.Popup>
-    <Combobox.Empty>No match</Combobox.Empty>
-    <Combobox.List>{(item) => <Combobox.Item key={item} value={item}>{item}</Combobox.Item>}</Combobox.List>
-  </Combobox.Popup>
+  <Combobox.Positioner>
+    <Combobox.Popup>
+      <Combobox.Empty>No match</Combobox.Empty>
+      <Combobox.List>{(item) => <Combobox.Item key={item} value={item}>{item}</Combobox.Item>}</Combobox.List>
+    </Combobox.Popup>
+  </Combobox.Positioner>
 </Combobox.Root>
 ```
 
-- **Root props**: `items?: string[]`, `value`/`defaultValue` (`string | string[] | null`), `onValueChange`, `inputValue`/`defaultInputValue`/`onInputValueChange`, `open`/`defaultOpen`/`onOpenChange`, `multiple`, `disabled`, `autoHighlight`, `filter` (`null` disables; `(item, query, itemToString) => boolean`), `itemToStringValue` (display, filtering and the text written into the input after selection).
-- **Default filter**: trimmed, case-insensitive substring; prefix matches first, then `items` order.
-- **Input** is a native `<input>`; click, focus and typing each open the popup. Escape or moving focus away closes it; Up/Down and Ctrl+N/Ctrl+P move the highlight (wrapping, skipping disabled) but do not reopen after Escape; Enter selects the highlighted item, and does nothing with no highlight.
+- **Root props**: generic `items` (flat, grouped or `createItems` collection), `filteredItems`, controlled/uncontrolled `value`, `inputValue`, and `open`, `onValueChange`, `onInputValueChange`, `onOpenChange`, `onItemHighlighted`, multiple selection, disabled/read-only/required, `autoHighlight`, `autoComplete`, `locale`, `filter`, `limit`, and item value/label/equality accessors. Root renders no host element.
+- **Default filter**: trimmed, locale-aware substring; prefix matches first, then `items` order. Root `autoComplete` sets the browser's form autofill hint; the input uses `aria-autocomplete="list"` by default and `"none"` while read-only.
+- **Input** is a native `<input>`; it associates with Label and exposes combobox/listbox ARIA state. Click, focus and typing open the popup by default. Escape or moving focus away closes it; Up/Down and Ctrl+N/Ctrl+P move the highlight (wrapping, skipping disabled); Enter selects the highlighted item.
 - **Selection**: single mode sets the value, writes it into the input and closes; multiple mode toggles, clears the input and stays open.
 - **Popup** unmounts while closed; a press outside closes it; focus stays in the input.
-- **Missing from Base UI**: `InputGroup`, `Icon`, `Clear`, `Chips`, `Chip`, `ItemIndicator`, `Status`, `Portal`, `Positioner`, `GroupLabel`, `Arrow`; `limit`, `virtualized`, `openOnInputClick`, `grid`, `inline`, `readOnly`, `required`, `name`; non-string items; ARIA.
+- **State and styling**: parts accept `className` and `style` functions. Input, Trigger, Positioner, Popup, List and Item expose state via callbacks; interactive parts set their corresponding ARIA and `data-*` attributes. `Portal` is a render-through part in the native renderer; floating content is placed by the shared Positioner.
 
 ## Tooltip (`@gpuix/react/tooltip`)
 
