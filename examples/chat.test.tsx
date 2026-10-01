@@ -499,12 +499,17 @@ describeNative('chat example', () => {
       expect(renderer.getActiveElement()).toBe(renderer.findByTestId('search-input')?.id)
 
       renderer.nativeSimulateClick(900, 40)
+      // Dialog keeps its ending state mounted until the next animation frame.
+      renderer.advanceAsyncClock(16)
+      renderer.flush()
       expect(renderer.getPaintedText()).not.toContain('Search threads')
 
       const opener = renderer.findByTestId('search')
       await app.getByTestId('search').click()
       expect(renderer.getActiveElement()).toBe(renderer.findByTestId('search-input')?.id)
       renderer.simulateKeystrokes('escape')
+      renderer.advanceAsyncClock(16)
+      renderer.flush()
       expect(renderer.getPaintedText()).not.toContain('Search threads')
       expect(renderer.getActiveElement()).toBe(opener?.id)
     } finally {

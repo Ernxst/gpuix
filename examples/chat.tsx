@@ -1282,7 +1282,9 @@ function ChipSelect({
   children: React.ReactNode
 }) {
   return (
-    <Select items={items} value={value} onValueChange={onChange}>
+    <Select items={items} value={value} onValueChange={(next) => {
+      if (next !== null) onChange(next)
+    }}>
       <div style={{ position: 'relative', display: 'flex' }}>
         <SelectTrigger
           data-testid={testId}

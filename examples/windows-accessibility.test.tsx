@@ -16,7 +16,7 @@
 import React from 'react'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { createRenderer, createRoot, flushSync } from '@gpuix/react'
+import { createRenderer, createRoot, flushSync, startFrameLoop } from '@gpuix/react'
 import { isNativeTestRendererAvailable } from '@gpuix/react/testing'
 import { testAccessibilityInitializedWhileVisible } from '@gpuix/native'
 import { describe, expect, it, vi } from 'vitest'
@@ -116,6 +116,8 @@ describeLive('Windows accessibility adapter order', () => {
 
       const root = createRoot(renderer)
       flushSync(() => root.render(<Tree />))
+      // A manual root does not start the native loop that reveals the window.
+      const frameLoop = startFrameLoop(renderer)
 
       try {
         const elements = await queryUiaElements()
@@ -142,6 +144,7 @@ describeLive('Windows accessibility adapter order', () => {
           `Expected a ControlType.CheckBox named "Include byproducts" among:\n${describeElements()}`,
         ).toBe(true)
       } finally {
+        frameLoop.stop()
         root.unmount()
         renderer.quit()
       }
