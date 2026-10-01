@@ -89,6 +89,26 @@ describeNative("Select item registration", () => {
     expect(testRoot.renderer.getAllText()).toContain("Alpha")
   })
 
+  it("renders an Item function child with its selection state", () => {
+    function Demo() {
+      return (
+        <SelectPrimitive.Root value="alpha">
+          <SelectPrimitive.Trigger style={triggerStyle}>Open</SelectPrimitive.Trigger>
+          <SelectPrimitive.Popup style={contentStyle}>
+            <SelectPrimitive.Item value="alpha" style={itemStyle}>
+              {({ selected }) => <text>{selected ? "Alpha selected" : "Alpha"}</text>}
+            </SelectPrimitive.Item>
+          </SelectPrimitive.Popup>
+        </SelectPrimitive.Root>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    testRoot.renderer.nativeSimulateClick(30, 25)
+
+    expect(testRoot.renderer.getPaintedText()).toContain("Alpha selected")
+  })
+
   it("skips a disabled wrapped Item during keyboard navigation", () => {
     function Demo() {
       const [value, setValue] = useState<string | undefined>(undefined)

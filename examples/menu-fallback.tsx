@@ -40,6 +40,7 @@ function App() {
 const renderer = createRenderer()
 const initedAt = Date.now()
 renderer.init({ title: 'GPUIX menu fallback', width: 320, height: 200, show, focus })
+const initCompletedAt = Date.now()
 render(<App />, { renderer })
 // A piped stdin (as in a spawned test) puts the renderer in automation mode,
 // which does not drive render()'s own frame loop on its own; pump it
@@ -48,7 +49,8 @@ startFrameLoop(renderer, { onTerminated: () => process.exit(0) })
 
 function report(menus: boolean): void {
   const elapsedMs = Date.now() - initedAt
-  console.log(`MENU_FALLBACK ${JSON.stringify({ elapsedMs, menus })}`)
+  const afterInitMs = Date.now() - initCompletedAt
+  console.log(`MENU_FALLBACK ${JSON.stringify({ elapsedMs, afterInitMs, menus })}`)
 }
 
 function poll(): void {

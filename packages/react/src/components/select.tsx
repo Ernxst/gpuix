@@ -740,7 +740,7 @@ export interface SelectItemProps extends SelectPartProps<SelectItemState, "child
   disabled?: boolean
   label?: string
   textValue?: string
-  children?: ReactNode
+  children?: ReactNode | ((state: SelectItemState) => ReactNode)
   style?: StateStyle<SelectItemState> | undefined
 }
 
@@ -758,7 +758,8 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
       highlighted: context.isItemEqualToValue(context.activeValue, itemValue),
       disabled,
     }
-    const fallbackTextValue = label ?? textValue ?? textContent(children)
+    const fallbackTextValue = label ?? textValue ?? (typeof children === "function" ? "" : textContent(children))
+    const renderedChildren = typeof children === "function" ? children(state) : children
     const itemContext = useMemo<SelectItemContextValue>(
       () => ({ value: itemValue, setText: setItemText }),
       [itemValue]
@@ -800,7 +801,7 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
     // before SelectValue renders it. Inert: `display: "none"` takes no layout
     // space, is absent from the accessibility tree, and is never hit-tested
     // (see display-none.test.tsx).
-    if (!context.open) return <SelectItemContext.Provider value={itemContext}><div style={{ display: "none" }} ref={setInstanceRef}>{children}</div></SelectItemContext.Provider>
+    if (!context.open) return <SelectItemContext.Provider value={itemContext}><div style={{ display: "none" }} ref={setInstanceRef}>{renderedChildren}</div></SelectItemContext.Provider>
     const itemProps: Props = {
       ...props,
       ref: setInstanceRef,
@@ -823,7 +824,7 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
     }
     return (
       <SelectItemContext.Provider value={itemContext}>
-        {renderPart({ render, props: itemProps, state, children, ref: setInstanceRef }) as ReactElement}
+        {renderPart({ render, props: itemProps, state, children: renderedChildren, ref: setInstanceRef }) as ReactElement}
       </SelectItemContext.Provider>
     )
   }

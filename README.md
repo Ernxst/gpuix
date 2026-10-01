@@ -3572,6 +3572,8 @@ In Select, `Label` labels the field and `GroupLabel` labels an item group.
 The namespace also includes `Portal`, `Backdrop`, `Positioner`, `Arrow`, both
 scroll arrows, and `Separator`. Values are generic and nullable for
 single-select mode, event callbacks receive details, and `items` is optional.
+`Select.Item` accepts a function child receiving `{ selected, highlighted, disabled }`,
+so item content can reflect its current state.
 
 ### Build a local Select
 

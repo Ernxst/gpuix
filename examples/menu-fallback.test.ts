@@ -17,13 +17,18 @@ import { isNativeTestRendererAvailable } from '@gpuix/react/testing'
 const CWD = path.dirname(fileURLToPath(import.meta.url))
 const MARKER = 'MENU_FALLBACK '
 const BLOCKER_READY = 'MENU_FALLBACK_BLOCKER ready'
+// init() creates the native window and may spend variable time in AppKit.
+// The fallback's timing budget starts once that setup has returned.
+const FALLBACK_BOUND_MS = 500
 
 const describeLive =
   process.platform === 'darwin' && isNativeTestRendererAvailable() ? describe : describe.skip
 
 interface MenuFallback {
-  /** Milliseconds from `init` to the default menus installing. */
+  /** Milliseconds from entering `init` to the default menus installing. */
   elapsedMs: number
+  /** Milliseconds after `init` returns, when the fallback can start. */
+  afterInitMs: number
   /** Whether the default menus installed before the deadline. */
   menus: boolean
 }
@@ -99,7 +104,7 @@ describeLive('default menus for a window that presents no frames', () => {
   it('installs the default menus and honors Cmd+Q for a hidden window', async () => {
     const { result, exitCode } = await runMenuFallback({ MENU_FALLBACK_SHOW: '0' })
     expect(result.menus).toBe(true)
-    expect(result.elapsedMs).toBeLessThan(500)
+    expect(result.afterInitMs).toBeLessThan(FALLBACK_BOUND_MS)
     expect(exitCode).toBe(0)
   }, 30_000)
 
@@ -109,7 +114,7 @@ describeLive('default menus for a window that presents no frames', () => {
 
     const { result, exitCode } = await runMenuFallback({ MENU_FALLBACK_FOCUS: '0' })
     expect(result.menus).toBe(true)
-    expect(result.elapsedMs).toBeLessThan(500)
+    expect(result.afterInitMs).toBeLessThan(FALLBACK_BOUND_MS)
     expect(exitCode).toBe(0)
   }, 30_000)
 })
