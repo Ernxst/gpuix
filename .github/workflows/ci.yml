@@ -268,7 +268,11 @@ jobs:
     needs: build
     # Needs the Windows artifact, which only exists on dispatch runs that target Windows.
     if: github.event_name == 'workflow_dispatch' && contains(inputs.targets, 'windows')
-    runs-on: blacksmith-4vcpu-windows-2025
+    # TestGpuixRenderer opens a real DirectX window, which needs an interactive
+    # desktop session. Blacksmith runs its Windows agent as a service in
+    # session 0, where creating the DirectX renderer fails, so this job stays
+    # on a GitHub-hosted runner. The Windows build itself runs on Blacksmith.
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
