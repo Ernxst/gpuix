@@ -353,7 +353,7 @@ describeNative("Dialog", () => {
     expect(detailsSeen[0]?.trigger?.id).toBe(triggerId)
   })
 
-  it("lets change details restore propagation for dismissal events", async () => {
+  it("lets change details restore propagation for an outside press", async () => {
     const bubbled: string[] = []
     screen.render(
       <Dialog.Root
@@ -361,16 +361,15 @@ describeNative("Dialog", () => {
         onOpenChange={(_open, details) => details.allowPropagation()}
       >
         <Dialog.Portal>
-          <Dialog.Popup>
-            <div onClick={() => bubbled.push("parent")}>
-              <Dialog.Close>Close</Dialog.Close>
-            </div>
-          </Dialog.Popup>
+          <div onMouseDown={() => bubbled.push("parent")}>
+            <Dialog.Backdrop data-testid="backdrop" />
+            <Dialog.Popup><Dialog.Title>Outside press</Dialog.Title></Dialog.Popup>
+          </div>
         </Dialog.Portal>
       </Dialog.Root>,
     )
 
-    await screen.userEvent.click(screen.getByRole("button", { name: "Close" }))
+    await screen.userEvent.click(screen.getByTestId("backdrop"))
     expect(bubbled).toEqual(["parent"])
   })
 
