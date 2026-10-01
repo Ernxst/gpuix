@@ -12,6 +12,7 @@ import {
   textContent,
   type TestRenderer,
 } from "../testing.js"
+import { useGpuixRequired } from "../index.js"
 import { gpuixMatchers, type GpuixMatchers } from "../testing-expect.js"
 import { readPngSize } from "../testing-png.js"
 import { withNewGoldenWrites } from "./test-utils.js"
@@ -129,6 +130,24 @@ function withActEnvironment(scope: () => void): void {
   }
 }
 
+function SetWindowTitle({
+  title,
+  errors,
+}: {
+  title: string
+  errors: unknown[]
+}): React.ReactElement {
+  const renderer = useGpuixRequired()
+  React.useEffect(() => {
+    try {
+      renderer.setWindowTitle!(title)
+    } catch (error) {
+      errors.push(error)
+    }
+  }, [renderer, title, errors])
+  return <text>Title writer</text>
+}
+
 /** A click whose result only appears once the effect the click's state change
  *  scheduled has run and set state of its own. */
 function ConfirmOnClick(): React.ReactElement {
@@ -168,6 +187,16 @@ describeNative("render", () => {
 
   it("exposes the window title from its last accessibility frame", () => {
     const screen = render(<text>Title reader</text>)
+    expect(screen.renderer.getWindowTitle()).toBe("GPUIX Test")
+  })
+
+  it("sets the window title through the renderer context", () => {
+    const errors: unknown[] = []
+    const screen = render(<SetWindowTitle title="Satisfactory route" errors={errors} />)
+    expect(errors).toEqual([])
+    expect(screen.renderer.getWindowTitle()).toBe("Satisfactory route")
+
+    screen.renderer.resetWindowState()
     expect(screen.renderer.getWindowTitle()).toBe("GPUIX Test")
   })
 
