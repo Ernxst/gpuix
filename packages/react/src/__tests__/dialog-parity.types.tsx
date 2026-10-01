@@ -15,8 +15,14 @@ function GpuixDialogFixture() {
       modal="trap-focus"
       onOpenChange={(open, details) => {
         const reason: string = details.reason
+        void details.event
+        void details.trigger
+        details.cancel()
+        details.allowPropagation()
+        const canceled: boolean = details.isCanceled
+        const propagationAllowed: boolean = details.isPropagationAllowed
         if (!open) details.preventUnmountOnClose()
-        void reason
+        void [reason, canceled, propagationAllowed]
       }}
       onOpenChangeComplete={(open) => void open}
       triggerId={undefined}
@@ -61,8 +67,14 @@ function BaseDialogFixture() {
       modal="trap-focus"
       onOpenChange={(open, details) => {
         const reason: string = details.reason
+        void details.event
+        void details.trigger
+        details.cancel()
+        details.allowPropagation()
+        const canceled: boolean = details.isCanceled
+        const propagationAllowed: boolean = details.isPropagationAllowed
         if (!open) details.preventUnmountOnClose()
-        void reason
+        void [reason, canceled, propagationAllowed]
       }}
       onOpenChangeComplete={(open) => void open}
       triggerId={undefined}
@@ -104,8 +116,14 @@ function GpuixAlertDialogFixture() {
       defaultOpen
       onOpenChange={(open, details) => {
         const reason: string = details.reason
+        void details.event
+        void details.trigger
+        details.cancel()
+        details.allowPropagation()
+        const canceled: boolean = details.isCanceled
+        const propagationAllowed: boolean = details.isPropagationAllowed
         if (!open) details.preventUnmountOnClose()
-        void reason
+        void [reason, canceled, propagationAllowed]
       }}
       onOpenChangeComplete={(open) => void open}
     >
@@ -132,8 +150,14 @@ function BaseAlertDialogFixture() {
       defaultOpen
       onOpenChange={(open, details) => {
         const reason: string = details.reason
+        void details.event
+        void details.trigger
+        details.cancel()
+        details.allowPropagation()
+        const canceled: boolean = details.isCanceled
+        const propagationAllowed: boolean = details.isPropagationAllowed
         if (!open) details.preventUnmountOnClose()
-        void reason
+        void [reason, canceled, propagationAllowed]
       }}
       onOpenChangeComplete={(open) => void open}
     >

@@ -31,9 +31,13 @@ export type FocusTarget = DialogFocusTarget
 
 export interface DialogChangeEventDetails {
   reason: "trigger-press" | "outside-press" | "escape-key" | "close-press" | "focus-out" | "imperative-action" | "none"
-  nativeEvent?: GpuixSyntheticEvent
+  event: Event | GpuixSyntheticEvent
+  cancel(): void
+  allowPropagation(): void
+  isCanceled: boolean
+  isPropagationAllowed: boolean
   nested: boolean
-  triggerElement: PublicInstance | null
+  trigger: PublicInstance | undefined
   preventUnmountOnClose(): void
 }
 
@@ -73,6 +77,7 @@ export interface DialogContextValue {
   disablePointerDismissal: boolean
   setOpen(open: boolean, reason?: DialogChangeEventDetails["reason"], nativeEvent?: GpuixSyntheticEvent): void
   triggerRef: React.MutableRefObject<PublicInstance | null>
+  preventUnmountOnClose: boolean
   titleId: string
   descriptionId: string
   isTopLayer(event?: GpuixSyntheticEvent): boolean
@@ -129,6 +134,7 @@ function DialogRootImpl<Payload = unknown>({
   const parentContext = useContext(DialogContext)
   const nested = parentContext !== null
   const [localOpen, setLocalOpen] = useState(defaultOpen)
+  const [preventUnmountOnClose, setPreventUnmountOnClose] = useState(false)
   const [nestedDialogCounts, setNestedDialogCounts] = useState<Record<string, number>>({})
   const open = openProp ?? localOpen
   const [triggerId, setTriggerIdState] = useState<string | null>(triggerIdProp ?? defaultTriggerId ?? null)
@@ -160,16 +166,25 @@ function DialogRootImpl<Payload = unknown>({
   }, [])
   const setOpen = useCallback((nextOpen: boolean, reason: DialogChangeEventDetails["reason"] = "none", nativeEvent?: GpuixSyntheticEvent) => {
     if (openRef.current === nextOpen) return
-    openRef.current = nextOpen
-    if (openProp === undefined) setLocalOpen(nextOpen)
+    let canceled = false
+    let propagationAllowed = false
+    let shouldPreventUnmountOnClose = false
     const details: DialogChangeEventDetails = {
       reason,
-      nativeEvent,
+      event: nativeEvent ?? new Event("base-ui"),
+      cancel() { canceled = true },
+      allowPropagation() { propagationAllowed = true },
+      get isCanceled() { return canceled },
+      get isPropagationAllowed() { return propagationAllowed },
       nested,
-      triggerElement: triggerRef.current,
-      preventUnmountOnClose() {},
+      trigger: triggerRef.current ?? undefined,
+      preventUnmountOnClose() { if (!nextOpen) shouldPreventUnmountOnClose = true },
     }
     onChangeRef.current?.(nextOpen, details)
+    if (details.isCanceled) return
+    openRef.current = nextOpen
+    if (openProp === undefined) setLocalOpen(nextOpen)
+    setPreventUnmountOnClose(nextOpen ? false : shouldPreventUnmountOnClose)
   }, [nested, openProp])
   const controller = useRef<HandleController<Payload> | null>(null)
   controller.current = {
@@ -188,7 +203,13 @@ function DialogRootImpl<Payload = unknown>({
   }, [handle])
   useEffect(() => {
     if (!actionsRef) return
-    const actions = { unmount() { setOpen(false, "imperative-action") }, close() { setOpen(false, "imperative-action") } }
+    const actions = {
+      unmount() {
+        setPreventUnmountOnClose(false)
+        setOpen(false, "imperative-action")
+      },
+      close() { setOpen(false, "imperative-action") },
+    }
     ;(actionsRef as { current: DialogRootActions | null }).current = actions
     return () => { (actionsRef as { current: DialogRootActions | null }).current = null }
   }, [actionsRef, setOpen])
@@ -209,6 +230,7 @@ function DialogRootImpl<Payload = unknown>({
     alert,
     nested,
     nestedDialogOpen: nestedDialogCount > 0,
+    preventUnmountOnClose,
     disablePointerDismissal,
     setOpen,
     triggerRef,
@@ -406,7 +428,7 @@ export const DialogPortal = forwardRef<PublicInstance, DialogPortalProps>(functi
   { container: _container, keepMounted = false, children, style, className, render, ...props }, ref,
 ) {
   const context = useDialogContext("Dialog.Portal")
-  if (!context.open && !keepMounted) return null
+  if (!context.open && !keepMounted && !context.preventUnmountOnClose) return null
   const state: DialogPortalState = {}
   const resolvedStyle: StyleDesc = { display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "transparent", ...resolveStyle(style, state), pointerEvents: context.modal === true ? undefined : "none" }
   const portalProps = {
@@ -430,7 +452,7 @@ export const DialogBackdrop = forwardRef<PublicInstance, DialogBackdropProps>(fu
   { forceRender = false, children, style, onMouseDown, className, render, ...props }, ref,
 ) {
   const context = useDialogContext("Dialog.Backdrop")
-  if (!context.open && !forceRender) return null
+  if (!context.open && !forceRender && !context.preventUnmountOnClose) return null
   const state = { open: context.open, transitionStatus: "none" as const }
   const elementProps: DialogComponentProps<typeof state> = {
     ...props,
@@ -495,7 +517,7 @@ export const DialogPopup = forwardRef<PublicInstance, DialogPopupProps>(function
     }
   }, [context.isTopLayer, context.open, context.triggerRef, renderer])
 
-  if (!context.open) return null
+  if (!context.open && !context.preventUnmountOnClose) return null
   const elementProps: DialogComponentProps<DialogPartState> = {
     ...props,
     role: context.alert ? "alertdialog" : "dialog",
@@ -530,7 +552,7 @@ export const DialogViewport = forwardRef<PublicInstance, DialogViewportProps>(fu
   { children, className, style, render, ...props }, ref,
 ) {
   const context = useDialogContext("Dialog.Viewport")
-  if (!context.open) return null
+  if (!context.open && !context.preventUnmountOnClose) return null
   const state = partState(context)
   return renderPart("div", { ...props, role: "presentation", className, style, render, children, ...stateAttributes(state) }, state, ref)
 })

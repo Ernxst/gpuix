@@ -1,7 +1,7 @@
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { Button } from "../components/button.js"
-import { AlertDialog, Dialog, DialogPopup, DialogPortal, DialogTrigger, DialogTitle } from "../components/dialog.js"
+import { AlertDialog, Dialog, DialogPopup, DialogPortal, DialogTitle, DialogTrigger } from "../components/dialog.js"
 import { Select, SelectItem, SelectPopup, SelectTrigger } from "../components/select.js"
 import { Combobox, ComboboxInput, ComboboxItem, ComboboxList, ComboboxPopup } from "../components/combobox.js"
 import { createTestRoot, isNativeTestRendererAvailable, type TestRoot } from "../testing.js"
@@ -299,6 +299,58 @@ describeNative("Dialog", () => {
     screen.renderer.simulateKeystrokes("enter")
     expect(renderedClicks).toEqual(["trigger", "close"])
     expect(screen.queryByRole("dialog", { name: "Rendered dialog" })).toBeNull()
+  })
+
+  it("supports Base UI change detail controls and retained Portal content", () => {
+    const detailsSeen: Array<{ open: boolean; event: unknown; trigger: PublicInstance | undefined }> = []
+    let cancelFirstClose = true
+    let retainNextClose = true
+    screen.render(
+      <Dialog.Root
+        onOpenChange={(open, details) => {
+          detailsSeen.push({ open, event: details.event, trigger: details.trigger })
+          expect(details.isCanceled).toBe(false)
+          if (open) {
+            details.allowPropagation()
+            expect(details.isPropagationAllowed).toBe(true)
+          } else if (cancelFirstClose) {
+            details.cancel()
+            expect(details.isCanceled).toBe(true)
+            cancelFirstClose = false
+          } else if (retainNextClose) {
+            details.preventUnmountOnClose()
+            retainNextClose = false
+          }
+        }}
+      >
+        <Dialog.Trigger ariaLabel="Open controlled dialog" />
+        <Dialog.Portal>
+          <Dialog.Popup>
+            <Dialog.Title>Retained dialog</Dialog.Title>
+            <Dialog.Close>Close</Dialog.Close>
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>,
+    )
+
+    const trigger = screen.getByRole("button", { name: "Open controlled dialog" })
+    const triggerId = trigger.id
+    screen.renderer.focusElement(trigger.id)
+    screen.renderer.simulateKeystrokes("enter")
+    expect(screen.getByRole("dialog", { name: "Retained dialog" })).toBeDefined()
+
+    const close = screen.getByRole("button", { name: "Close" })
+    screen.renderer.focusElement(close.id)
+    screen.renderer.simulateKeystrokes("enter")
+    expect(screen.getByRole("dialog", { name: "Retained dialog" })).toBeDefined()
+
+    screen.renderer.focusElement(screen.getByRole("button", { name: "Close" }).id)
+    screen.renderer.simulateKeystrokes("enter")
+    expect(screen.getByRole("dialog", { name: "Retained dialog" })).toBeDefined()
+
+    expect(detailsSeen.map(({ open }) => open)).toEqual([true, false, false])
+    expect(detailsSeen.every(({ event }) => event != null)).toBe(true)
+    expect(detailsSeen[0]?.trigger?.id).toBe(triggerId)
   })
 
   it("dispatches keyboard button activation as a bubbling click event", () => {
