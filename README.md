@@ -3784,6 +3784,9 @@ direction. Home/End and PageUp/PageDown are not handled.
 
 Select parts accept `className` and `style` functions with state matching the
 corresponding Base UI part. `Root` renders no element and takes neither prop.
+When a part accepts `render={<element />}`, the element's `className` is kept
+and combined before the part's class; element props are applied after part props,
+including inline styles, event handlers, and refs.
 
 Select positioning uses the native window viewport, anchor, side/alignment and
 offset options. A custom `collisionBoundary` may be a rectangle, host element,
@@ -3903,6 +3906,11 @@ and disabled state through ARIA and `data-*` attributes.
 The root `autoComplete` option controls the browser's form autofill hint. The input
 uses `aria-autocomplete="list"` by default and `"none"` while read-only,
 and `locale` sets the default filter's string comparison locale.
+
+Parts that accept `render={<element />}` preserve and combine the element's
+`className` with the part's class. The element's inline styles take precedence,
+its event handlers run before the part handlers, and both element and part refs
+are retained.
 
 ```tsx
 <TooltipPrimitive.Tooltip.Provider delay={350} closeDelay={80}>
