@@ -4,6 +4,9 @@
   "cacheMaxAge": "30d",
   "tasks": {
     "dev": {
+      "dependsOn": [
+        "@gpuix/native#build:debug"
+      ],
       "cache": false,
       "persistent": true,
       "description": "Run persistent development servers for workspace packages."

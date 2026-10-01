@@ -6955,12 +6955,12 @@ after touching one file:
 | `bun run build:debug` (napi) | ~2s |
 | One vitest screenshot file | ~2s |
 
-`bun run dev` wires that into a loop: it watches `packages/native/src`,
+`bun scripts/dev.ts` wires that into a loop: it watches `packages/native/src`,
 rebuilds, and re-renders the screenshot tests. **Rust edit to fresh PNGs is
 about 4 seconds.**
 
 ```bash
-bun run dev                      # rebuild, re-render the showcase screenshots
+bun scripts/dev.ts               # rebuild, re-render the showcase screenshots
 bun scripts/dev.ts --shots diff  # only tests matching "diff"
 bun scripts/dev.ts --app native-text   # rebuild, restart an example app
 ```
@@ -6968,6 +6968,10 @@ bun scripts/dev.ts --app native-text   # rebuild, restart an example app
 Screenshot mode is the better default. Open
 `packages/react/screenshots/showcase.png` in Preview.app, which reloads on
 write, and unlike a live window the PNG can also be read by an agent.
+
+`bun run dev` from the repository root runs the todo app in `example-app/`
+under `turbo watch`. A Rust edit rebuilds the debug addon and restarts the
+app; a React or plugin edit hot-reloads it.
 
 Two things avoid the rebuild entirely:
 

@@ -105,7 +105,7 @@
     "build": "tsc",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "typecheck": "tsc --build tsconfig.typecheck.json --noEmit",
-    "dev": "tsc --watch",
+    "dev": "tsc --watch --incremental",
     "test": "vitest run --project react",
     "canvas:wpt": "vitest run --project wpt",
     "test:watch": "vitest --project react",
