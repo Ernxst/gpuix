@@ -318,7 +318,15 @@ jobs:
           path: packages/native/
 
       - name: Run React tests
-        run: bun run test
+        # These suites construct TestGpuixRenderer, which the Linux binding omits
+        # because wgpu cannot read rendered images back yet. The remaining React
+        # tests do not need GPU image readback and still run on Linux.
+        run: |
+          bun run build
+          bun run typecheck:test
+          bun run vitest run \
+            --exclude src/__tests__/canvas-wpt.test.tsx \
+            --exclude 'src/__tests__/{baseline-layout.test.tsx,border-box-sizing.test.tsx,bun-preload-hover-group.test.ts,code.test.tsx,diff-native.test.tsx,frame-clock.test.tsx,globals.test.tsx,grid-layout.test.tsx,highlight.test.tsx,intrinsic-and-viewport-lengths.test.tsx,markdown.test.tsx,resolved-style.test.tsx,satisfactory-focus-within-repro.test.tsx,scroll-percentage-layout.test.tsx,selection-layout.test.tsx,selection.test.tsx,showcase.test.tsx,spacing-percentage-layout.test.tsx,style-coverage.test.tsx,testing-per-file-isolation.test.tsx,virtual-list.test.tsx}'
         working-directory: packages/react
 
       - name: Run example tests
