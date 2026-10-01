@@ -3582,10 +3582,15 @@ Each primitive has a dedicated namespace entry point:
 | Import | Main parts |
 |---|---|
 | `@gpuix/react/dialog` | `Root`, `Trigger`, `Portal`, `Backdrop`, `Popup`, `Title`, `Description`, `Close` |
-| `@gpuix/react/select` | `Root`, `Trigger`, `Value`, `Icon`, `Popup`, `List`, `Item`, `ItemText`, `ItemIndicator` |
+| `@gpuix/react/select` | `Root`, `Label`, `Trigger`, `Value`, `Icon`, `Portal`, `Backdrop`, `Positioner`, `Popup`, `List`, `Item`, `ItemIndicator`, `ItemText`, `Arrow`, `ScrollUpArrow`, `ScrollDownArrow`, `Group`, `GroupLabel`, `Separator` |
 | `@gpuix/react/combobox` | `Root`, `Input`, `Popup`, `List`, `Item`, `Empty` |
 | `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Popup` |
-| `@gpuix/react/floating` | `FloatingLayer`, `renderSlot` |
+| `@gpuix/react/floating` | `FloatingLayer`, `PositionerProps`, `FloatingPositioner`, `renderSlot` |
+
+In Select, `Label` labels the field and `GroupLabel` labels an item group.
+The namespace also includes `Portal`, `Backdrop`, `Positioner`, `Arrow`, both
+scroll arrows, and `Separator`. Values are generic and nullable for
+single-select mode, event callbacks receive details, and `items` is optional.
 
 ### Build a local Select
 
@@ -3599,6 +3604,8 @@ import * as SelectPrimitive from '@gpuix/react/select'
 export const Select = SelectPrimitive.Root
 export const SelectValue = SelectPrimitive.Value
 export const SelectGroup = SelectPrimitive.Group
+export const SelectGroupLabel = SelectPrimitive.GroupLabel
+export const SelectLabel = SelectPrimitive.Label
 export const SelectIcon = SelectPrimitive.Icon
 export const SelectList = SelectPrimitive.List
 export const SelectItemText = SelectPrimitive.ItemText
@@ -3711,6 +3718,23 @@ direction. Home/End and PageUp/PageDown are not handled.
 
 Select parts accept `className` and `style` functions with state matching the
 corresponding Base UI part. `Root` renders no element and takes neither prop.
+
+Select positioning uses the native window viewport, anchor, side/alignment and
+offset options. A custom `collisionBoundary` may be a rectangle, host element,
+or array of boundaries (arrays use their intersection); object-valued
+`collisionPadding` is applied per edge. `anchorHidden` reports an anchor that
+falls outside the effective boundary. On the native renderer,
+`collisionBoundary="clipping-ancestors"` means the window viewport.
+
+The native renderer accepts but does not implement `positionMethod`, `sticky`,
+`arrowPadding`, `disableAnchorTracking`, `alignItemWithTrigger`,
+`collisionAvoidance.fallbackAxisSide`, Root `modal` and `actionsRef`, or Root
+form props (`name`, `form`, `required`, `autoComplete`, `inputRef`), Root
+`itemToStringLabel`/`itemToStringValue`, or logical side direction resolution
+(`inline-start`/`inline-end` map to left/right). These options currently have
+no native effect. Select change details carry the
+originating GPU-IX event in `event`; programmatic changes have `event` set to
+`undefined`. Calling `details.cancel()` prevents the associated state update.
 
 Set `multiple` on `Select` to keep the popup open while items are toggled. The
 controlled and uncontrolled values are string arrays, and `onValueChange`

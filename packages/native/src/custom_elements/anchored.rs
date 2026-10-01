@@ -94,6 +94,7 @@ impl Alignment {
 
 #[derive(Debug, Clone, Copy, Default)]
 enum FitMode {
+    None,
     Switch,
     #[default]
     Snap,
@@ -101,10 +102,10 @@ enum FitMode {
 
 impl FitMode {
     fn from_str(value: &str) -> Self {
-        if value == "switch" {
-            Self::Switch
-        } else {
-            Self::Snap
+        match value {
+            "none" => Self::None,
+            "switch" => Self::Switch,
+            _ => Self::Snap,
         }
     }
 }
@@ -354,9 +355,11 @@ impl CustomElement for AnchoredElement {
             if let Some((x, y)) = self.position {
                 anchored = anchored.position(gpui::point(gpui::px(x), gpui::px(y)));
             }
-            if matches!(self.fit, FitMode::Snap) {
-                anchored = anchored.snap_to_window_with_margin(gpui::px(self.snap_margin));
-            }
+                match self.fit {
+                    FitMode::None => {}
+                    FitMode::Switch => {}
+                    FitMode::Snap => anchored = anchored.snap_to_window_with_margin(gpui::px(self.snap_margin)),
+                }
         }
 
         let anchored = anchored.child(content);

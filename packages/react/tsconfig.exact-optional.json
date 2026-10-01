@@ -3,14 +3,27 @@
   "compilerOptions": {
     "exactOptionalPropertyTypes": true,
     "jsxImportSource": "react",
+    "rootDir": ".",
+    "baseUrl": ".",
     "paths": {
+      "@gpuix/react": ["dist/index.d.ts"],
+      "@gpuix/react/select": ["dist/components/select.d.ts"],
       "@gpuix/react/dialog": ["./dist/components/dialog.d.ts"],
-      "@gpuix/react/alert-dialog": ["./dist/components/alert-dialog.d.ts"]
+      "@gpuix/react/alert-dialog": ["./dist/components/alert-dialog.d.ts"],
+      "@gpuix/react/*": ["dist/*"]
     },
     "skipLibCheck": true,
     "disableSourceOfProjectReferenceRedirect": true,
     "noEmit": true
   },
-  "files": ["src/__tests__/exact-optional.types.ts", "src/__tests__/dialog-parity.types.tsx"],
-  "include": ["src/__tests__/exact-optional.types.ts", "src/__tests__/dialog-parity.types.tsx"]
+  "files": [
+    "src/__tests__/exact-optional.types.ts",
+    "src/__tests__/dialog-parity.types.tsx",
+    "type-tests/select-parity/select-parity.types.tsx"
+  ],
+  "include": [
+    "src/__tests__/exact-optional.types.ts",
+    "src/__tests__/dialog-parity.types.tsx",
+    "type-tests/select-parity/select-parity.types.tsx"
+  ]
 }
