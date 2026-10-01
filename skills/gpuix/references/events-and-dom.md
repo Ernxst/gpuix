@@ -22,7 +22,7 @@ GPU-IX dispatches its own synthetic events over the retained host tree (`package
 - **`ref.current.id` is a number**, the native element id. The authored `id` is `ref.current.getAttribute("id")` or `ref.current.props.id`.
 - **Refs have no `closest`, `querySelector`, `dataset`, `style`, `classList`, `children`, `parentNode`, `textContent`, `addEventListener`, `setAttribute` or `offsetWidth`.** `isConnected` reports whether the ref is mounted in its root.
 - **`window` is `globalThis`.** Under Bun `window.addEventListener("resize" | "keydown" | "blur", …)` registers without error and never fires. Use `useWindowSize()` for resize and a root `onKeyDown` for shortcuts.
-- **`document` answers `getElementById`, `activeElement`, `body`, `defaultView`, and `pointerup`/`pointercancel` listeners only.** Other listener types are ignored with one warning; `documentElement` is `undefined`, and `createElement`, `querySelector` and `dispatchEvent` are undefined and throw when called.
+- **`document` answers `getElementById`, `activeElement`, `body`, `defaultView`, and `pointerup`/`pointercancel` listeners.** `querySelector()` always returns `null` and `querySelectorAll()` always returns an empty array; the facade does not evaluate CSS selectors. Other listener types are ignored with one warning; `documentElement` is `undefined`, and `createElement` and `dispatchEvent` are undefined and throw when called.
 - **Not installed anywhere**: `matchMedia`, `MutationObserver`, `IntersectionObserver`, `innerWidth`/`innerHeight`, `devicePixelRatio`, `DOMRect`, `CSS`, `KeyboardEvent`, `MouseEvent`, `FocusEvent`, `requestIdleCallback`.
 - **Keys pressed with nothing focused reach only the root element's own `onKeyDown`/`onKeyUp`.** Render one top-level element and put app shortcuts on it. With several top-level children (`<><App /><Toaster /></>`) GPU-IX inserts an implicit root with no handlers, and no-focus shortcuts are lost (#619).
 - **Only elements with a focus handle can take focus.** A handle comes from `tabIndex`, a key/focus/blur listener (capture forms included), `onAccessibilityAction`, or a `focusWithin` style; inputs, textareas and choice/range inputs have one already. `ref.focus()` on a bare `div` does nothing, and so does `autoFocus`: it focuses only an element that is already focusable. Adding `onKeyDown` makes an element focusable but not a Tab stop.
@@ -146,7 +146,8 @@ The globals are typed as full DOM types although the objects are partial (#649).
 | API | Status |
 |---|---|
 | `document.addEventListener` for `pointerdown`, `mousedown`, `keydown`, `focusin`, `focusout`, `click`, `scroll`, `visibilitychange` | ignored with a warning |
-| `document.createElement`, `createTextNode`, `createTreeWalker`, `querySelector(All)`, `getElementsBy*`, `documentElement`, `hasFocus`, `getSelection`, `dispatchEvent` | absent |
+| `document.querySelector`, `document.querySelectorAll` | present, but always return `null` and `[]`; CSS selectors are not evaluated |
+| `document.createElement`, `createTextNode`, `createTreeWalker`, `getElementsBy*`, `documentElement`, `hasFocus`, `getSelection`, `dispatchEvent` | absent |
 | `window.addEventListener` (resize, keydown, blur, focus) | registers, never fires |
 | `window.innerWidth`/`innerHeight`/`devicePixelRatio`/`visualViewport` | absent; use `useWindowSize()` |
 | `getComputedStyle` | partial: `display` and `visibility` from resolved inline or compiled CSS module styles; defaults to `block` / `visible` |

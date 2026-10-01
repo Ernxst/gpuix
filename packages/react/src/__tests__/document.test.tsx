@@ -97,6 +97,20 @@ describe("@gpuix/react/globals document", () => {
     expect(doc.body).toBeNull()
   })
 
+  it("returns no matches for document selector queries", () => {
+    const doc = globalThis.document as unknown as GpuixDocument
+    const app = mount(
+      <div>
+        <button id="submit" />
+      </div>
+    )
+
+    expect(doc.querySelector("button")).toBeNull()
+    expect(doc.querySelectorAll("button")).toEqual([])
+
+    app.unmount()
+  })
+
   it("answers Base UI's composite visibility and disabled checks on mounted refs", () => {
     const enabled = createRef<PublicInstance>()
     const disabled = createRef<PublicInstance>()
