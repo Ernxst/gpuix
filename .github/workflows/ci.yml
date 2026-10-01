@@ -19,6 +19,8 @@ permissions: {}
 jobs:
   typecheck:
     name: Typecheck
+    # Waits for the build so the native binding's types come from the cache.
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -30,12 +32,17 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          submodules: recursive
 
       - name: Setup bun
         uses: ./.github/actions/bun
 
-      - name: Build
-        run: bun run build --exclude packages/native
+      # Only used when the remote cache has no native build for this commit.
+      - name: Setup rust
+        uses: ./.github/actions/rust
+
+      - name: Setup linux
+        uses: ./.github/actions/linux
 
       - name: Typecheck
         run: bun run typecheck

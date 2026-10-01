@@ -9,4 +9,5 @@ runs:
     # "cannot execute tool 'metal' due to missing Metal Toolchain".
     - name: Install Metal toolchain
       if: runner.os == 'macOS'
+      shell: bash
       run: xcodebuild -downloadComponent MetalToolchain
