@@ -2008,27 +2008,30 @@ async fn run_ui_commands(
                 response.send(()).ok();
                 Ok(())
             }
-            UiCommand::ActivateWindow => window.update(cx, |_view, window, cx| {
-                if test_window_activation_disabled() {
-                    #[cfg(target_os = "macos")]
-                    if let Some((ns_view, ns_window)) = ns_view(window).zip(ns_window(window)) {
-                        show_window_with_current_frame(ns_view, ns_window, false);
-                    }
-                    #[cfg(target_os = "windows")]
-                    {
-                        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-                        let handle = HasWindowHandle::window_handle(window)
-                            .map_err(|error| anyhow::anyhow!("no window handle: {error:?}"))?;
-                        if let RawWindowHandle::Win32(handle) = handle.as_raw() {
-                            gpui_windows::show_window_opened_hidden(handle.hwnd)?;
+            UiCommand::ActivateWindow => window
+                .update(cx, |_view, window, cx| {
+                    if test_window_activation_disabled() {
+                        #[cfg(target_os = "macos")]
+                        if let Some((ns_view, ns_window)) = ns_view(window).zip(ns_window(window)) {
+                            show_window_with_current_frame(ns_view, ns_window, false);
                         }
+                        #[cfg(target_os = "windows")]
+                        {
+                            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                            let handle = HasWindowHandle::window_handle(window)
+                                .map_err(|error| anyhow::anyhow!("no window handle: {error:?}"))?;
+                            if let RawWindowHandle::Win32(handle) = handle.as_raw() {
+                                gpui_windows::show_window_opened_hidden(handle.hwnd)?;
+                            }
+                        }
+                    } else {
+                        cx.activate(true);
+                        window.activate_window();
+                        order_window_front_regardless(window);
                     }
-                } else {
-                    cx.activate(true);
-                    window.activate_window();
-                    order_window_front_regardless(window);
-                }
-            }),
+                    anyhow::Ok(())
+                })
+                .and_then(std::convert::identity),
             #[cfg(target_os = "windows")]
             UiCommand::RevealWindow { activate } => window
                 .update(cx, |_view, window, cx| {
