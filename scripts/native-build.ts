@@ -75,10 +75,10 @@ async function windowsFxcIdentity() {
   let selectedPath: string | undefined;
   let source: string | undefined;
   const configuredPath = process.env.GPUI_FXC_PATH;
-  const nativeRoot = path.join(root, "packages/native");
+  const gpuiWindowsRoot = path.join(root, "zed/crates/gpui_windows");
 
   if (configuredPath) {
-    const resolvedConfiguredPath = path.resolve(nativeRoot, configuredPath);
+    const resolvedConfiguredPath = path.resolve(gpuiWindowsRoot, configuredPath);
     if (existsSync(resolvedConfiguredPath)) selectedPath = resolvedConfiguredPath;
   }
   if (selectedPath) {
@@ -87,7 +87,7 @@ async function windowsFxcIdentity() {
 
   if (!selectedPath) {
     const lookup = spawnSync("where.exe", ["fxc.exe"], {
-      cwd: nativeRoot,
+      cwd: gpuiWindowsRoot,
       encoding: "utf8",
       env: process.env,
       maxBuffer: 1024 * 1024,
@@ -151,7 +151,7 @@ async function windowsFxcIdentity() {
     throw new Error("Could not resolve the fxc.exe that gpui_windows will use");
   }
 
-  const resolvedPath = await realpath(path.resolve(nativeRoot, selectedPath));
+  const resolvedPath = await realpath(path.resolve(gpuiWindowsRoot, selectedPath));
   const binary = await readFile(resolvedPath);
   return {
     source,
