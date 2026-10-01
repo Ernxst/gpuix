@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.26.1-fork
+
+GPU-IX no longer crashes when a z-index overlay reaches the native hit-order sort, and opacity-only elements stay visible above clipped row backgrounds. Desktop text can opt into balanced wrapping with `textWrap: 'balance'`.
+
+1. **A z-index overlay can no longer crash native rendering.** The previous hitbox comparator could form a cycle and panic while sorting; hit testing now follows a total paint order ([#802](https://github.com/galaxiajs/gpuix/issues/802), [PR #824](https://github.com/galaxiajs/gpuix/pull/824)).
+2. **Opacity-only elements paint above row backgrounds.** Elements with opacity below `1` inside clipped virtual-list rows remain visible ([#819](https://github.com/galaxiajs/gpuix/issues/819), [PR #820](https://github.com/galaxiajs/gpuix/pull/820)).
+3. **Desktop text supports `textWrap: 'balance'`.** Short text wraps into more even lines without changing its line count. Native balancing applies to at most six visible lines, and intrinsic sizes stay unchanged ([#731](https://github.com/galaxiajs/gpuix/issues/731), [PR #818](https://github.com/galaxiajs/gpuix/pull/818)).
+4. **Keyboard-focused link underlines use the focus colour.** The underline now matches the focus styling instead of keeping its resting colour ([#804](https://github.com/galaxiajs/gpuix/issues/804), [PR #816](https://github.com/galaxiajs/gpuix/pull/816)).
+5. **CSS module package imports resolve consistently.** Vite, Vitest and Bun resolve package `imports` and exported subpaths like relative CSS modules. Vite also refreshes importers after edits; Bun's plugin API still cannot refresh plugin-loaded CSS modules during hot reload ([#806](https://github.com/galaxiajs/gpuix/issues/806), [#808](https://github.com/galaxiajs/gpuix/issues/808), [PR #809](https://github.com/galaxiajs/gpuix/pull/809), [PR #813](https://github.com/galaxiajs/gpuix/pull/813); Bun limitation tracked in [#812](https://github.com/galaxiajs/gpuix/issues/812)).
+
+- The named `Select` import now exposes the compound parts as `Select.Root`, `Select.Trigger` and related members ([#801](https://github.com/galaxiajs/gpuix/issues/801), [PR #803](https://github.com/galaxiajs/gpuix/pull/803)).
+- `render` elements keep their classes while styles, handlers and refs compose with component-part props ([#811](https://github.com/galaxiajs/gpuix/issues/811), [PR #814](https://github.com/galaxiajs/gpuix/pull/814)).
+- TanStack Router's `HeadContent` works with the document facade's empty `querySelector()` and `querySelectorAll()` results ([#798](https://github.com/galaxiajs/gpuix/issues/798), [PR #799](https://github.com/galaxiajs/gpuix/pull/799)).
+
+## Install
+
+The repository moved to `galaxiajs/gpuix`; GitHub redirects install URLs under `Ernxst/gpuix`. Pin the `@gpuix/native`, `@gpuix/react`, and `@gpuix/plugins` tarballs from the same release. For this release, use the tag `@gpuix/react@0.26.1-fork` (URL-encoded as `%40gpuix/react%400.26.1-fork`) and update all three versioned tarball URLs together.
+
 ## 0.25.0-fork.12
 
 1. **Eager test-renderer flushes drain async work with fewer redraws.** A 40-image test root loads every image after its first eager flush while drawing 3 times instead of 42. On the same local fixture, median flush time fell from 261.5 ms to 17.9 ms across five runs. Manual mode and screenshot suites are unchanged. [#708](https://github.com/galaxiajs/gpuix/issues/708), [PR #709](https://github.com/galaxiajs/gpuix/pull/709), [Ernxst/zed#11](https://github.com/Ernxst/zed/pull/11)
