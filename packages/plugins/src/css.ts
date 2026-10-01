@@ -21,6 +21,10 @@ export function cleanId(id: string): string {
   return id.split(/[?#]/, 1)[0]
 }
 
+function cssFileKey(id: string): string {
+  return path.resolve(cleanId(id)).replaceAll("\\", "/")
+}
+
 export function isCssModule(id: string): boolean {
   return CSS_MODULE_RESOLVE_RE.test(id)
 }
@@ -240,6 +244,7 @@ async function compileCssModuleCode(
  */
 export const gpuixCssUnplugin = createUnplugin<CssModulesOptions, false>((userOptions, meta) => {
   const cssModulesByDependency = new Map<string, Set<string>>()
+  const cssModuleIdsBySource = new Map<string, string>()
 
   return {
     name: "gpuix-css-modules",
@@ -248,13 +253,17 @@ export const gpuixCssUnplugin = createUnplugin<CssModulesOptions, false>((userOp
     vite: {
       enforce: "pre",
       handleHotUpdate({ file, server }: HmrContext) {
-        const changedFile = cleanId(file)
+        const changedFile = cssFileKey(file)
         const affectedSources = new Set([
           changedFile,
           ...(cssModulesByDependency.get(changedFile) ?? []),
         ])
         const modules = [...affectedSources]
-          .map((source) => server.moduleGraph.getModuleById(cssModuleId(source)))
+          .map((source) =>
+            server.moduleGraph.getModuleById(
+              cssModuleIdsBySource.get(source) ?? cssModuleId(source),
+            ),
+          )
           .filter((module) => module !== undefined)
         return modules.length > 0 ? modules : undefined
       },
@@ -270,8 +279,10 @@ export const gpuixCssUnplugin = createUnplugin<CssModulesOptions, false>((userOp
       handler(id) {
         const context = this as ViteLoadContext
         const sourceId = sourceIdFromCssModuleId(id)
+        const sourceKey = cssFileKey(sourceId)
+        cssModuleIdsBySource.set(sourceKey, id)
         for (const [dependency, dependents] of cssModulesByDependency) {
-          dependents.delete(sourceId)
+          dependents.delete(sourceKey)
           if (dependents.size === 0) cssModulesByDependency.delete(dependency)
         }
         return loadCssModule(
@@ -279,10 +290,10 @@ export const gpuixCssUnplugin = createUnplugin<CssModulesOptions, false>((userOp
             resolve: context.resolve?.bind(context),
             addWatchFile(file: string) {
               context.addWatchFile(file)
-              const dependency = cleanId(file)
-              if (dependency === sourceId) return
+              const dependency = cssFileKey(file)
+              if (dependency === sourceKey) return
               const dependents = cssModulesByDependency.get(dependency) ?? new Set<string>()
-              dependents.add(sourceId)
+              dependents.add(sourceKey)
               cssModulesByDependency.set(dependency, dependents)
             },
           },
