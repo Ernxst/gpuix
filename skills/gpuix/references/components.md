@@ -159,14 +159,14 @@ import { Tooltip } from "@gpuix/react/tooltip"
 |---|---|---|
 | `Provider` | `delay` (600), `closeDelay` (0), `timeout` (400) | Within `timeout` of a close, the next tooltip opens without delay. |
 | `Root` | `open`/`defaultOpen`, `onOpenChange(open, details)`, `onOpenChangeComplete`, `disabled`, `disableHoverablePopup`, `trackCursorAxis`, `actionsRef`, `handle`, `triggerId`, `defaultTriggerId` | Renders no host element. `details` carries the reason, originating GPU-IX event, trigger, and `preventUnmountOnClose()`. |
-| `Trigger` | `delay`, `closeDelay`, `closeOnClick`, `disabled`, `handle`, `payload`, `render` | Hover schedules open; focus opens immediately; Escape closes; state styling receives `{ open }`. |
+| `Trigger` | `delay`, `closeDelay`, `closeOnClick`, `disabled`, `handle`, `payload`, `render` | Hover schedules open; focus opens immediately; Escape closes; state styling receives `{ open }`. `disabled` suppresses tooltip interaction without disabling the rendered control. Multiple triggers retain their own anchors and payloads. |
 | `Portal` | `container`, `keepMounted`, `render` | Keeps children in the retained tree; native positioning happens in Positioner. |
 | `Positioner` | Shared `PositionerProps` from `/floating`; default `side="top"` | Uses `FloatingPositioner` for anchor measurement and collision handling. |
 | `Popup` | `render`, state-based `className` and `style` | Unmounts while closed unless `preventUnmountOnClose()` was called; exposes open/closed, side, align, instant and transition state. |
 | `Arrow` | `render`, state-based `className` and `style` | Exposes open/closed, side, align, instant and `uncentered` state. |
 | `Viewport` | `render`, state-based `className` and `style` | Provides the Base UI state shape for optional content transitions. |
 
-The Trigger, Positioner, Popup and Arrow emit Base UI open/closed and placement attributes where those parts expose them. Native Portal `container` and `keepMounted` are accepted but do not change the retained tree. `trackCursorAxis` is accepted but has no native cursor-tracking effect. Popup transitions and Arrow centring are not measured, so their transition status stays idle and `uncentered` stays false. `disableHoverableContent` remains as a deprecated Provider alias for older GPU-IX callers.
+The Trigger, Positioner, Popup and Arrow emit Base UI open/closed and placement attributes where those parts expose them. Disabling Root closes an open tooltip and prevents future opens. Native Portal `container` and `keepMounted` are accepted but do not change the retained tree. `trackCursorAxis` is accepted but has no native cursor-tracking effect. Popup transitions and Arrow centring are not measured, so their transition status stays idle and `uncentered` stays false. `disableHoverableContent` remains as a deprecated Provider alias for older GPU-IX callers.
 
 ## File pickers (`@gpuix/react/dialogs`)
 

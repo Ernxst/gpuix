@@ -96,7 +96,7 @@ interface HandleRoot<Payload> {
   close: (reason: TooltipChangeEventReason, event?: GpuixSyntheticEvent) => void
   isOpen: () => boolean
   isDisabled: () => boolean
-  setTrigger: (instance: PublicInstance | null) => void
+  setTrigger: (triggerId: string, instance: PublicInstance | null) => void
   cancelClose: () => void
   setCloseDelay: (delay: number) => void
 }
@@ -105,7 +105,7 @@ class TooltipHandleImpl<Payload> implements TooltipHandle<Payload> {
   private root: HandleRoot<Payload> | null = null
   private activePayload: Payload | undefined
   private activeTriggerId: string | null = null
-  private triggerInstance: PublicInstance | null = null
+  private triggerInstances = new Map<string, PublicInstance>()
   private listeners = new Set<() => void>()
   private openTimer: ReturnType<typeof setTimeout> | null = null
   private closeTimer: ReturnType<typeof setTimeout> | null = null
@@ -134,7 +134,7 @@ class TooltipHandleImpl<Payload> implements TooltipHandle<Payload> {
       this.cancelClose()
     }
     this.root = root
-    root?.setTrigger(this.triggerInstance)
+    for (const [triggerId, instance] of this.triggerInstances) root?.setTrigger(triggerId, instance)
     this.notify()
   }
 
@@ -192,9 +192,10 @@ class TooltipHandleImpl<Payload> implements TooltipHandle<Payload> {
     return this.isOpen && this.activeTriggerId === triggerId
   }
 
-  setTrigger(instance: PublicInstance | null): void {
-    this.triggerInstance = instance
-    this.root?.setTrigger(instance)
+  setTrigger(triggerId: string, instance: PublicInstance | null): void {
+    if (instance) this.triggerInstances.set(triggerId, instance)
+    else this.triggerInstances.delete(triggerId)
+    this.root?.setTrigger(triggerId, instance)
   }
 
   setCloseDelay(delay: number): void {
@@ -227,8 +228,8 @@ function isTooltipHandleTriggerOpen(handle: TooltipHandle<unknown>, triggerId: s
   return (handle as TooltipHandleImpl<unknown>).isTriggerOpen(triggerId)
 }
 
-function setTooltipHandleTrigger(handle: TooltipHandle<unknown>, instance: PublicInstance | null): void {
-  ;(handle as TooltipHandleImpl<unknown>).setTrigger(instance)
+function setTooltipHandleTrigger(handle: TooltipHandle<unknown>, triggerId: string, instance: PublicInstance | null): void {
+  ;(handle as TooltipHandleImpl<unknown>).setTrigger(triggerId, instance)
 }
 
 function scheduleTooltipHandleOpen<Payload>(handle: TooltipHandle<Payload>, delay: number, triggerId: string, payload: Payload | undefined, reason: TooltipChangeEventReason, event?: GpuixSyntheticEvent): void {
@@ -303,7 +304,8 @@ interface TooltipContextValue<Payload = unknown> {
   activeTriggerId: string | null
   payload: Payload | undefined
   instant: "delay" | "focus" | "dismiss" | undefined
-  triggerRef: React.MutableRefObject<PublicInstance | null>
+  triggerRefs: React.MutableRefObject<Map<string, PublicInstance>>
+  getTrigger: (triggerId: string | null) => PublicInstance | null
   dismissLayer: (event?: GpuixSyntheticEvent) => boolean
   scheduleOpen: (delay: number, reason: TooltipChangeEventReason, event?: GpuixSyntheticEvent, triggerId?: string, payload?: Payload) => void
   scheduleClose: (delay: number, reason: TooltipChangeEventReason, event?: GpuixSyntheticEvent) => void
@@ -348,7 +350,7 @@ function renderPart<State>(
   return React.createElement(tag, resolved, children)
 }
 
-export const TooltipRoot = forwardRef<PublicInstance, TooltipRootProps<any>>(function TooltipRoot(
+const TooltipRootImpl = forwardRef<PublicInstance, TooltipRootProps<unknown>>(function TooltipRoot(
   {
     children,
     open: openProp,
@@ -367,14 +369,15 @@ export const TooltipRoot = forwardRef<PublicInstance, TooltipRootProps<any>>(fun
 ) {
   const provider = useContext(ProviderContext)
   const disableHoverablePopup = disableHoverablePopupProp ?? provider.disableHoverableContent
-  const [open, setOpenState] = useControllableState({ value: openProp, defaultValue: defaultOpen })
+  const [openState, setOpenState] = useControllableState({ value: openProp, defaultValue: defaultOpen })
+  const open = openState && !disabled
   const [popupMounted, setPopupMounted] = useState(openProp ?? defaultOpen)
   const [activeTriggerId, setActiveTriggerId] = useState<string | null>(triggerId ?? defaultTriggerId ?? null)
   const [activePayload, setActivePayload] = useState<unknown>()
   const [activeCloseDelay, setActiveCloseDelay] = useState(provider.closeDelay)
   const [forceUnmount, setForceUnmount] = useState(false)
   const [instant, setInstant] = useState<TooltipContextValue["instant"]>()
-  const triggerRef = useRef<PublicInstance | null>(null)
+  const triggerRefs = useRef(new Map<string, PublicInstance>())
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dismissLayer = useDismissLayer(open)
@@ -396,7 +399,7 @@ export const TooltipRoot = forwardRef<PublicInstance, TooltipRootProps<any>>(fun
     const details: TooltipChangeEventDetails = {
       reason,
       event,
-      trigger: triggerRef.current as unknown as Element | null ?? undefined,
+      trigger: triggerRefs.current.get(next ? nextTriggerId ?? triggerId ?? activeTriggerId ?? "" : triggerId ?? activeTriggerId ?? "") as unknown as Element | undefined,
       preventUnmountOnClose: () => { preventUnmount = true },
     }
     onOpenChange?.(next, details)
@@ -440,6 +443,10 @@ export const TooltipRoot = forwardRef<PublicInstance, TooltipRootProps<any>>(fun
     closeTimer.current = setTimeout(() => close(reason, event), delay)
   }
 
+  useEffect(() => {
+    if (disabled && openState) close("disabled")
+  }, [disabled, openState])
+
   useEffect(() => () => {
     cancelOpen()
     cancelClose()
@@ -469,7 +476,10 @@ export const TooltipRoot = forwardRef<PublicInstance, TooltipRootProps<any>>(fun
       close: (reason, event) => close(reason, event),
       isOpen: () => open,
       isDisabled: () => disabled,
-      setTrigger: (instance) => { triggerRef.current = instance },
+      setTrigger: (id, instance) => {
+        if (instance) triggerRefs.current.set(id, instance)
+        else triggerRefs.current.delete(id)
+      },
       cancelClose,
       setCloseDelay: setActiveCloseDelay,
     })
@@ -482,7 +492,8 @@ export const TooltipRoot = forwardRef<PublicInstance, TooltipRootProps<any>>(fun
     activeTriggerId: triggerId ?? activeTriggerId,
     payload: activePayload,
     instant,
-    triggerRef,
+    triggerRefs,
+    getTrigger: (id) => id ? triggerRefs.current.get(id) ?? null : null,
     dismissLayer,
     scheduleOpen,
     scheduleClose,
@@ -500,8 +511,14 @@ export const TooltipRoot = forwardRef<PublicInstance, TooltipRootProps<any>>(fun
   return <TooltipContext.Provider value={context}>{renderedChildren}</TooltipContext.Provider>
 })
 
+export interface TooltipRootComponent {
+  <Payload = unknown>(props: TooltipRootProps<Payload> & React.RefAttributes<PublicInstance>): ReactElement
+}
+
+export const TooltipRoot = TooltipRootImpl as TooltipRootComponent
+
 export interface TooltipTriggerProps<Payload = unknown> extends TooltipPartProps<TooltipTriggerState> {
-  handle?: TooltipHandle<any> | undefined
+  handle?: TooltipHandle<Payload> | undefined
   payload?: Payload | undefined
   delay?: number | undefined
   closeDelay?: number | undefined
@@ -545,15 +562,15 @@ const TooltipTriggerInRoot = forwardRef<PublicInstance, TooltipTriggerProps>(fun
     ...props,
     id: triggerId,
     ref: (instance: PublicInstance | null) => {
-      context.triggerRef.current = instance
-      if (handle) setTooltipHandleTrigger(handle, instance)
+      if (instance) context.triggerRefs.current.set(triggerId, instance)
+      else context.triggerRefs.current.delete(triggerId)
+      if (handle) setTooltipHandleTrigger(handle, triggerId, instance)
       if (typeof ref === "function") ref(instance)
       else if (ref) ref.current = instance
     },
     tabIndex: props.tabIndex ?? 0,
     "data-popup-open": isOpen ? "" : undefined,
     "data-trigger-disabled": disabled ? "" : undefined,
-    disabled,
     className: resolveClassName(className, state),
     style: resolveStyle(style, state),
     onMouseEnter: (event: GpuixSyntheticEvent) => {
@@ -635,14 +652,13 @@ const TooltipTriggerWithHandle = forwardRef<PublicInstance, TooltipTriggerProps>
     ...props,
     id: triggerId,
     ref: (instance: PublicInstance | null) => {
-      setTooltipHandleTrigger(activeHandle, instance)
+      setTooltipHandleTrigger(activeHandle, triggerId, instance)
       if (typeof ref === "function") ref(instance)
       else if (ref) ref.current = instance
     },
     tabIndex: props.tabIndex ?? 0,
     "data-popup-open": isOpen ? "" : undefined,
     "data-trigger-disabled": disabled ? "" : undefined,
-    disabled,
     className: resolveClassName(className, state),
     style: resolveStyle(style, state),
     onMouseEnter: (event: GpuixSyntheticEvent) => {
@@ -683,12 +699,18 @@ const TooltipTriggerWithHandle = forwardRef<PublicInstance, TooltipTriggerProps>
   return nativeButton ? <button {...resolved}>{children}</button> : <div {...resolved}>{children}</div>
 })
 
-export const TooltipTrigger = forwardRef<PublicInstance, TooltipTriggerProps>(function TooltipTrigger(props, ref) {
+const TooltipTriggerImpl = forwardRef<PublicInstance, TooltipTriggerProps>(function TooltipTrigger(props, ref) {
   const context = useContext(TooltipContext)
   if (context) return <TooltipTriggerInRoot {...props} ref={ref} />
   if (!props.handle) throw new Error("Tooltip.Trigger must be used inside Tooltip.Root or with a Handle")
   return <TooltipTriggerWithHandle {...props} ref={ref} />
 })
+
+export interface TooltipTriggerComponent {
+  <Payload = unknown>(props: TooltipTriggerProps<Payload> & React.RefAttributes<PublicInstance>): ReactElement
+}
+
+export const TooltipTrigger = TooltipTriggerImpl as TooltipTriggerComponent
 
 export interface TooltipPortalState {}
 export interface TooltipPortalProps extends TooltipPartProps<TooltipPortalState> {
@@ -729,7 +751,7 @@ export const TooltipPositioner = forwardRef<PublicInstance, TooltipPositionerPro
     <FloatingPositioner
       {...props}
       ref={ref}
-      anchor={anchor ?? context.triggerRef.current as unknown as Element | null}
+      anchor={anchor ?? context.getTrigger(context.activeTriggerId) as unknown as Element | null}
       side={side}
       open={open && !context.forceUnmount}
       className={typeof className === "function" ? (state) => className(applyState(state)) : className}

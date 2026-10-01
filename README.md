@@ -3565,7 +3565,7 @@ Each primitive has a dedicated namespace entry point:
 | `@gpuix/react/dialog` | `Root`, `Trigger`, `Portal`, `Backdrop`, `Popup`, `Title`, `Description`, `Close` |
 | `@gpuix/react/select` | `Root`, `Label`, `Trigger`, `Value`, `Icon`, `Portal`, `Backdrop`, `Positioner`, `Popup`, `List`, `Item`, `ItemIndicator`, `ItemText`, `Arrow`, `ScrollUpArrow`, `ScrollDownArrow`, `Group`, `GroupLabel`, `Separator` |
 | `@gpuix/react/combobox` | `Root`, `Input`, `Popup`, `List`, `Item`, `Empty` |
-| `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Popup` |
+| `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Portal`, `Positioner`, `Popup`, `Arrow`, `Viewport`, `Handle`, `createHandle` |
 | `@gpuix/react/floating` | `FloatingLayer`, `PositionerProps`, `FloatingPositioner`, `renderSlot` |
 
 In Select, `Label` labels the field and `GroupLabel` labels an item group.
@@ -3818,7 +3818,9 @@ Base UI state attributes. `Tooltip.Viewport` is optional unless animated
 content switches between triggers. The native Portal keeps children in the
 retained tree; its `container` prop does not select a destination. The shared
 floating Positioner uses GPUI's deferred `anchored()` layer, snaps inside the
-window, and occludes controls behind it.
+window, and occludes controls behind it. A disabled Trigger suppresses tooltip
+interaction without disabling its rendered control; disabling an open Root
+closes the tooltip. Multiple triggers retain their own anchors and payloads.
 
 ### Overlay menus
 

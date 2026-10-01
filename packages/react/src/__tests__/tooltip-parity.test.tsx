@@ -79,4 +79,77 @@ describeNative("Tooltip Base UI parity tree", () => {
 
     testRoot.render(null)
   })
+
+  it("keeps disabled triggers operable and closes an open Root when disabled", () => {
+    const testRoot = createTestRoot()
+    const changes: Array<{ open: boolean; reason: string }> = []
+
+    const render = (disabled: boolean) => testRoot.render(
+      <Tooltip.Provider>
+        <Tooltip.Root
+          defaultOpen
+          defaultTriggerId="disabled-trigger"
+          disabled={disabled}
+          onOpenChange={(open, details) => changes.push({ open, reason: details.reason })}
+        >
+          <Tooltip.Positioner>
+            <Tooltip.Popup data-testid="disabled-popup">Tip</Tooltip.Popup>
+          </Tooltip.Positioner>
+          <Tooltip.Trigger id="disabled-trigger" data-testid="disabled-trigger" disabled>
+            Action
+          </Tooltip.Trigger>
+        </Tooltip.Root>
+      </Tooltip.Provider>
+    )
+
+    render(false)
+    expect(testRoot.renderer.findByTestId("disabled-trigger")?.customProps?.disabled).toBeUndefined()
+    expect(testRoot.renderer.findByTestId("disabled-popup")).toBeDefined()
+
+    render(true)
+    expect(testRoot.renderer.findByTestId("disabled-trigger")?.customProps?.disabled).toBeUndefined()
+    expect(testRoot.renderer.findByTestId("disabled-popup")).toBeUndefined()
+    expect(changes.at(-1)).toEqual({ open: false, reason: "disabled" })
+    testRoot.render(null)
+  })
+
+  it("keeps in-Root trigger anchors and change details associated with their trigger", async () => {
+    const testRoot = createTestRoot()
+    let first: PublicInstance | null = null
+    let lastChangeTrigger: Element | undefined
+
+    testRoot.render(
+      <div style={{ width: 420, height: 300 }}>
+        <Tooltip.Root onOpenChange={(_open, details) => { lastChangeTrigger = details.trigger }}>
+          <Tooltip.Positioner side="top" sideOffset={4}>
+            <Tooltip.Popup data-testid="multiple-trigger-popup">Tip</Tooltip.Popup>
+          </Tooltip.Positioner>
+          <Tooltip.Trigger
+            id="first-trigger"
+            ref={(instance) => { first = instance }}
+            delay={0}
+            style={{ position: "absolute", left: 40, top: 80, width: 80, height: 28 }}
+          >
+            First
+          </Tooltip.Trigger>
+          <Tooltip.Trigger
+            id="last-trigger"
+            delay={0}
+            style={{ position: "absolute", left: 260, top: 180, width: 80, height: 28 }}
+          >
+            Last
+          </Tooltip.Trigger>
+        </Tooltip.Root>
+      </div>
+    )
+
+    const firstBounds = first!.getBoundingClientRect()
+    testRoot.renderer.nativeSimulateMouseMove(firstBounds.x + 8, firstBounds.y + 8)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    const popup = testRoot.renderer.findByTestId("multiple-trigger-popup")!
+    expect(lastChangeTrigger).toBe(first)
+    expect(popup.getBoundingClientRect().bottom).toBeLessThanOrEqual(firstBounds.top)
+    testRoot.render(null)
+  })
 })

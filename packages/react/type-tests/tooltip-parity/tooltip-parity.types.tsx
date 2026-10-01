@@ -125,5 +125,31 @@ const gpuixFixture = (
   </GpuixTooltip.Provider>
 )
 
+const basePayloadRender = (
+  <BaseTooltip.Root handle={baseHandle}>
+    {({ payload }) => payload?.source.toUpperCase()}
+  </BaseTooltip.Root>
+)
+
+const gpuixPayloadRender = (
+  <GpuixTooltip.Root handle={gpuixHandle}>
+    {({ payload }) => payload?.source.toUpperCase()}
+  </GpuixTooltip.Root>
+)
+
+const basePayloadMismatch = (
+  // @ts-expect-error A handle constrains its trigger payload.
+  <BaseTooltip.Trigger handle={baseHandle} payload={{ source: 123 }} />
+)
+
+const gpuixPayloadMismatch = (
+  // @ts-expect-error A handle constrains its trigger payload.
+  <GpuixTooltip.Trigger handle={gpuixHandle} payload={{ source: 123 }} />
+)
+
 void baseFixture
 void gpuixFixture
+void basePayloadRender
+void gpuixPayloadRender
+void basePayloadMismatch
+void gpuixPayloadMismatch
