@@ -3,6 +3,7 @@
   "compilerOptions": {
     "baseUrl": "../..",
     "paths": {
+      "@gpuix/react/select": ["node_modules/@base-ui/react/select/index.d.ts"],
       "@gpuix/react/jsx-runtime": ["jsx-runtime.d.ts"]
     }
   },

@@ -4,6 +4,7 @@
     "baseUrl": "../..",
     "paths": {
       "@base-ui/react/select": ["dist/components/select.d.ts"],
+      "@gpuix/react/select": ["dist/components/select.d.ts"],
       "@gpuix/react/jsx-runtime": ["jsx-runtime.d.ts"]
     }
   },
