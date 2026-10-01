@@ -84,11 +84,26 @@ test("Vite imports CSS modules through package imports like relative imports", a
     'import relative from "./src/styles/card.module.css"\nimport queried from "./src/styles/card.module.css?used"\nimport aliased from "#styles/card.module.css"\nimport exported from "style-package/card.module.css"\nexport default { relative: relative.card, queried: queried.card, aliased: aliased.card, exported: exported.card }\n',
   )
 
+  const cssPlugin = gpuixCssModules()
+  let packageHotUpdate: { file: string; modules: string[] } | undefined
+  const handleHotUpdate = cssPlugin.handleHotUpdate
+  if (handleHotUpdate) {
+    cssPlugin.handleHotUpdate = async function (context) {
+      const modules = await handleHotUpdate.call(this, context)
+      if (context.file.includes("style-package")) {
+        packageHotUpdate = {
+          file: context.file,
+          modules: modules?.map((module) => module.id) ?? [],
+        }
+      }
+      return modules
+    }
+  }
   server = await createServer({
     appType: "custom",
     configFile: false,
     root: fixture,
-    plugins: [gpuixCssModules()],
+    plugins: [cssPlugin],
   })
   await server.listen()
   const loaded = (await server.ssrLoadModule("/entry.ts")).default as Record<string, unknown>
@@ -122,7 +137,7 @@ test("Vite imports CSS modules through package imports like relative imports", a
     if (JSON.stringify(updated.exported) === JSON.stringify({ display: "grid" })) break
     await new Promise((resolve) => setTimeout(resolve, 30))
   }
-  expect(updated?.exported).toEqual({ display: "grid" })
+  expect(updated?.exported, JSON.stringify(packageHotUpdate)).toEqual({ display: "grid" })
 })
 
 test("Vitest imports CSS modules through package imports like relative imports", async () => {

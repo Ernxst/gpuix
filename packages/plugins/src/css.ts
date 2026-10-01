@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
+import { existsSync, readFileSync, statSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import type { BunPlugin } from "bun"
@@ -22,12 +22,7 @@ export function cleanId(id: string): string {
 }
 
 function cssFileKey(id: string): string {
-  const resolved = path.resolve(cleanId(id))
-  try {
-    return realpathSync(resolved).replaceAll("\\", "/")
-  } catch {
-    return resolved.replaceAll("\\", "/")
-  }
+  return path.resolve(cleanId(id)).replaceAll("\\", "/")
 }
 
 export function isCssModule(id: string): boolean {
