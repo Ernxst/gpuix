@@ -2,7 +2,7 @@ import { existsSync, readFileSync, statSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import type { BunPlugin } from "bun"
-import type { Plugin } from "vite"
+import type { HmrContext, Plugin } from "vite"
 import type { AcceptedPlugin } from "postcss"
 import {
   exports as resolvePackageExports,
@@ -239,11 +239,26 @@ async function compileCssModuleCode(
  * module compilation.
  */
 export const gpuixCssUnplugin = createUnplugin<CssModulesOptions, false>((userOptions, meta) => {
+  const cssModulesByDependency = new Map<string, Set<string>>()
+
   return {
     name: "gpuix-css-modules",
     // Resolve before Vite's own CSS plugin, which would otherwise claim the
     // file and hand back a stylesheet the native renderer cannot use.
-    vite: { enforce: "pre" },
+    vite: {
+      enforce: "pre",
+      handleHotUpdate({ file, server }: HmrContext) {
+        const changedFile = cleanId(file)
+        const affectedSources = new Set([
+          changedFile,
+          ...(cssModulesByDependency.get(changedFile) ?? []),
+        ])
+        const modules = [...affectedSources]
+          .map((source) => server.moduleGraph.getModuleById(cssModuleId(source)))
+          .filter((module) => module !== undefined)
+        return modules.length > 0 ? modules : undefined
+      },
+    },
     resolveId: {
       filter: { id: CSS_MODULE_RESOLVE_RE },
       handler(id, importer) {
@@ -253,7 +268,27 @@ export const gpuixCssUnplugin = createUnplugin<CssModulesOptions, false>((userOp
     load: {
       filter: { id: CSS_MODULE_VIRTUAL_RE },
       handler(id) {
-        return loadCssModule(this, id, userOptions.plugins)
+        const context = this as ViteLoadContext
+        const sourceId = sourceIdFromCssModuleId(id)
+        for (const [dependency, dependents] of cssModulesByDependency) {
+          dependents.delete(sourceId)
+          if (dependents.size === 0) cssModulesByDependency.delete(dependency)
+        }
+        return loadCssModule(
+          {
+            resolve: context.resolve?.bind(context),
+            addWatchFile(file: string) {
+              context.addWatchFile(file)
+              const dependency = cleanId(file)
+              if (dependency === sourceId) return
+              const dependents = cssModulesByDependency.get(dependency) ?? new Set<string>()
+              dependents.add(sourceId)
+              cssModulesByDependency.set(dependency, dependents)
+            },
+          },
+          id,
+          userOptions.plugins,
+        )
       },
     },
   }

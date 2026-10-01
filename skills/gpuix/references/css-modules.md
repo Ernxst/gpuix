@@ -31,7 +31,7 @@ A declaration that compiles is not always one the renderer accepts. The compiler
 - **`transition` belongs on the base class rule only.** Inside `:hover` or another state it fails the build; the `transition-*` longhands are rejected everywhere.
 - **Plain descendant rules nested inside a class are rejected.** `postcss-nesting` flattens `.card { .label {} }` to `.card .label`. `&:hover` and `&:hover .label` are fine.
 - **`bun build --compile` on the command line compiles no CSS modules.** It takes no plugins, so each import becomes Bun's class-name string and paints nothing; strict mode is off in the binary, so this only warns. Build with `Bun.build({ compile, plugins: [gpuixCssModulesBun()] })` (`packages/plugins/README.md`).
-- **CSS module edits do not refresh their JS importers automatically.** In the tested setup, Bun's CSS plugin does not re-run plugin-loaded modules under either `--hot` or `--watch`, for relative or package imports. Vite also retains the previous compiled styles until the importer is reloaded, for both relative and package imports. Restart Bun or reload the Vite importer after editing the module.
+- **Vite refreshes JS importers when a CSS module changes.** This works for relative imports, package `imports` such as `#styles/utilities.module.css`, and exported package subpaths. Bun's plugin API cannot register extra files for `--hot` or `--watch` to track, so restart Bun after editing a CSS module. See Bun's [plugin API](https://bun.sh/docs/bundler/plugins) and [plugin type declarations for 1.4.0](https://github.com/oven-sh/bun/blob/bun-v1.4.0/packages/bun-types/bun.d.ts#L5838).
 - **An empty rule produces no key.** `.a {}` makes `styles.a` `undefined`.
 
 ## Wiring

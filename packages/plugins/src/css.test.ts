@@ -76,7 +76,8 @@ test("Vite imports CSS modules through package imports like relative imports", a
     path.join(stylePackage, "package.json"),
     JSON.stringify({ name: "style-package", exports: { "./card.module.css": "./card.module.css" } }),
   )
-  await writeFile(path.join(stylePackage, "card.module.css"), ".card { display: flex; }\n")
+  const packageModule = path.join(stylePackage, "card.module.css")
+  await writeFile(packageModule, ".card { display: flex; }\n")
   await writeFile(path.join(fixture, "src/styles/card.module.css"), ".card { display: flex; }\n")
   await writeFile(
     path.join(fixture, "entry.ts"),
@@ -89,6 +90,7 @@ test("Vite imports CSS modules through package imports like relative imports", a
     root: fixture,
     plugins: [gpuixCssModules()],
   })
+  await server.listen()
   const loaded = (await server.ssrLoadModule("/entry.ts")).default as Record<string, unknown>
   expect(loaded.aliased).toEqual(loaded.relative)
   expect(loaded.queried).toEqual(loaded.relative)
@@ -101,11 +103,22 @@ test("Vite imports CSS modules through package imports like relative imports", a
   )
   const source = path.join(fixture, "src/styles/card.module.css")
   await writeFile(source, ".card { display: block; }\n")
+  await writeFile(packageModule, ".card { display: grid; }\n")
   server.watcher.emit("change", realpathSync(source))
-  await new Promise((resolve) => setTimeout(resolve, 150))
-  const updated = (await server.ssrLoadModule("/entry.ts")).default as Record<string, unknown>
-  expect(updated.aliased).toEqual(updated.relative)
-  expect(updated.relative).toEqual({ display: "flex" })
+  server.watcher.emit("change", realpathSync(packageModule))
+  const deadline = Date.now() + 3_000
+  let updated: Record<string, unknown> | undefined
+  while (Date.now() < deadline) {
+    updated = (await server.ssrLoadModule("/entry.ts")).default as Record<string, unknown>
+    if (
+      JSON.stringify(updated.relative) === JSON.stringify({ display: "block" }) &&
+      JSON.stringify(updated.exported) === JSON.stringify({ display: "grid" })
+    ) break
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  }
+  expect(updated?.relative).toEqual({ display: "block" })
+  expect(updated?.aliased).toEqual(updated?.relative)
+  expect(updated?.exported).toEqual({ display: "grid" })
 })
 
 test("Vitest imports CSS modules through package imports like relative imports", async () => {
@@ -146,7 +159,9 @@ test("Vitest imports CSS modules through package imports like relative imports",
 }, 30_000)
 
 test("resolves and watches a composed CSS module in Vite", async () => {
-  fixture = await mkdtemp(path.join(path.dirname(fileURLToPath(import.meta.url)), ".css-vite-composes-"))
+  fixture = await mkdtemp(
+    path.join(path.dirname(fileURLToPath(import.meta.url)), "css-vite-composes-"),
+  )
   const tile = path.join(fixture, "tile.module.css")
   await writeFile(
     tile,
@@ -180,6 +195,25 @@ test("resolves and watches a composed CSS module in Vite", async () => {
     ([directory, files]) => path.resolve(directory) === fixture && files.includes("tile.module.css"),
   )
   expect(watched).toBe(true)
+
+  await writeFile(tile, ".plate { color: silver; &:hover { color: gray; } }\n")
+  server.watcher.emit("change", realpathSync(tile))
+  const deadline = Date.now() + 3_000
+  let updated: Record<string, unknown> | undefined
+  while (Date.now() < deadline) {
+    updated = (await server.ssrLoadModule("/entry.ts")).default as Record<string, unknown>
+    if (
+      updated.color === "silver" &&
+      (updated.hover as Record<string, unknown>).color === "gray"
+    ) {
+      break
+    }
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  }
+  expect(updated?.color).toBe("silver")
+  expect(updated?.backgroundColor).toBe("black")
+  expect((updated?.hover as Record<string, unknown>).color).toBe("gray")
+  expect((updated?.hover as Record<string, unknown>).backgroundColor).toBe("navy")
 })
 
 test("resolves a Bun import against its importer", async () => {
