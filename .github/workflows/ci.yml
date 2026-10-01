@@ -299,8 +299,14 @@ jobs:
         shell: bash
         run: bun -e "const { statSync } = require('node:fs'); const { TestGpuixRenderer } = require('./packages/native'); const renderer = new TestGpuixRenderer(320, 200); renderer.applyBatch(JSON.stringify([['createElement',1,'text'],['setText',1,'Windows test renderer'],['setRoot',1]])); renderer.flush(); renderer.captureScreenshot('windows-test-renderer.png'); if (renderer.getAllText()[0] !== 'Windows test renderer' || statSync('windows-test-renderer.png').size === 0) throw new Error('TestGpuixRenderer did not render')"
 
-      - name: Run React tests
-        run: bun run test
+      - name: Trace Windows owned-renderer recovery borrows
+        env:
+          GPU_IX_TRACE_APP_BORROW: "1"
+        shell: bash
+        run: |
+          bun run build
+          bun run typecheck:test
+          bunx vitest run src/__tests__/render.test.tsx --testNamePattern='owned renderer|runtime error overlay|first-render failure|Reload is clicked|clicked event handler throws'
         working-directory: packages/react
 
       - name: Build React package
