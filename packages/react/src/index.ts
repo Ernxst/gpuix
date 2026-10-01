@@ -315,12 +315,38 @@ export type {
 } from "./components/combobox.js"
 export { Button, buttonProps } from "./components/button.js"
 export type { ButtonBehavior, ButtonState, HeadlessButtonProps } from "./components/button.js"
-export { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./components/tooltip.js"
+export {
+  TooltipRoot as Tooltip,
+  TooltipRoot,
+  TooltipPopup,
+  TooltipProvider,
+  TooltipTrigger,
+  TooltipPortal,
+  TooltipPositioner,
+  TooltipArrow,
+  TooltipViewport,
+  createTooltipHandle,
+} from "./components/tooltip.js"
 export type {
+  TooltipRootProps,
+  TooltipRootState,
+  TooltipRootActions,
+  TooltipChangeEventDetails,
+  TooltipChangeEventReason,
   TooltipPopupProps,
-  TooltipProps,
+  TooltipPopupState,
   TooltipProviderProps,
   TooltipTriggerProps,
+  TooltipTriggerState,
+  TooltipPortalProps,
+  TooltipPortalState,
+  TooltipPositionerProps,
+  TooltipPositionerState,
+  TooltipArrowProps,
+  TooltipArrowState,
+  TooltipViewportProps,
+  TooltipViewportState,
+  TooltipHandle,
 } from "./components/tooltip.js"
 export {
   Dialog,
@@ -329,9 +355,12 @@ export {
   DialogPortal,
   DialogBackdrop,
   DialogPopup,
+  DialogViewport,
   DialogTitle,
   DialogDescription,
   DialogClose,
+  DialogHandle,
+  createDialogHandle,
   AlertDialog,
   AlertDialogRoot,
   AlertDialogTrigger,
@@ -341,8 +370,40 @@ export {
   AlertDialogTitle,
   AlertDialogDescription,
   AlertDialogClose,
+  AlertDialogViewport,
+  AlertDialogHandle,
+  createAlertDialogHandle,
 } from "./components/dialog.js"
-export type { DialogProps, DialogTriggerProps, DialogPortalProps, DialogBackdropProps, DialogPopupProps, DialogCloseProps, FocusTarget } from "./components/dialog.js"
+export type {
+  DialogProps,
+  DialogRootProps,
+  DialogRootState,
+  DialogRootChangeEventReason,
+  DialogRootChangeEventDetails,
+  DialogTriggerProps,
+  DialogTriggerState,
+  DialogPortalProps,
+  DialogPortalState,
+  DialogBackdropProps,
+  DialogBackdropState,
+  DialogPopupProps,
+  DialogPopupState,
+  DialogViewportProps,
+  DialogViewportState,
+  DialogTitleProps,
+  DialogTitleState,
+  DialogDescriptionProps,
+  DialogDescriptionState,
+  DialogCloseProps,
+  DialogCloseState,
+  DialogRootActions,
+  DialogChangeEventDetails,
+  DialogModal,
+  DialogFocusTarget,
+  FocusTarget,
+  AlertDialogRootProps,
+  AlertDialogTriggerProps,
+} from "./components/dialog.js"
 export { AnimatePresence, motion, useIsPresent, usePresence } from "./components/index.js"
 export type { AnimatePresenceProps } from "./components/index.js"
 export type {

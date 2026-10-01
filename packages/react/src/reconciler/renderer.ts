@@ -590,6 +590,28 @@ function reloadApp(slot: RenderSlot): void {
   render(slot.lastNode, slot.lastOptions)
 }
 
+/** Queue recovery through GPUI's frame callback. On Windows and Linux,
+ *  `requestFrame` crosses the native UI command queue before dispatching back
+ *  to JavaScript, so the event callback's mutable window borrow has ended
+ *  before recovery reads or updates the window. */
+function deferRuntimeErrorRecovery(slot: RenderSlot, callback: () => void): void {
+  const usesQueuedUiCommands =
+    typeof process !== "undefined" &&
+    (process.platform === "win32" ||
+      process.platform === "linux" ||
+      process.platform === "freebsd")
+  const requestFrame = usesQueuedUiCommands ? slot.renderer?.requestFrame : undefined
+  if (requestFrame) {
+    try {
+      requestFrame.call(slot.renderer, callback, performance.now())
+      return
+    } catch {
+      // Fall back if the native renderer is already stopping.
+    }
+  }
+  setImmediate(callback)
+}
+
 /** Unmount the dead root and mount a fresh overlay root in its place. Thrown
  *  synchronously back to `handleFatalRenderError`, which falls back to the
  *  fatal path; a failure of the overlay root itself goes fatal from its own
@@ -607,7 +629,7 @@ function showRuntimeErrorOverlay(
   let overlayRoot!: Root
   overlayRoot = createRoot(host, {
     onUncaughtError: ({ error: overlayError }) => {
-      queueMicrotask(() => {
+      deferRuntimeErrorRecovery(slot, () => {
         if (slot.root !== overlayRoot || slot.fatal) return
         terminateFatally(slot, overlayError, "runtime error overlay")
       })
@@ -657,9 +679,14 @@ function installProcessTerminationGuards(slot: RenderSlot): void {
   const uncaughtException = (
     error: Error,
     origin: NodeJS.UncaughtExceptionOrigin
-  ): void => handleFatalRenderError(slot, error, origin)
-  const unhandledRejection = (reason: unknown): void =>
-    handleFatalRenderError(slot, reason, "unhandledRejection")
+  ): void => {
+    deferRuntimeErrorRecovery(slot, () => handleFatalRenderError(slot, error, origin))
+  }
+  const unhandledRejection = (reason: unknown): void => {
+    deferRuntimeErrorRecovery(slot, () =>
+      handleFatalRenderError(slot, reason, "unhandledRejection"),
+    )
+  }
   process.on("uncaughtException", uncaughtException)
   process.on("unhandledRejection", unhandledRejection)
   slot.processHandlers = { uncaughtException, unhandledRejection }
@@ -763,7 +790,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
       if (injected) return
       // React 19 reports this from its commit path instead of rethrowing it,
       // so neither flushSync's catch nor the process guards can observe it.
-      queueMicrotask(() => {
+      deferRuntimeErrorRecovery(slot, () => {
         if (slot.root !== root) return
         handleFatalRenderError(slot, error, "uncaught React root error", componentStack)
       })

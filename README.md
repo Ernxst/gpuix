@@ -3506,8 +3506,8 @@ kind and options.
 
 ### Headless Dialog
 
-`@gpuix/react/dialog` provides Base UI-shaped `Root`, `Trigger`, `Portal`,
-`Backdrop`, `Popup`, `Title`, `Description`, and `Close` parts. The same parts
+`@gpuix/react/dialog` provides the Base UI 1.8.0 `Dialog` namespace and part
+tree, including `Viewport` and the `Handle`/`createHandle` APIs. The same parts
 are exported with a `Dialog` prefix from `@gpuix/react`.
 
 ```tsx
@@ -3526,13 +3526,32 @@ import * as Dialog from "@gpuix/react/dialog"
 </Dialog.Root>
 ```
 
-`Root` supports `open`, `defaultOpen`, `onOpenChange`, and `modal` (true by
-default). A modal Popup reports `aria-modal`, traps Tab and Shift+Tab among its
-painted tab stops, and focuses the Popup on open. Set `initialFocus` and
-`finalFocus` on Popup to use a host ref or numeric host element ID; by default,
+`Root` supports `onOpenChange(open, eventDetails)`, `onOpenChangeComplete`,
+`actionsRef`, trigger IDs, render-function children, handles, and `modal` values
+`true`, `false`, and `"trap-focus"`. The native renderer traps focus for both
+modal modes; only `true` blocks interaction behind the full-window portal.
+`Portal` accepts Base UI's `container` prop for shared source compatibility;
+the prop is a no-op because native portals always fill the GPU-IX window. Parts
+accept Base UI's `render`, state-function `className` and `style`, and
+state/data attributes. Popup and Viewport expose `transitionStatus` and
+`data-starting-style`/`data-ending-style` during the native opening or closing
+frame; `onOpenChangeComplete` runs when that frame completes.
+
+A modal Popup reports `aria-modal`, traps Tab and Shift+Tab among painted tab
+stops, and focuses the Popup on open. Set `initialFocus` and `finalFocus` on
+Popup to use a host ref, numeric host element ID, or callback; by default,
 focus returns to the Trigger, or to the element focused before the dialog.
 Escape dismisses the topmost open Dialog, Select, Combobox, or Tooltip layer.
-`AlertDialog` uses the same parts with the Popup role set to `alertdialog`.
+
+### Headless Alert Dialog
+
+`@gpuix/react/alert-dialog` provides the Base UI `AlertDialog` namespace and
+part tree. Its Popup has the `alertdialog` role and cannot be dismissed by
+Escape or by pressing the Backdrop; include an `AlertDialog.Close` action so
+users can complete or cancel the prompt. `Dialog.Handle` and
+`AlertDialog.Handle` are handle classes created with each namespace's
+`createHandle()` method. The `AlertDialog` export from `/dialog` remains as a
+deprecated alias.
 
 `Dialog.Trigger` and `Dialog.Close` are keyboard-operable buttons. The root
 `Button` export gives a styled `div` button activation with Enter and Space; it
@@ -3565,7 +3584,7 @@ Each primitive has a dedicated namespace entry point:
 | `@gpuix/react/dialog` | `Root`, `Trigger`, `Portal`, `Backdrop`, `Popup`, `Title`, `Description`, `Close` |
 | `@gpuix/react/select` | `Root`, `Label`, `Trigger`, `Value`, `Icon`, `Portal`, `Backdrop`, `Positioner`, `Popup`, `List`, `Item`, `ItemIndicator`, `ItemText`, `Arrow`, `ScrollUpArrow`, `ScrollDownArrow`, `Group`, `GroupLabel`, `Separator` |
 | `@gpuix/react/combobox` | `Root`, `Label`, `Value`, `Input`, `InputGroup`, `Trigger`, `List`, `Status`, `Portal`, `Backdrop`, `Positioner`, `Popup`, `Arrow`, `Icon`, `Group`, `GroupLabel`, `Item`, `ItemIndicator`, `Chips`, `Chip`, `ChipRemove`, `Row`, `Collection`, `Empty`, `Clear`, `Separator`, `useFilter`, `useFilteredItems`, `createItems` |
-| `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Popup` |
+| `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Portal`, `Positioner`, `Popup`, `Arrow`, `Viewport`, `Handle`, `createHandle` |
 | `@gpuix/react/floating` | `FloatingLayer`, `PositionerProps`, `FloatingPositioner`, `renderSlot` |
 
 In Select, `Label` labels the field and `GroupLabel` labels an item group.
@@ -3820,22 +3839,30 @@ uses `aria-autocomplete="list"` by default and `"none"` while read-only,
 and `locale` sets the default filter's string comparison locale.
 
 ```tsx
-<TooltipPrimitive.Provider delay={350}>
-  <TooltipPrimitive.Root>
-    <TooltipPrimitive.Trigger asChild>
-      <div tabIndex={0} style={{ padding: 8 }}>Copy</div>
-    </TooltipPrimitive.Trigger>
-    <TooltipPrimitive.Popup side="top" sideOffset={6}>
-      Copy message
-    </TooltipPrimitive.Popup>
-  </TooltipPrimitive.Root>
-</TooltipPrimitive.Provider>
+<TooltipPrimitive.Tooltip.Provider delay={350} closeDelay={80}>
+  <TooltipPrimitive.Tooltip.Root onOpenChange={(open, details) => console.log(open, details.reason)}>
+    <TooltipPrimitive.Tooltip.Trigger>Copy</TooltipPrimitive.Tooltip.Trigger>
+    <TooltipPrimitive.Tooltip.Portal>
+      <TooltipPrimitive.Tooltip.Positioner side="top" sideOffset={6}>
+        <TooltipPrimitive.Tooltip.Popup>
+          <TooltipPrimitive.Tooltip.Arrow />
+          Copy message
+        </TooltipPrimitive.Tooltip.Popup>
+      </TooltipPrimitive.Tooltip.Positioner>
+    </TooltipPrimitive.Tooltip.Portal>
+  </TooltipPrimitive.Tooltip.Root>
+</TooltipPrimitive.Tooltip.Provider>
 ```
 
 Combobox uses the native input for text editing, IME, clipboard, and focus.
-Tooltip `asChild` preserves the child ref and merges trigger behavior into that
-host element. All floating content uses GPUI's deferred `anchored()` layer,
-snaps inside the window, and occludes controls behind it.
+Tooltip parts accept `render`, state-based `className` and `style`, and expose
+Base UI state attributes. `Tooltip.Viewport` is optional unless animated
+content switches between triggers. The native Portal keeps children in the
+retained tree; its `container` prop does not select a destination. The shared
+floating Positioner uses GPUI's deferred `anchored()` layer, snaps inside the
+window, and occludes controls behind it. A disabled Trigger suppresses tooltip
+interaction without disabling its rendered control; disabling an open Root
+closes the tooltip. Multiple triggers retain their own anchors and payloads.
 
 ### Overlay menus
 

@@ -33,7 +33,9 @@ Each component is importable two ways: as a namespace from its subpath (`import 
   | `SelectPositioner` | `{ open, side, align, anchorHidden }` |
   | `SelectSeparator` | `{ orientation }` |
 
-  Combobox and Tooltip parts also accept state functions. Combobox root renders no wrapper element, like Select root.
+  Combobox and Tooltip parts accept state functions. `Select.Root` and
+  `Combobox.Root` render no wrapper element; `Select.Root` does not accept
+  `className` or `style`.
 
   ```tsx
   <SelectItem value="a" style={({ highlighted, selected }) => ({ backgroundColor: highlighted ? "#2c2c2c" : "#1a1a1a", color: selected ? "#fff" : "#bbb" })}>
@@ -43,45 +45,49 @@ Each component is importable two ways: as a namespace from its subpath (`import 
 
 - **`render` customises Select parts.** It accepts an element or a function receiving host props and state. Other controls that use `asChild` still require one child that forwards its ref and host props.
 - **Select Root renders no wrapper element.** Its Popup is positioned against the Trigger.
-- **Select and Combobox provide `Portal`, `Backdrop`, `Positioner`, and `Arrow`.** Both labels associate with their input/trigger; use `GroupLabel` for item groups. Both positioners use the shared `/floating` positioning contract.
+- **Select, Combobox, and Tooltip provide `Portal`, `Positioner`, and `Arrow`.** Select and Combobox also provide `Backdrop`; their labels associate with their input/trigger. Use `GroupLabel` for item groups. All positioners use the shared `/floating` positioning contract.
 - **Give Popup an opaque background.** It defaults to `#1A1A1A` when neither `style` nor a compiled `className` sets a background. A background supplied by either wins; a translucent colour lets the page show through.
 - **Combobox filtering and keyboard navigation use the mounted items.** Pass `items` to Root and use either the `List` function child or `Collection` for grouped data. `createItems` maps generic source objects to primitive selection values and labels. `filteredItems` supports externally filtered lists; `useFilter` provides locale-aware contains/startsWith/endsWith matching, and `useFilteredItems` reads the current results inside Root. `items` is optional when composing explicit Item children.
 - **A controlled Select cannot be cleared with `value={undefined}`**: `undefined` means uncontrolled. Use `value={null}` to clear single-select mode. Values can be generic objects or primitives, and multiple mode uses arrays.
 - **Select keyboard support is minimal**: typeahead, Up/Down, Ctrl+N/Ctrl+P, Enter, Space and Escape. Home/End and PageUp/PageDown are not handled.
 - **Combobox sets its listbox semantics.** Input has the combobox role and expanded, controls, active-descendant, and autocomplete state; List and Item expose listbox/option roles and selected/disabled state. State is also available to `className` and `style` functions.
-- **Tooltip opens instantly by default** (`delayDuration` 0; Base UI waits 600 ms), and opens on any focus, not only keyboard focus. Its delays use `setTimeout` on wall time, so `advanceAsyncClock` in tests does not move them.
+- **Tooltip timers use wall time.** `advanceAsyncClock` in tests does not move Provider or Trigger delay timers.
 - **Combobox `autoHighlight` defaults to `false`**, so typing and pressing Enter selects nothing until an item is arrowed to. Pass `autoHighlight` for type-and-Enter.
-- **There is no Popover, Menu or message box.** `@gpuix/react/dialogs` is file pickers only (#572 for a message box). Dialog is available from `@gpuix/react/dialog`; it handles modal Tab focus, Escape dismissal, focus restoration and `aria-modal` in AccessKit.
+- **There is no Popover or Menu primitive.** `@gpuix/react/dialogs` provides native file pickers. Dialog and AlertDialog are available from `@gpuix/react/dialog` and `/alert-dialog`.
 
 ## Dialog (`@gpuix/react/dialog`)
 
-The parts follow Base UI names: `Root`, `Trigger`, `Portal`, `Backdrop`,
-`Popup`, `Title`, `Description`, and `Close`. The package root also exports
-`Dialog`, `DialogTrigger`, and the other prefixed parts. `Root` takes
-`open`/`defaultOpen`, `onOpenChange`, and `modal` (default `true`). `Popup` takes
-`initialFocus` and `finalFocus`, each a host ref, numeric host element ID, or
-`false` to skip that focus move.
+The parts follow Base UI 1.8.0: `Root`, `Trigger`, `Portal`, `Backdrop`,
+`Viewport`, `Popup`, `Title`, `Description`, `Close`, and `Handle`. The package
+root also exports `Dialog`, `DialogTrigger`, and the other prefixed parts.
+`Root` takes `open`/`defaultOpen`, `onOpenChange(open, eventDetails)`,
+`onOpenChangeComplete`, trigger IDs, actions and handles. `modal` accepts
+`true`, `false`, or `"trap-focus"`. Parts support `render`, state-function
+`className`/`style`, state attributes, and `data-*` props. `Popup` takes
+`initialFocus` and `finalFocus` refs or callbacks; native host refs and numeric
+host IDs are also accepted.
 
 Modal Popups expose `aria-modal`, focus the Popup when opened, trap Tab and
 Shift+Tab among painted descendants, and return focus to the Trigger or prior
-focused element when closed. Escape dismisses the highest open Dialog, Select,
-Combobox, or Tooltip. GPU-IX does not currently export a Popover primitive.
-`AlertDialog` shares the Dialog parts and renders its Popup with the
-`alertdialog` role. `Dialog.Trigger`, `Dialog.Close`, and the
-root `Button` export activate with Enter and Space; they add no default focus
-ring.
-
-The API follows the `@base-ui/react` Dialog shape but is not a full Base UI API
-match. Compared with Base UI 1.8.0, GPU-IX does not provide
-`Dialog.Viewport`, `onOpenChangeComplete`, `triggerId`, `actionsRef`, or a
-`Dialog.Root` render-function child. `modal` accepts only a boolean, so
-`'trap-focus'` is not available. `initialFocus` and `finalFocus` accept refs,
-numeric host IDs, or `false`; they do not accept `true` or callbacks. GPU-IX's
-`Portal` fills the window, so it does not need a separate `Viewport` part.
+focused element when closed. Both `true` and `"trap-focus"` trap focus; only
+`true` blocks pointer interaction behind the overlay. Escape dismisses the
+highest open Dialog, Select, Combobox, or Tooltip. `Dialog.Trigger`,
+`Dialog.Close`, and the root `Button` activate with Enter and Space; they add no
+default focus ring.
 
 `Portal` mounts a full-window deferred layer with `<anchored fill="window">`.
-All React children remain in the retained tree; this is a native overlay
-component, not a general DOM portal.
+Its `container` prop is accepted for Base UI source compatibility and is a
+no-op in the native renderer. All React children remain in the retained tree;
+this is a native overlay component, not a general DOM portal. Popup and
+Viewport expose `transitionStatus` and the `data-starting-style`/
+`data-ending-style` attributes through the native opening or closing frame.
+
+## AlertDialog (`@gpuix/react/alert-dialog`)
+
+AlertDialog has the same part tree and handle pattern as Dialog. Its Popup has
+the `alertdialog` role, and Escape or Backdrop presses do not dismiss it. Add an
+`AlertDialog.Close` action for an explicit response. The `AlertDialog` export
+from `/dialog` is a deprecated alias.
 
 ## Floating layer (`@gpuix/react/floating`)
 
@@ -140,16 +146,35 @@ import * as Combobox from "@gpuix/react/combobox"
 
 ## Tooltip (`@gpuix/react/tooltip`)
 
-Parts: `Provider`, `Root`, `Trigger`, `Popup`.
+`Tooltip` exposes the Base UI part namespace: `Provider`, `Root`, `Trigger`, `Portal`, `Positioner`, `Popup`, `Arrow`, `Viewport`, and `Handle`/`createHandle`. The package root also exports prefixed parts such as `TooltipRoot` and `TooltipPositioner`.
+
+```tsx
+import { Tooltip } from "@gpuix/react/tooltip"
+
+<Tooltip.Provider delay={600} closeDelay={80} timeout={400}>
+  <Tooltip.Root onOpenChange={(open, details) => console.log(open, details.reason)}>
+    <Tooltip.Trigger>Copy</Tooltip.Trigger>
+    <Tooltip.Portal>
+      <Tooltip.Positioner side="top" sideOffset={6}>
+        <Tooltip.Popup><Tooltip.Arrow />Copy message</Tooltip.Popup>
+      </Tooltip.Positioner>
+    </Tooltip.Portal>
+  </Tooltip.Root>
+</Tooltip.Provider>
+```
 
 | Part | Props | Behaviour |
 |---|---|---|
-| `Provider` | `delay` (0), `timeout` (300), `disableHoverableContent` | Within `timeout` of a close, the next tooltip opens without delay. |
-| `Root` | `open`/`defaultOpen`/`onOpenChange`, `delayDuration`, `disableHoverablePopup` | Wrapper `div`. |
-| `Trigger` | `asChild`; `tabIndex` 0 unless `asChild` | Hover schedules open; leave schedules close (80 ms when content is hoverable); press closes; focus opens immediately; blur closes; Escape closes while the trigger has focus. |
-| `Popup` | `FloatingPopupProps` with `side="top"`, `align="center"` | Unmounts while closed; hovering it keeps it open unless `disableHoverablePopup`. |
+| `Provider` | `delay` (600), `closeDelay` (0), `timeout` (400) | Within `timeout` of a close, the next tooltip opens without delay. |
+| `Root` | `open`/`defaultOpen`, `onOpenChange(open, details)`, `onOpenChangeComplete`, `disabled`, `disableHoverablePopup`, `trackCursorAxis`, `actionsRef`, `handle`, `triggerId`, `defaultTriggerId` | Renders no host element. `details` carries the reason, originating GPU-IX event, trigger, and `preventUnmountOnClose()`. |
+| `Trigger` | `delay`, `closeDelay`, `closeOnClick`, `disabled`, `handle`, `payload`, `render` | Hover schedules open; focus opens immediately; Escape closes; state styling receives `{ open }`. `disabled` suppresses tooltip interaction without disabling the rendered control. Multiple triggers retain their own anchors and payloads. |
+| `Portal` | `container`, `keepMounted`, `render` | Keeps children in the retained tree; native positioning happens in Positioner. |
+| `Positioner` | Shared `PositionerProps` from `/floating`; default `side="top"` | Uses `FloatingPositioner` for anchor measurement and collision handling. |
+| `Popup` | `render`, state-based `className` and `style` | Unmounts while closed unless `preventUnmountOnClose()` was called; exposes open/closed, side, align, instant and transition state. |
+| `Arrow` | `render`, state-based `className` and `style` | Exposes open/closed, side, align, instant and `uncentered` state. |
+| `Viewport` | `render`, state-based `className` and `style` | Provides the Base UI state shape for optional content transitions. |
 
-Base UI names the provider's opening delay and sibling-tooltip timeout `delay` and `timeout`. It also has `closeDelay`, which GPU-IX's fixed 80 ms close timer does not expose. GPU-IX keeps `delayDuration` on Root, and `disableHoverableContent` on Provider, because those props do not have the same part boundary in Base UI.
+The Trigger, Positioner, Popup and Arrow emit Base UI open/closed and placement attributes where those parts expose them. Disabling Root closes an open tooltip and prevents future opens. Native Portal `container` and `keepMounted` are accepted but do not change the retained tree. `trackCursorAxis` is accepted but has no native cursor-tracking effect. Popup transitions and Arrow centring are not measured, so their transition status stays idle and `uncentered` stays false. `disableHoverableContent` remains as a deprecated Provider alias for older GPU-IX callers.
 
 ## File pickers (`@gpuix/react/dialogs`)
 
