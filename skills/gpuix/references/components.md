@@ -43,7 +43,7 @@ Use the documented named namespace import for compound components: `import { Sel
   </SelectItem>
   ```
 
-- **`render` customises Select parts.** It accepts an element or a function receiving host props and state. Other controls that use `asChild` still require one child that forwards its ref and host props.
+- **`render` customises parts.** It accepts an element or a function receiving host props and state. When given an element, GPU-IX combines its `className` before the part class, lets its inline styles take precedence, calls its event handlers before the part handlers, and retains both refs. Other controls that use `asChild` still require one child that forwards its ref and host props.
 - **Select Root renders no wrapper element.** Its Popup is positioned against the Trigger.
 - **Select, Combobox, and Tooltip provide `Portal`, `Positioner`, and `Arrow`.** Select and Combobox also provide `Backdrop`; their labels associate with their input/trigger. Use `GroupLabel` for item groups. All positioners use the shared `/floating` positioning contract.
 - **Give Popup an opaque background.** It defaults to `#1A1A1A` when neither `style` nor a compiled `className` sets a background. A background supplied by either wins; a translucent colour lets the page show through.
@@ -99,7 +99,7 @@ The Positioner accepts `positionMethod`, `sticky`, `arrowPadding`, and `disableA
 
 - The outer anchored surface takes only `visibility`, `opacity` and the border radii; everything else styles the inner content. Nested opacity is not multiplied.
 - An open Popup blocks clicks on controls behind it; a closed one does not. `pointerEvents: "none"` turns that off.
-- `renderSlot` (behind `asChild`) merges props onto its one child, composes event handlers rather than replacing them, shallow-merges `style`, and merges refs. It throws `asChild requires exactly one React element` otherwise.
+- `renderSlot` (behind `asChild`) merges props onto its one child, combines `className`, composes event handlers, shallow-merges `style`, and merges refs. It throws `asChild requires exactly one React element` otherwise.
 
 ## Select (`@gpuix/react/select`)
 

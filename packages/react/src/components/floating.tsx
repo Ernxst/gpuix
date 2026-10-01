@@ -19,6 +19,7 @@ import { useGpuix } from "../hooks/use-gpuix.js"
 import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 import type { NativeStateStyle, Props, PublicInstance, StyleDesc } from "../types/host.js"
 import { isCompiledStyle } from "../class-names.js"
+import { cn } from "../cn.js"
 
 export type FloatingSide = "top" | "right" | "bottom" | "left"
 export type FloatingAlign = "start" | "center" | "end"
@@ -288,12 +289,75 @@ function composeHandlers<Event extends GpuixSyntheticEvent>(
   first?: (event: Event) => void,
   second?: (event: Event) => void
 ): ((event: Event) => void) | undefined {
-  if (!first) return second
-  if (!second) return first
-  return (event) => {
-    first(event)
-    second(event)
+  if (!first && !second) return undefined
+  if (!first) return (event) => {
+    if (isSyntheticEvent(event)) makeBaseUIHandlerPreventable(event)
+    second?.(event)
   }
+  if (!second) return (event) => {
+    if (isSyntheticEvent(event)) makeBaseUIHandlerPreventable(event)
+    first(event)
+  }
+  return (event) => {
+    if (isSyntheticEvent(event)) makeBaseUIHandlerPreventable(event)
+    first(event)
+    if (!isSyntheticEvent(event) || !(event as GpuixSyntheticEvent & { baseUIHandlerPrevented?: boolean }).baseUIHandlerPrevented) {
+      second(event)
+    }
+  }
+}
+
+function isSyntheticEvent(event: GpuixSyntheticEvent): boolean {
+  return event !== null && typeof event === "object" && "nativeEvent" in event
+}
+
+function makeBaseUIHandlerPreventable(event: GpuixSyntheticEvent): void {
+  const preventable = event as GpuixSyntheticEvent & {
+    baseUIHandlerPrevented?: boolean
+    preventBaseUIHandler?: () => void
+  }
+  preventable.baseUIHandlerPrevented = false
+  preventable.preventBaseUIHandler = () => {
+    preventable.baseUIHandlerPrevented = true
+  }
+}
+
+function mergeClassNames(partClassName: Props["className"], renderClassName: Props["className"]): Props["className"] {
+  if (renderClassName === undefined || renderClassName === "") return partClassName
+  if (partClassName === undefined || partClassName === "") return renderClassName
+  if (typeof partClassName === "string" && typeof renderClassName === "string") {
+    return `${renderClassName} ${partClassName}`
+  }
+  return cn(renderClassName, partClassName)
+}
+
+/** Merge part props with the props on its `render` element, following Base UI's mergeProps order. */
+export function mergeRenderProps(partProps: Props, renderProps: Props): Props {
+  const merged: Props = {
+    ...partProps,
+    ...renderProps,
+    className: mergeClassNames(partProps.className, renderProps.className),
+    style: mergeStyles(partProps.style, renderProps.style),
+  }
+  const mergedRecord = merged as Record<string, unknown>
+
+  for (const key of Object.keys(renderProps)) {
+    const isEventHandler = key.startsWith("on") && key.charCodeAt(2) >= 65 && key.charCodeAt(2) <= 90
+    if (!isEventHandler) continue
+
+    const partHandler = (partProps as Record<string, unknown>)[key]
+    const renderHandler = (renderProps as Record<string, unknown>)[key]
+    if (renderHandler === undefined) {
+      mergedRecord[key] = partHandler
+    } else if (typeof renderHandler === "function") {
+      mergedRecord[key] = composeHandlers(
+        renderHandler as ((event: GpuixSyntheticEvent) => void) | undefined,
+        partHandler as ((event: GpuixSyntheticEvent) => void) | undefined,
+      )
+    }
+  }
+
+  return merged
 }
 
 export function renderSlot({
@@ -316,30 +380,7 @@ export function renderSlot({
 
   const child = children
   const childProps = child.props
-  const merged: Props = {
-    ...childProps,
-    ...props,
-    style: mergeStyles(childProps.style, props.style),
-    onClick: composeHandlers(childProps.onClick, props.onClick),
-    onDoubleClick: composeHandlers(childProps.onDoubleClick, props.onDoubleClick),
-    onContextMenu: composeHandlers(childProps.onContextMenu, props.onContextMenu),
-    onMouseDown: composeHandlers(childProps.onMouseDown, props.onMouseDown),
-    onMouseUp: composeHandlers(childProps.onMouseUp, props.onMouseUp),
-    onMouseEnter: composeHandlers(childProps.onMouseEnter, props.onMouseEnter),
-    onMouseLeave: composeHandlers(childProps.onMouseLeave, props.onMouseLeave),
-    onMouseMove: composeHandlers(childProps.onMouseMove, props.onMouseMove),
-    onMouseDownOutside: composeHandlers(
-      childProps.onMouseDownOutside,
-      props.onMouseDownOutside
-    ),
-    onKeyDown: composeHandlers(childProps.onKeyDown, props.onKeyDown),
-    onKeyUp: composeHandlers(childProps.onKeyUp, props.onKeyUp),
-    onFocus: composeHandlers(childProps.onFocus, props.onFocus),
-    onBlur: composeHandlers(childProps.onBlur, props.onBlur),
-    onScroll: composeHandlers(childProps.onScroll, props.onScroll),
-    onWheel: composeHandlers(childProps.onWheel, props.onWheel),
-    onChange: composeHandlers(childProps.onChange, props.onChange),
-  }
+  const merged = mergeRenderProps(props, childProps)
   if (props.tabIndex === undefined) merged.tabIndex = childProps.tabIndex
   const childRef = getElementRef(child)
   if (childRef || ref) merged.ref = mergeRefs(childRef, ref)

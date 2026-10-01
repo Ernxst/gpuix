@@ -18,7 +18,7 @@ import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
 import { cancelAnimationFrame, requestAnimationFrame } from "../frame-clock.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import { buttonProps } from "./button.js"
-import { DismissLayerScope, renderSlot, setRefs, useDismissLayer } from "./floating.js"
+import { DismissLayerScope, mergeRenderProps, renderSlot, setRefs, useDismissLayer } from "./floating.js"
 
 export type DialogModal = boolean | "trap-focus"
 export type DialogInteractionType = "mouse" | "touch" | "pen" | "keyboard"
@@ -355,16 +355,7 @@ function renderPart<State>(
     ? render({ ...elementProps, children }, state) as ReactElement<Record<string, unknown>>
     : render as ReactElement<Record<string, unknown>> | undefined
   if (resolved) {
-    const mergedProps: Record<string, unknown> = { ...elementProps, ...resolved.props }
-    for (const [key, renderHandler] of Object.entries(resolved.props)) {
-      const componentHandler = (elementProps as Record<string, unknown>)[key]
-      if (key.startsWith("on") && renderHandler !== componentHandler && typeof renderHandler === "function" && typeof componentHandler === "function") {
-        mergedProps[key] = (...args: unknown[]) => {
-          renderHandler(...args)
-          componentHandler(...args)
-        }
-      }
-    }
+    const mergedProps = mergeRenderProps(elementProps, resolved.props as Props) as Record<string, unknown>
     mergedProps.children = resolved.props.children ?? children
     if (elementProps.ref && resolved.props.ref && elementProps.ref !== resolved.props.ref) {
       mergedProps.ref = (value: PublicInstance | null) => setRefs(value, resolved.props.ref as React.Ref<PublicInstance> | undefined, elementProps.ref as React.Ref<PublicInstance> | undefined)
