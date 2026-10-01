@@ -21,7 +21,7 @@ Use Bun and the checked-in lockfile. In a new checkout, install with `bun instal
 - Browser build: `bun run web:wasm` from the repository root.
 - Target directory: don't set `CARGO_TARGET_DIR` or pass `--target-dir`, including for one-off review builds. Cargo runs through mbx, which already gives each checkout its own target directory and deletes it when unused; a custom target directory bypasses mbx and is never cleaned up. Before the first native build in a new checkout, run `mkdir -p packages/native/target && mbx adopt packages/native`. Otherwise `napi build` creates `target/` as a plain directory before Cargo runs, and mbx stops the build in a terminal to ask whether to move it, which an unattended run cannot answer.
 
-CI is disabled by default to control costs. No checks run on pull requests or pushes, so the absence of checks is not a signal; verify changes locally. Enable CI manually for a one-off run only when another platform is genuinely needed, such as Windows or Linux. Do not re-enable the workflow or change `.github/workflows/ci.yml` to get checks.
+The CI workflow is enabled. Pushes and pull requests build Linux and Windows and run the plugins tests. The macOS test job and `test-windows` run only on `workflow_dispatch`, so claims that tests pass on those platforms require a dispatched run on the PR head. Do not disable the workflow.
 
 Verify the target changed: TypeScript checks do not compile Rust, and native checks do not validate the browser renderer. Consult the relevant package scripts or CI job for additional checks required by the change.
 
