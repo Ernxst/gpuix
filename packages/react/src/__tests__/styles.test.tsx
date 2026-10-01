@@ -1270,8 +1270,8 @@ describeNative("style properties", () => {
       expect(longHeading).toContain(balancedSelection!)
     })
 
-    it("keeps earlier forced-break groups when truncating a balanced clamp", () => {
-      const firstGroup = "This earlier forced-break group has a wide first line"
+    it("keeps earlier forced-break groups ending in the truncation affix", () => {
+      const firstGroup = "This earlier forced-break group has a wide first …"
       const lastGroup =
         "Final heading words remain visible before this is a short tail followed by supercalifragilisticexpialidocious and more words"
       const text = `${firstGroup}\n${lastGroup}`
