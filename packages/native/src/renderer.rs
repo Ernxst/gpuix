@@ -1080,6 +1080,8 @@ thread_local! {
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     static WEB_WINDOW: RefCell<Option<gpui::WindowHandle<GpuixView>>> = const { RefCell::new(None) };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    static PENDING_WEB_WINDOW_TITLE: RefCell<Option<String>> = const { RefCell::new(None) };
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     static PENDING_DEBUG_OVERLAY: RefCell<Option<gpui::DebugFrameOverlayMode>> =
         const { RefCell::new(None) };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -6782,7 +6784,9 @@ fn start_web_app(
                     canvas_display_lists,
                     Some(event_callback),
                     window_event_callback,
-                    "GPUIX Web".to_string(),
+                    PENDING_WEB_WINDOW_TITLE
+                        .with(|title| title.borrow_mut().take())
+                        .unwrap_or_else(|| "GPUIX Web".to_string()),
                     selection,
                     crate::custom_elements::img::ImageNetworkPolicy::default(),
                     view_cx,
@@ -7276,6 +7280,13 @@ impl WebGpuixRenderer {
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = setWindowTitle)]
     pub fn set_window_title(&self, title: String) -> Result<(), wasm_bindgen::JsValue> {
+        let window_ready = WEB_WINDOW.with(|window| window.borrow().is_some());
+        if !window_ready {
+            PENDING_WEB_WINDOW_TITLE.with(|pending| {
+                *pending.borrow_mut() = Some(title);
+            });
+            return Ok(());
+        }
         update_web_view(move |view, _window, cx| {
             view.window_title = title;
             cx.notify();
@@ -11830,7 +11841,7 @@ pub(crate) static RENDER_BUILD_NANOS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
 /// Records on scope exit so early returns from `render` are still counted.
-struct RecordRenderBuild(std::time::Instant);
+struct RecordRenderBuild(web_time::Instant);
 
 impl Drop for RecordRenderBuild {
     fn drop(&mut self) {
@@ -11853,7 +11864,7 @@ impl gpui::Render for GpuixView {
         // built. Record the store revision before constructing GPUI elements
         // so a completion during prepaint remains stale until the next draw.
         self.drawn_img_image_revision = self.img_image_store.revision();
-        let _record_build = RecordRenderBuild(std::time::Instant::now());
+        let _record_build = RecordRenderBuild(web_time::Instant::now());
 
         window.set_window_title(&self.window_title);
         self.observe_window_resize(window, cx);
@@ -17351,7 +17362,7 @@ fn align_items_keyword(value: Option<&str>) -> Option<gpui::AlignItems> {
 pub(crate) static APPLY_STYLES_NANOS: std::sync::atomic::AtomicU64 =
     std::sync::atomic::AtomicU64::new(0);
 
-struct RecordApplyStyles(std::time::Instant);
+struct RecordApplyStyles(web_time::Instant);
 
 impl Drop for RecordApplyStyles {
     fn drop(&mut self) {
@@ -17363,7 +17374,7 @@ impl Drop for RecordApplyStyles {
 }
 
 pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
-    let _record_apply_styles = RecordApplyStyles(std::time::Instant::now());
+    let _record_apply_styles = RecordApplyStyles(web_time::Instant::now());
     match style.visibility.as_deref() {
         Some("hidden") => el = el.invisible(),
         Some("visible") => el = el.visible(),

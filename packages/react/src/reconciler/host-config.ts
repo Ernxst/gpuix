@@ -193,6 +193,13 @@ function containerFor(node: HostNode): Container {
 
 const windowTitlesByRenderer = new WeakMap<object, WindowTitleState>()
 
+function applyWindowTitle(state: WindowTitleState, title: string): void {
+  state.originalSetWindowTitle(title)
+  if (hasBrowserDocument()) {
+    document.title = title
+  }
+}
+
 function windowTitleState(container: Container): WindowTitleState {
   if (container.windowTitles) return container.windowTitles
   const renderer = container.native
@@ -210,9 +217,7 @@ function windowTitleState(container: Container): WindowTitleState {
       setWindowTitle(title) {
         state!.baseTitle = title
         const current = state!.entries.at(-1)?.title
-        const next = current ?? title
-        state!.originalSetWindowTitle(next)
-        if (hasBrowserDocument()) document.title = next
+        applyWindowTitle(state!, current ?? title)
       },
     }
     windowTitlesByRenderer.set(renderer, state)
@@ -232,8 +237,7 @@ function updateWindowTitle(container: Container, instance: Instance): void {
       ? (children[0] as TextInstance).text
       : ""
   const title = state.entries.at(-1)?.title ?? state.baseTitle
-  state.originalSetWindowTitle(title)
-  if (hasBrowserDocument()) document.title = title
+  applyWindowTitle(state, title)
 }
 
 function mountWindowTitle(instance: Instance, container: Container): void {
@@ -254,8 +258,7 @@ function unmountWindowTitle(instance: Instance, container: Container): void {
   if (index === -1) return
   state.entries.splice(index, 1)
   const title = state.entries.at(-1)?.title ?? state.baseTitle
-  state.originalSetWindowTitle(title)
-  if (hasBrowserDocument()) document.title = title
+  applyWindowTitle(state, title)
 }
 
 function isInsideTitle(node: HostNode): boolean {
