@@ -2,7 +2,7 @@ import { existsSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { readFile } from "node:fs/promises"
 import path from "node:path"
 import type { BunPlugin } from "bun"
-import type { HmrContext, Plugin } from "vite"
+import type { HmrContext, Plugin, ViteDevServer } from "vite"
 import type { AcceptedPlugin } from "postcss"
 import {
   exports as resolvePackageExports,
@@ -250,6 +250,7 @@ async function compileCssModuleCode(
 export const gpuixCssUnplugin = createUnplugin<CssModulesOptions, false>((userOptions, meta) => {
   const cssModulesByDependency = new Map<string, Set<string>>()
   const cssModuleIdsBySource = new Map<string, string>()
+  let viteServer: ViteDevServer | undefined
 
   return {
     name: "gpuix-css-modules",
@@ -257,6 +258,23 @@ export const gpuixCssUnplugin = createUnplugin<CssModulesOptions, false>((userOp
     // file and hand back a stylesheet the native renderer cannot use.
     vite: {
       enforce: "pre",
+      config(config) {
+        // Vite ignores node_modules by default. CSS modules can be imported
+        // through package exports, so let its watcher see those files while
+        // keeping the rest of node_modules excluded.
+        if (config.server?.watch === null) return
+        const watch = config.server?.watch
+        const ignored = watch?.ignored
+        config.server ??= {}
+        config.server.watch ??= {}
+        config.server.watch.ignored = [
+          ...(Array.isArray(ignored) ? ignored : ignored === undefined ? [] : [ignored]),
+          "!**/node_modules/**/*.module.css",
+        ]
+      },
+      configureServer(server) {
+        viteServer = server
+      },
       handleHotUpdate({ file, server }: HmrContext) {
         const changedFile = cssFileKey(file)
         const affectedSources = new Set([
@@ -295,6 +313,12 @@ export const gpuixCssUnplugin = createUnplugin<CssModulesOptions, false>((userOp
             resolve: context.resolve?.bind(context),
             addWatchFile(file: string) {
               context.addWatchFile(file)
+              if (file.replaceAll("\\", "/").includes("/node_modules/")) {
+                // Vite's addWatchFile helper skips files inside root, while
+                // its root watcher ignores node_modules. Add imported CSS
+                // modules directly so Chokidar can watch the file itself.
+                viteServer?.watcher.add(file)
+              }
               const dependency = cssFileKey(file)
               if (dependency === sourceKey) return
               const dependents = cssModulesByDependency.get(dependency) ?? new Set<string>()

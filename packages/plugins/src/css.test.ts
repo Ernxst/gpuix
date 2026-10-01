@@ -104,7 +104,6 @@ test("Vite imports CSS modules through package imports like relative imports", a
   )
   const source = path.join(fixture, "src/styles/card.module.css")
   await writeFile(source, ".card { display: block; }\n")
-  server.watcher.emit("change", realpathSync(source))
   let updated: Record<string, unknown> | undefined
   let deadline = Date.now() + 3_000
   while (Date.now() < deadline) {
@@ -116,7 +115,6 @@ test("Vite imports CSS modules through package imports like relative imports", a
   expect(updated?.aliased).toEqual(updated?.relative)
 
   await writeFile(packageModule, ".card { display: grid; }\n")
-  server.watcher.emit("change", realpathSync(packageModule))
   deadline = Date.now() + 3_000
   while (Date.now() < deadline) {
     updated = (await server.ssrLoadModule("/entry.ts")).default as Record<string, unknown>
