@@ -437,7 +437,7 @@ export function ComboboxRoot<Value = unknown, Multiple extends boolean | undefin
     if (multiple) {
       if (inputValue) setInputValue("", "input-clear", event, true)
     } else {
-      if (!setInputValue(itemToLabel(selected), "item-press", event, true)) return
+      setInputValue(itemToLabel(selected), "item-press", event)
       setOpen(false, "item-press", event)
     }
   }
@@ -466,9 +466,11 @@ export function ComboboxRoot<Value = unknown, Multiple extends boolean | undefin
     <ComboboxContext.Provider value={context}>
       <DismissLayerScope>
         {children}
-        {props.name && selectedValues.map((selected, index) => (
-          <input key={`${String(selected)}-${index}`} type="hidden" name={props.name} form={props.form} autoComplete={autoComplete} value={itemToStringValue(selected)} />
-        ))}
+        {props.name && (multiple
+          ? selectedValues.map((selected, index) => (
+            <input key={`${String(selected)}-${index}`} type="hidden" name={props.name} form={props.form} autoComplete={autoComplete} value={itemToStringValue(selected)} />
+          ))
+          : <input type="hidden" name={props.name} form={props.form} autoComplete={autoComplete} value={value == null ? "" : itemToStringValue(value as Value)} />)}
       </DismissLayerScope>
     </ComboboxContext.Provider>
   )
@@ -604,7 +606,7 @@ export interface ComboboxGroupLabelProps extends PartProps<Record<string, never>
 export interface ComboboxSeparatorProps extends PartProps<{ orientation: "horizontal" | "vertical" }> { orientation?: "horizontal" | "vertical" | undefined }
 export interface ComboboxEmptyProps extends PartProps<Record<string, never>> {}
 export interface ComboboxStatusProps extends PartProps<Record<string, never>> {}
-export interface ComboboxLabelProps extends PartProps<ComboboxRootState> {}
+export interface ComboboxLabelProps extends PartProps<ComboboxRootState, "id"> {}
 export interface ComboboxInputGroupProps extends PartProps<ComboboxRootState> {}
 export interface ComboboxIconProps extends PartProps<Record<string, never>> {}
 export interface ComboboxArrowProps extends PartProps<{ open: boolean; side: PositionerState["side"]; align: PositionerState["align"]; uncentered: boolean }> {}
@@ -627,11 +629,13 @@ function basicPart<State>(name: string, tag: string, state: (context: ComboboxCo
   })
 }
 
-export const ComboboxLabel = forwardRef<PublicInstance, ComboboxLabelProps>(function ComboboxLabel({ render, className, style, children, ...props }, ref) {
+export const ComboboxLabel = forwardRef<PublicInstance, ComboboxLabelProps>(function ComboboxLabel(labelProps, ref) {
+  const { id: _id, ...props } = labelProps as ComboboxLabelProps & { id?: string }
+  const { render, className, style, children } = labelProps
   const context = useComboboxContext("Combobox.Label")
   useEffect(() => { context.setHasLabel(true); return () => context.setHasLabel(false) }, [context.setHasLabel])
   const state = getRootState(context)
-  return renderPart("label", render, { ...stateProps({ render, className, style }, state), ...props, ref, id: props.id ?? context.labelId, htmlFor: context.inputId, "data-disabled": context.disabled ? "" : undefined, "data-required": context.required ? "" : undefined } as Props, children, state, ref) as ReactElement
+  return renderPart("label", render, { ...stateProps({ render, className, style }, state), ...props, ref, id: context.labelId, htmlFor: context.inputId, "data-disabled": context.disabled ? "" : undefined, "data-required": context.required ? "" : undefined } as Props, children, state, ref) as ReactElement
 })
 export const ComboboxInputGroup = basicPart("Combobox.InputGroup", "div", getRootState, (context) => ({ "data-popup-open": context.open ? "" : undefined, "data-disabled": context.disabled ? "" : undefined, "data-readonly": context.readOnly ? "" : undefined, "data-required": context.required ? "" : undefined, "data-list-empty": context.filteredItems.length === 0 ? "" : undefined, "data-placeholder": context.selectedValues.length ? undefined : "" }))
 export const ComboboxIcon = basicPart("Combobox.Icon", "span", () => ({}))
