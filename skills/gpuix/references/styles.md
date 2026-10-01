@@ -128,11 +128,23 @@ Colour fields accept named colours, `transparent`, 3/4/6/8-digit hex, `rgb[a]()`
 | `textDecoration` | `underline`, `line-through`, `none` |
 | `textTransform` | `none`, `uppercase`, `lowercase` (inherited) |
 | `whiteSpace` | `normal`, `nowrap`, `pre` (no `pre-wrap`) (inherited) |
-| `textWrap` | `wrap`, `nowrap` (no `balance`, `pretty`) |
+| `textWrap` | `wrap`, `nowrap`, `balance` (not `pretty`) |
 | `textOverflow` | `ellipsis`, `ellipsis-start` |
 | `lineClamp` | positive integer |
 | `fontVariantNumeric` | `normal` or numeric-variant keywords (`tabular-nums` etc.) (inherited) |
 | `listStyle`, `listStyleType` | `none` only |
+
+`textWrap: "balance"` balances each explicit-line paragraph when it has at most
+six visible wrapped lines on native, following [Chromium's documented six-line
+limit](https://developer.chrome.com/docs/css-ui/css-text-wrap-balance/). WebKit
+documents that Safari has no corresponding line limit
+([WebKit](https://webkit.org/blog/15383/webkit-features-in-safari-17-5/)). In the
+browser renderer it maps to CSS `text-wrap: balance` and follows the browser's
+own line limit. `lineClamp` limits
+the visible text before balancing; native adds an ellipsis after balancing and
+keeps it on the last clamped line. The browser renderer delegates balancing and
+ellipsis placement to CSS, where the visible clamped text is balanced before
+the ellipsis is applied.
 
 No user-agent styles apply: `h1` is not bold or large, `pre` needs `whiteSpace: "pre"`, `b`/`i`/`small` need explicit styles.
 

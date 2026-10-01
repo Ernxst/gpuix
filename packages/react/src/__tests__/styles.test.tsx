@@ -7,6 +7,7 @@
 /// @ts-nocheck
 
 import fs from "fs"
+import path from "path"
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import React from "react"
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing"
@@ -18,6 +19,7 @@ const describeNative = isNativeTestRendererAvailable() ? describe : describe.ski
 // Not `/tmp`: that path does not exist on Windows, so every capture failed
 // there with `The system cannot find the path specified`.
 const SCREENSHOT_DIR = SHOTS_DIR
+const VISUAL_EVIDENCE_DIR = path.resolve(SCREENSHOT_DIR, "../../..", "docs/screenshots")
 
 /** Centering wrapper — fills the test window and centers content. */
 function Center({ children }: { children: React.ReactNode }) {
@@ -1112,6 +1114,203 @@ describeNative("style properties", () => {
       if (fs.existsSync(path)) fs.unlinkSync(path)
       testRoot.renderer.captureScreenshot(path)
       expect(fs.existsSync(path)).toBe(true)
+    })
+  })
+
+  describe("textWrap balance", () => {
+    const heading = "Balanced headings have useful line breaks in a narrow desktop window"
+
+    function Heading({ textWrap }: { textWrap: "wrap" | "balance" }) {
+      return (
+        <Center>
+          <div style={{ width: 230, padding: 20, backgroundColor: "#1e1e2e" }}>
+            <text
+              data-testid="heading"
+              style={{ color: "#cdd6f4", fontFamily: "Helvetica", fontSize: 18, textWrap }}
+            >
+              {heading}
+            </text>
+          </div>
+        </Center>
+      )
+    }
+
+    it("balances a short heading and uses those lines for selection and hit testing", () => {
+      const greedy = createTestRoot()
+      greedy.render(<Heading textWrap="wrap" />)
+      const balanced = createTestRoot()
+      balanced.render(<Heading textWrap="balance" />)
+
+      fs.mkdirSync(VISUAL_EVIDENCE_DIR, { recursive: true })
+      const greedyPath = path.join(VISUAL_EVIDENCE_DIR, "text-wrap-greedy.png")
+      const balancedPath = path.join(VISUAL_EVIDENCE_DIR, "text-wrap-balance.png")
+      for (const path of [greedyPath, balancedPath]) {
+        if (fs.existsSync(path)) fs.unlinkSync(path)
+      }
+      greedy.renderer.captureScreenshot(greedyPath)
+      balanced.renderer.captureScreenshot(balancedPath)
+      const greedyImage = fs.readFileSync(greedyPath)
+      const balancedImage = fs.readFileSync(balancedPath)
+      expect(greedyImage.equals(balancedImage)).toBe(false)
+      expect(bufferSimilarity(greedyImage, balancedImage)).toBeLessThan(0.99)
+
+      const greedyId = greedy.renderer.findByTestId("heading")!.id
+      const balancedId = balanced.renderer.findByTestId("heading")!.id
+      expect(balanced.renderer.getElement(balancedId)!.style).toMatchObject({ textWrap: "balance" })
+      const greedyBounds = greedy.renderer.getElementBounds(greedyId)!
+      const balancedBounds = balanced.renderer.getElementBounds(balancedId)!
+      expect(balancedBounds.height).toBe(greedyBounds.height)
+      const secondLineY = greedyBounds.y + greedyBounds.height * 0.75
+      const greedySelection = greedy.renderer.dragSelect(
+        greedyBounds.x + 1,
+        secondLineY,
+        greedyBounds.x + greedyBounds.width + 20,
+        secondLineY,
+      )
+      const balancedSelection = balanced.renderer.dragSelect(
+        balancedBounds.x + 1,
+        secondLineY,
+        balancedBounds.x + balancedBounds.width + 20,
+        secondLineY,
+      )
+      expect(greedySelection).not.toBeNull()
+      expect(balancedSelection).not.toBeNull()
+      expect(greedySelection).not.toBe(balancedSelection)
+      expect(heading.endsWith(balancedSelection!)).toBe(true)
+    })
+
+    it("keeps min-content and max-content widths unchanged", () => {
+      function IntrinsicWidths({ textWrap }: { textWrap: "wrap" | "balance" }) {
+        return (
+          <div style={{ display: "flex", flexDirection: "column", padding: 12 }}>
+            <div data-testid="min-content" style={{ width: "min-content" }}>
+              <text style={{ fontSize: 16, textWrap }}>{heading}</text>
+            </div>
+            <div data-testid="max-content" style={{ width: "max-content" }}>
+              <text style={{ fontSize: 16, textWrap }}>{heading}</text>
+            </div>
+          </div>
+        )
+      }
+
+      const greedy = createTestRoot()
+      greedy.render(<IntrinsicWidths textWrap="wrap" />)
+      const balanced = createTestRoot()
+      balanced.render(<IntrinsicWidths textWrap="balance" />)
+
+      for (const testId of ["min-content", "max-content"]) {
+        const greedyId = greedy.renderer.findByTestId(testId)!.id
+        const balancedId = balanced.renderer.findByTestId(testId)!.id
+        expect(balanced.renderer.getElementBounds(balancedId)!.width).toBe(
+          greedy.renderer.getElementBounds(greedyId)!.width,
+        )
+      }
+    })
+
+    it("balances the visible lines before placing a clamped ellipsis", () => {
+      const longHeading = `${heading}. Additional words follow after the visible heading and should be replaced by an ellipsis.`
+      function ClampedHeading({ textWrap }: { textWrap: "wrap" | "balance" }) {
+        return (
+          <Center>
+            <div style={{ width: 220, padding: 16, backgroundColor: "#1e1e2e" }}>
+              <text
+                data-testid="clamped-heading"
+                style={{
+                  color: "#cdd6f4",
+                  fontSize: 18,
+                  textWrap,
+                  lineClamp: 2,
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {longHeading}
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      const greedy = createTestRoot()
+      greedy.render(<ClampedHeading textWrap="wrap" />)
+      const balanced = createTestRoot()
+      balanced.render(<ClampedHeading textWrap="balance" />)
+
+      const greedyId = greedy.renderer.findByTestId("clamped-heading")!.id
+      const balancedId = balanced.renderer.findByTestId("clamped-heading")!.id
+      const greedyBounds = greedy.renderer.getElementBounds(greedyId)!
+      const balancedBounds = balanced.renderer.getElementBounds(balancedId)!
+      expect(balancedBounds.height).toBe(greedyBounds.height)
+      expect(balancedBounds.height).toBeLessThan(70)
+
+      const path = `${SCREENSHOT_DIR}/gpuix-text-wrap-balance-clamp-ellipsis.png`
+      if (fs.existsSync(path)) fs.unlinkSync(path)
+      balanced.renderer.captureScreenshot(path)
+      expect(fs.existsSync(path)).toBe(true)
+      expect(fs.statSync(path).size).toBeGreaterThan(0)
+
+      const secondLineY = balancedBounds.y + balancedBounds.height * 0.75
+      const greedySelection = greedy.renderer.dragSelect(
+        greedyBounds.x + 1,
+        greedyBounds.y + greedyBounds.height * 0.75,
+        greedyBounds.x + greedyBounds.width + 20,
+        greedyBounds.y + greedyBounds.height * 0.75,
+      )
+      const balancedSelection = balanced.renderer.dragSelect(
+        balancedBounds.x + 1,
+        secondLineY,
+        balancedBounds.x + balancedBounds.width + 20,
+        secondLineY,
+      )
+      expect(greedySelection).not.toBeNull()
+      expect(balancedSelection).not.toBeNull()
+      expect(balancedSelection).not.toBe(greedySelection)
+      // Browsers paint the line-clamp ellipsis as generated content, so it is not part of
+      // the text returned by selection APIs.
+      expect(balancedSelection).not.toContain("…")
+      expect(longHeading).toContain(balancedSelection!)
+    })
+
+    it("keeps earlier forced-break groups ending in the truncation affix", () => {
+      const firstGroup = "This earlier forced-break group has a wide first …"
+      const lastGroup =
+        "Final heading words remain visible before this is a short tail followed by supercalifragilisticexpialidocious and more words"
+      const text = `${firstGroup}\n${lastGroup}`
+      function ForcedBreakHeading({ textWrap }: { textWrap: "wrap" | "balance" }) {
+        return (
+          <Center>
+            <div style={{ width: 260, padding: 16 }}>
+              <text
+                data-testid="forced-break-heading"
+                style={{ fontSize: 18, textWrap, lineClamp: 4, textOverflow: "ellipsis" }}
+              >
+                {text}
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      const greedy = createTestRoot()
+      greedy.render(<ForcedBreakHeading textWrap="wrap" />)
+      const balanced = createTestRoot()
+      balanced.render(<ForcedBreakHeading textWrap="balance" />)
+      const greedyId = greedy.renderer.findByTestId("forced-break-heading")!.id
+      const balancedId = balanced.renderer.findByTestId("forced-break-heading")!.id
+      const greedyBounds = greedy.renderer.getElementBounds(greedyId)!
+      const balancedBounds = balanced.renderer.getElementBounds(balancedId)!
+      expect(balancedBounds.height).toBe(greedyBounds.height)
+
+      const finalGroupStartY = balancedBounds.y + balancedBounds.height * 0.625
+      const finalGroupEndY = balancedBounds.y + balancedBounds.height * 0.875
+      const selectedLastGroup = balanced.renderer.dragSelect(
+        balancedBounds.x + 1,
+        finalGroupStartY,
+        balancedBounds.x + balancedBounds.width + 20,
+        finalGroupEndY,
+      )
+      expect(selectedLastGroup).not.toBeNull()
+      expect(selectedLastGroup).toMatch(/^Final heading/)
+      expect(selectedLastGroup).not.toContain("…")
     })
   })
 

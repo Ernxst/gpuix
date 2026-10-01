@@ -3442,12 +3442,12 @@ fn parse_style_value_at(value: &serde_json::Value, prefix: &str) -> ParsedStyle 
             let property = property!("textWrap");
             let wrap = decode::<String>(&property, value, &mut parsed.problems);
             match wrap.as_deref() {
-                Some("wrap" | "nowrap") => parsed.style.text_wrap = wrap,
-                Some("balance" | "pretty") => reject(
+                Some("wrap" | "nowrap" | "balance") => parsed.style.text_wrap = wrap,
+                Some("pretty") => reject(
                     &mut parsed.problems,
                     property,
                     value,
-                    "balanced and pretty wrapping are not supported by GPUI",
+                    "pretty wrapping is not supported by GPUI",
                 ),
                 Some(_) => reject(
                     &mut parsed.problems,
@@ -5305,14 +5305,25 @@ mod tests {
     }
 
     #[test]
-    fn radial_and_unsupported_wrapping_are_explicit_rejections() {
+    fn radial_and_pretty_wrapping_are_explicit_rejections() {
         let parsed = parse_style_value(&json!({
             "background": "radial-gradient(red, blue)",
-            "textWrap": "balance"
+            "textWrap": "pretty"
         }));
         assert_eq!(parsed.problems.len(), 2);
         assert!(parsed.problems[0].reason.contains("radial"));
         assert!(parsed.problems[1].reason.contains("not supported"));
+    }
+
+    #[test]
+    fn balanced_text_wrap_is_supported_and_pretty_remains_rejected() {
+        let balanced = parse_style_value(&json!({ "textWrap": "balance" }));
+        assert!(balanced.problems.is_empty());
+        assert_eq!(balanced.style.text_wrap.as_deref(), Some("balance"));
+
+        let pretty = parse_style_value(&json!({ "textWrap": "pretty" }));
+        assert_eq!(pretty.problems.len(), 1);
+        assert!(pretty.problems[0].reason.contains("pretty"));
     }
 
     #[test]

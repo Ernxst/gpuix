@@ -5045,9 +5045,17 @@ a state override such as `hover`:
 
 **Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `fontVariantNumeric` (`"normal"` or a space-separated set of `lining-nums` | `oldstyle-nums`, `proportional-nums` | `tabular-nums`, `diagonal-fractions` | `stacked-fractions`, `ordinal`, `slashed-zero`; inherited), `textDecoration` (`"underline"` | `"line-through"` | `"none"`), `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`. A bare number or numeric string, such as `1.4` or `"1.4"`, multiplies the resolved font size, matching `lineHeight` in React DOM; `"20px"` is an absolute length.
 
-`textWrap` accepts `"wrap"` and `"nowrap"`. `"balance"` and `"pretty"` are
-recognized but explicitly rejected with a strict-style diagnostic because GPUI
-does not yet implement those wrapping algorithms.
+`textWrap` accepts `"wrap"`, `"nowrap"` and `"balance"`. Native `"balance"`
+balances paragraphs with up to six visible lines, following [Chromium's
+documented six-line limit](https://developer.chrome.com/docs/css-ui/css-text-wrap-balance/);
+WebKit documents no corresponding line limit in Safari
+([WebKit](https://webkit.org/blog/15383/webkit-features-in-safari-17-5/)).
+Explicit line breaks are balanced separately. The browser renderer maps it to
+CSS `text-wrap: balance` and follows the browser's own line limit. `lineClamp`
+limits the visible text before balancing; native adds an ellipsis after balancing and keeps it on the
+final clamped line. The browser renderer delegates the balance and ellipsis
+placement to CSS, where the visible clamped text is balanced before the
+ellipsis is applied. `"pretty"` is not supported.
 
 **Lists:** `listStyle` and `listStyleType` accept only `"none"`. Native `<ul>`, `<ol>` and `<li>` paint no marker, so `"none"` is the one value that matches what is drawn; `"disc"`, `"decimal"` and every other marker are rejected with a strict-style diagnostic until markers are implemented. `listStylePosition` and `listStyleImage` remain unsupported and are rejected the same way.
 
