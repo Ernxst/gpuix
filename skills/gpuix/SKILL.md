@@ -32,6 +32,8 @@ Select, Combobox, and Tooltip Positioners share anchor, side/alignment offset, c
 
 **Text lives in `<text>`.** `span`, `strong`, `a`, `p` and the other HTML tags are block boxes that stack vertically. For styled words inside a sentence, nest `<text>` in `<text>`; a `<text>` accepts only strings and `<text>`. Uncoloured text paints light grey `#e2e2e2`, which is invisible on light surfaces. `color`, `fontSize`, `fontFamily`, `fontWeight`, `whiteSpace`, `textTransform`, `fontVariantNumeric` and `userSelect` inherit from ancestors.
 
+**`<title>` sets the window title.** Render one string or number child; text updates are reflected immediately. The last mounted title wins, and unmounting it restores the earlier title. With no mounted title, GPU-IX restores the window option or the last `renderer.setWindowTitle()` value. An element or other child shape sets an empty title, matching React DOM. On the browser target it updates `document.title`; `suppressHydrationWarning` is accepted for shared router head output.
+
 **Style values are narrower than CSS.**
 - Spacing, insets, radii, font sizes and `flexBasis` are numbers in px. Among lengths, only `width`/`height`/`min*`/`max*` take strings (`%`, `vw`, `vh`, `ch`, `calc(a ± b)`, `clamp()`, intrinsic keywords).
 - A numeric `lineHeight` is a multiple of the font size, so `lineHeight: 20` is twenty lines tall; write `"20px"` for pixels.

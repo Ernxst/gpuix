@@ -27,6 +27,7 @@ import type {
   StyleDesc,
   TextInstance,
   VirtualListProps,
+  WindowTitleState,
 } from "../types/host.js"
 import {
   registerEventHandler,
@@ -95,7 +96,7 @@ import {
   DOCUMENT_POSITION_IMPLEMENTATION_SPECIFIC,
   DOCUMENT_POSITION_PRECEDING,
 } from "../dom-position.js"
-import { ownerDocument } from "../document.js"
+import { hasBrowserDocument, ownerDocument } from "../document.js"
 import { moveAnnouncerRegionsToRoot } from "../announce.js"
 
 let currentUpdatePriority = NoEventPriority
@@ -188,6 +189,98 @@ function stateFor(node: HostNode): HostNodeState {
 
 function containerFor(node: HostNode): Container {
   return stateFor(node).container
+}
+
+const windowTitlesByRenderer = new WeakMap<object, WindowTitleState>()
+
+function windowTitleState(container: Container): WindowTitleState {
+  if (container.windowTitles) return container.windowTitles
+  const renderer = container.native
+  let state = windowTitlesByRenderer.get(renderer)
+  if (!state) {
+    const original = renderer.setWindowTitle?.bind(renderer) ?? (() => {})
+    const baseTitle =
+      hasBrowserDocument()
+        ? document.title
+        : (renderer.getWindowTitle?.() ?? "GPUIX")
+    state = {
+      baseTitle,
+      entries: [],
+      originalSetWindowTitle: original,
+      setWindowTitle(title) {
+        state!.baseTitle = title
+        const current = state!.entries.at(-1)?.title
+        const next = current ?? title
+        state!.originalSetWindowTitle(next)
+        if (hasBrowserDocument()) document.title = next
+      },
+    }
+    windowTitlesByRenderer.set(renderer, state)
+    if (renderer.setWindowTitle) renderer.setWindowTitle = state.setWindowTitle
+  }
+  container.windowTitles = state
+  return state
+}
+
+function updateWindowTitle(container: Container, instance: Instance): void {
+  const state = windowTitleState(container)
+  const entry = state.entries.find((candidate) => candidate.instance === instance)
+  if (!entry) return
+  const children = stateFor(instance).children
+  entry.title =
+    children.length === 1 && !("type" in children[0]!)
+      ? (children[0] as TextInstance).text
+      : ""
+  const title = state.entries.at(-1)?.title ?? state.baseTitle
+  state.originalSetWindowTitle(title)
+  if (hasBrowserDocument()) document.title = title
+}
+
+function mountWindowTitle(instance: Instance, container: Container): void {
+  const state = windowTitleState(container)
+  if (state.entries.length === 0) {
+    state.baseTitle = hasBrowserDocument()
+      ? document.title
+      : (container.native.getWindowTitle?.() ?? state.baseTitle)
+  }
+  state.entries.push({ instance, title: "" })
+  updateWindowTitle(container, instance)
+}
+
+function unmountWindowTitle(instance: Instance, container: Container): void {
+  const state = container.windowTitles
+  if (!state) return
+  const index = state.entries.findIndex((candidate) => candidate.instance === instance)
+  if (index === -1) return
+  state.entries.splice(index, 1)
+  const title = state.entries.at(-1)?.title ?? state.baseTitle
+  state.originalSetWindowTitle(title)
+  if (hasBrowserDocument()) document.title = title
+}
+
+function isInsideTitle(node: HostNode): boolean {
+  let current = stateFor(node).parent
+  while (current) {
+    if (current.type === "title") return true
+    current = stateFor(current).parent
+  }
+  return false
+}
+
+function titleAncestor(node: HostNode): Instance | null {
+  let current = stateFor(node).parent
+  while (current) {
+    if (current.type === "title") return current
+    current = stateFor(current).parent
+  }
+  return null
+}
+
+function markTitleSubtreeMounted(node: HostNode): void {
+  stateFor(node).mounted = true
+  if ("type" in node) {
+    for (const child of stateFor(node).children) markTitleSubtreeMounted(child)
+  }
 }
 
 export function containerForPublicInstance(instance: PublicInstance): Container | undefined {
@@ -378,6 +471,9 @@ function ancestorChain(node: HostNode): HostNode[] {
 
 function markUnmounted(node: HostNode): void {
   const state = stateFor(node)
+  if ("type" in node && node.type === "title" && state.mounted) {
+    unmountWindowTitle(node, state.container)
+  }
   state.mounted = false
   if ("type" in node && node.type === "virtual-list") {
     virtualListsByContainer.get(state.container)?.delete(node)
@@ -2307,6 +2403,16 @@ function materialize(node: HostNode): HostNodeState {
   const state = stateFor(node)
   if (state.mounted) return state
 
+  if (isInsideTitle(node)) {
+    markTitleSubtreeMounted(node)
+    return state
+  }
+  if ("type" in node && node.type === "title") {
+    markTitleSubtreeMounted(node)
+    mountWindowTitle(node, state.container)
+    return state
+  }
+
   const renderer = state.container.renderer
   if ("type" in node) {
     state.container.eventTargets.set(node.id, node)
@@ -2341,6 +2447,7 @@ function materialize(node: HostNode): HostNodeState {
 
   for (const child of state.children) {
     materialize(child)
+    if ("type" in child && child.type === "title") continue
     renderer.appendChild(node.id, child.id)
   }
   return state
@@ -2403,7 +2510,7 @@ function setDirectContainerRoot(container: Container, child: Instance): void {
   child.parentId = null
   stateFor(child).parent = null
   materialize(child)
-  container.renderer.setRoot(child.id)
+  if (child.type !== "title") container.renderer.setRoot(child.id)
   container.bodyElement = child
   container.implicitRoot = null
   container.rootElementId = child.id
@@ -2423,6 +2530,7 @@ function placeInImplicitRoot(
     appendTrackedChild(root, state, child)
   }
   materialize(child)
+  if (child.type === "title") return
   if (beforeChild) {
     container.renderer.insertBefore(root.id, child.id, beforeChild.id)
   } else {
@@ -2454,6 +2562,10 @@ function promoteContainerRoot(
 }
 
 function placeInContainer(container: Container, child: Instance, beforeChild: Instance | null): void {
+  if (child.type === "title") {
+    materialize(child)
+    return
+  }
   const root = container.bodyElement
   if (!root) {
     setDirectContainerRoot(container, child)
@@ -2486,7 +2598,12 @@ export const hostConfig = {
     if ((type === "hr" || type === "input") && props.children != null) {
       throw new Error(`[gpuix] <${type}> is a void element and cannot contain children.`)
     }
-    if (hostContext?.isInsideText && type !== "text") {
+    if (
+      !hostContext?.isInsideTitle &&
+      hostContext?.isInsideText &&
+      type !== "text" &&
+      type !== "title"
+    ) {
       throw new InlineTextChildError(
         `GPUIX <text> can contain only strings and nested <text> elements; received <${type}>. ` +
           "Move block or custom content outside the flowing text node."
@@ -2501,11 +2618,13 @@ export const hostConfig = {
       parent: null,
     })
     publicInstanceContainers.set(instance, rootContainerInstance)
-    diagnoseUnsupportedStyleTransition(instance, rootContainerInstance, props)
-    diagnoseUnsupportedClassNameProp(instance, rootContainerInstance, props)
-    diagnoseUnsupportedAccessibilityRoleProp(instance, rootContainerInstance, props)
-    diagnoseUnsupportedAriaProp(instance, rootContainerInstance, props)
-    diagnoseVisuallyHiddenProp(instance, rootContainerInstance, props)
+    if (!hostContext?.isInsideTitle && type !== "title") {
+      diagnoseUnsupportedStyleTransition(instance, rootContainerInstance, props)
+      diagnoseUnsupportedClassNameProp(instance, rootContainerInstance, props)
+      diagnoseUnsupportedAccessibilityRoleProp(instance, rootContainerInstance, props)
+      diagnoseUnsupportedAriaProp(instance, rootContainerInstance, props)
+      diagnoseVisuallyHiddenProp(instance, rootContainerInstance, props)
+    }
     return instance
   },
 
@@ -2517,12 +2636,21 @@ export const hostConfig = {
     // resolving it first computes the role against no parent at all.
     appendTrackedChild(parent, parentState, child)
     materialize(child)
+    if (parent.type === "title" || isInsideTitle(parent)) {
+      updateWindowTitle(
+        parentState.container,
+        parent.type === "title" ? parent : titleAncestor(parent)!
+      )
+      return
+    }
     if (!("type" in child)) parentState.container.eventTargets.set(child.id, parent)
     scheduleVirtualListValidation(parent, parentState)
     if (parent.type !== "virtual-list") {
       scheduleZeroHeightChecksBelow(parent, parentState.container)
     }
-    parentState.container.renderer.appendChild(parent.id, child.id)
+    if (!("type" in child && child.type === "title")) {
+      parentState.container.renderer.appendChild(parent.id, child.id)
+    }
   },
 
   // React only calls this from the deletion path, never to move a node, so the
@@ -2533,11 +2661,20 @@ export const hostConfig = {
     const parentState = stateFor(parent)
     removeTrackedChild(parentState, child)
     markUnmounted(child)
+    if (parent.type === "title" || isInsideTitle(parent)) {
+      updateWindowTitle(
+        parentState.container,
+        parent.type === "title" ? parent : titleAncestor(parent)!
+      )
+      return
+    }
     scheduleVirtualListValidation(parent, parentState)
     if (parent.type !== "virtual-list") {
       scheduleZeroHeightChecksBelow(parent, parentState.container)
     }
-    const destroyed = parentState.container.renderer.destroyElement(child.id)
+    const destroyed = "type" in child && child.type === "title"
+      ? []
+      : parentState.container.renderer.destroyElement(child.id)
     for (const id of destroyed) {
       unregisterEventHandlers(parentState.container.eventHandlers, id)
       parentState.container.eventTargets.delete(id)
@@ -2557,12 +2694,21 @@ export const hostConfig = {
     // Attach before materializing, for the reason `appendChild` explains.
     insertTrackedChild(parent, parentState, child, beforeChild)
     materialize(child)
+    if (parent.type === "title" || isInsideTitle(parent)) {
+      updateWindowTitle(
+        parentState.container,
+        parent.type === "title" ? parent : titleAncestor(parent)!
+      )
+      return
+    }
     if (!("type" in child)) parentState.container.eventTargets.set(child.id, parent)
     scheduleVirtualListValidation(parent, parentState)
     if (parent.type !== "virtual-list") {
       scheduleZeroHeightChecksBelow(parent, parentState.container)
     }
-    parentState.container.renderer.insertBefore(parent.id, child.id, beforeChild.id)
+    if (!("type" in child && child.type === "title")) {
+      parentState.container.renderer.insertBefore(parent.id, child.id, beforeChild.id)
+    }
   },
 
   insertInContainerBefore(
@@ -2577,6 +2723,11 @@ export const hostConfig = {
     disposeRecordingContext2D(child)
     disposeWebGpuContext(child)
     const root = parent.bodyElement
+    if (child.type === "title") {
+      markUnmounted(child)
+      if (parent.implicitRoot) removeTrackedChild(stateFor(parent.implicitRoot), child)
+      return
+    }
     if (!root) return
 
     if (parent.implicitRoot) {
@@ -2637,7 +2788,7 @@ export const hostConfig = {
   },
 
   getRootHostContext(_rootContainerInstance: Container): HostContext {
-    return { isInsideText: false }
+    return { isInsideText: false, isInsideTitle: false }
   },
 
   getChildHostContext(
@@ -2646,7 +2797,8 @@ export const hostConfig = {
     _rootContainerInstance: Container
   ): HostContext {
     const isInsideText = type === "text"
-    return { ...parentHostContext, isInsideText }
+    const isInsideTitle = parentHostContext.isInsideTitle || type === "title"
+    return { ...parentHostContext, isInsideText, isInsideTitle }
   },
 
   shouldSetTextContent(_type: ElementType, _props: Props): boolean {
@@ -2704,6 +2856,10 @@ export const hostConfig = {
     newProps: Props,
     _internalInstanceHandle: unknown
   ): void {
+    if (instance.type === "title" || isInsideTitle(instance)) {
+      instance.props = newProps
+      return
+    }
     const container = containerFor(instance)
     const oldCanvasProps = oldProps as Props & { width?: number; height?: number }
     const newCanvasProps = newProps as Props & { width?: number; height?: number }
@@ -2767,8 +2923,13 @@ export const hostConfig = {
     _oldText: string,
     newText: string
   ): void {
-    rendererFor(textInstance).setText(textInstance.id, newText)
     textInstance.text = newText
+    const title = titleAncestor(textInstance)
+    if (title) {
+      updateWindowTitle(containerFor(textInstance), title)
+    } else {
+      rendererFor(textInstance).setText(textInstance.id, newText)
+    }
   },
 
   appendChildToContainer(container: Container, child: Instance): void {

@@ -3092,6 +3092,7 @@ pub struct GpuixRenderer {
     strict_styles: AtomicBool,
     style_diagnostics: Mutex<PendingStyleDiagnostics>,
     canvas_diagnostic_members: Mutex<HashSet<(u64, String)>>,
+    window_title: Mutex<String>,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     ui_commands: Mutex<Option<mpsc::UnboundedSender<UiCommand>>>,
     /// The window `init` opened hidden, to show on the first `tick`/`tickIdle`;
@@ -3284,6 +3285,7 @@ impl GpuixRenderer {
             strict_styles: AtomicBool::new(true),
             style_diagnostics: Mutex::new(PendingStyleDiagnostics::default()),
             canvas_diagnostic_members: Mutex::new(HashSet::new()),
+            window_title: Mutex::new("GPUIX".to_string()),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             ui_commands: Mutex::new(None),
             #[cfg(target_os = "windows")]
@@ -3294,6 +3296,11 @@ impl GpuixRenderer {
     /// Initialize GPUI using the native event-loop architecture for this OS.
     #[napi]
     pub fn init(&self, options: Option<WindowOptions>) -> Result<()> {
+        let initial_title = options
+            .as_ref()
+            .and_then(|options| options.title.clone())
+            .unwrap_or_else(|| "GPUIX".to_string());
+        *self.window_title.lock().unwrap() = initial_title;
         #[cfg(not(any(
             target_os = "macos",
             target_os = "windows",
@@ -5064,6 +5071,7 @@ impl GpuixRenderer {
 
     #[napi]
     pub fn set_window_title(&self, title: String) -> Result<()> {
+        *self.window_title.lock().unwrap() = title.clone();
         #[cfg(target_os = "macos")]
         return update_window(move |view, window, cx| {
             view.window_title = title;
@@ -5083,6 +5091,23 @@ impl GpuixRenderer {
         Err(Error::from_reason(
             "The production GPUIX renderer does not support this operating system",
         ))
+    }
+
+    #[napi]
+    pub fn get_window_title(&self) -> Result<String> {
+        #[cfg(target_os = "macos")]
+        return update_window(|view, _window, _cx| view.window_title.clone());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return Ok(self.window_title.lock().unwrap().clone());
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Ok(self.window_title.lock().unwrap().clone())
     }
 
     /// Move focus to an element. `preventScroll` mirrors the `FocusOptions`

@@ -791,6 +791,7 @@ export type SharedStyle = CSSProperties &
 
 // Element types supported by GPUIX
 export type ElementType =
+  | "title"
   | "div"
   | "text"
   | "main"
@@ -1276,6 +1277,8 @@ interface PropsBase extends AccessibilityProps {
 
   /** Author-defined identity preserved for shared DOM/native JSX and native diagnostics. */
   id?: string
+  /** React DOM compatibility for elements rendered before hydration. */
+  suppressHydrationWarning?: boolean
   /**
    * HTML `hidden`: `display: "none"` for this element unless its own style sets
    * `display`, as the user-agent rule is outranked by author styles.
@@ -1850,6 +1853,7 @@ export interface NativeRenderer {
   setWindowEventHandler?(handler: ((event: EventPayload) => void) | null): void
   getWindowInsets?(): NativeWindowInsets
   setWindowTitle?(title: string): void
+  getWindowTitle?(): string | null
   /** Minimize the native desktop window. */
   minimizeWindow?(): void
   /** Run the native desktop zoom or maximize operation. */
@@ -2001,6 +2005,8 @@ export interface Container {
   preventedKeyboardActivations: Map<number, string>
   /** Whether unprevented Tab and Shift+Tab use the native focus order. */
   tabNavigation?: boolean
+  /** Ordered document titles owned by this renderer, plus the title to restore. */
+  windowTitles?: WindowTitleState
   strictStyles: boolean
   /** The id last passed to `setRoot`. `announce()` attaches its regions beneath it. */
   rootElementId: number | null
@@ -2420,4 +2426,12 @@ export interface TextInstance {
 // Host context passed down the tree
 export interface HostContext {
   isInsideText: boolean
+  isInsideTitle: boolean
+}
+
+export interface WindowTitleState {
+  baseTitle: string
+  entries: Array<{ instance: Instance; title: string }>
+  setWindowTitle: (title: string) => void
+  originalSetWindowTitle: (title: string) => void
 }

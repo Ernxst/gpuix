@@ -34,6 +34,7 @@ export namespace JSX {
   type IntrinsicClassAttributes<T> = React.JSX.IntrinsicClassAttributes<T>
 
   interface IntrinsicElements {
+    title: Props
     div: Props
     text: Props
     main: Props
