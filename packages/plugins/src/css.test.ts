@@ -103,21 +103,25 @@ test("Vite imports CSS modules through package imports like relative imports", a
   )
   const source = path.join(fixture, "src/styles/card.module.css")
   await writeFile(source, ".card { display: block; }\n")
-  await writeFile(packageModule, ".card { display: grid; }\n")
   server.watcher.emit("change", realpathSync(source))
-  server.watcher.emit("change", realpathSync(packageModule))
-  const deadline = Date.now() + 3_000
   let updated: Record<string, unknown> | undefined
+  let deadline = Date.now() + 3_000
   while (Date.now() < deadline) {
     updated = (await server.ssrLoadModule("/entry.ts")).default as Record<string, unknown>
-    if (
-      JSON.stringify(updated.relative) === JSON.stringify({ display: "block" }) &&
-      JSON.stringify(updated.exported) === JSON.stringify({ display: "grid" })
-    ) break
+    if (JSON.stringify(updated.relative) === JSON.stringify({ display: "block" })) break
     await new Promise((resolve) => setTimeout(resolve, 30))
   }
   expect(updated?.relative).toEqual({ display: "block" })
   expect(updated?.aliased).toEqual(updated?.relative)
+
+  await writeFile(packageModule, ".card { display: grid; }\n")
+  server.watcher.emit("change", realpathSync(packageModule))
+  deadline = Date.now() + 3_000
+  while (Date.now() < deadline) {
+    updated = (await server.ssrLoadModule("/entry.ts")).default as Record<string, unknown>
+    if (JSON.stringify(updated.exported) === JSON.stringify({ display: "grid" })) break
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  }
   expect(updated?.exported).toEqual({ display: "grid" })
 })
 
