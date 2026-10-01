@@ -261,12 +261,37 @@ export type {
 } from "./components/combobox.js"
 export { Button, buttonProps } from "./components/button.js"
 export type { ButtonBehavior, ButtonState, HeadlessButtonProps } from "./components/button.js"
-export { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./components/tooltip.js"
+export {
+  TooltipRoot as Tooltip,
+  TooltipRoot,
+  TooltipPopup,
+  TooltipProvider,
+  TooltipTrigger,
+  TooltipPortal,
+  TooltipPositioner,
+  TooltipArrow,
+  TooltipViewport,
+  createTooltipHandle,
+} from "./components/tooltip.js"
 export type {
+  TooltipRootProps,
+  TooltipRootState,
+  TooltipRootActions,
+  TooltipChangeEventDetails,
+  TooltipChangeEventReason,
   TooltipPopupProps,
-  TooltipProps,
+  TooltipPopupState,
   TooltipProviderProps,
   TooltipTriggerProps,
+  TooltipTriggerState,
+  TooltipPortalProps,
+  TooltipPortalState,
+  TooltipPositionerProps,
+  TooltipArrowProps,
+  TooltipArrowState,
+  TooltipViewportProps,
+  TooltipViewportState,
+  TooltipHandle,
 } from "./components/tooltip.js"
 export {
   Dialog,

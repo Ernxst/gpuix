@@ -13,6 +13,6 @@
     },
     "noEmit": true
   },
-  "files": ["src/__tests__/exact-optional.types.ts", "type-tests/select-parity/select-parity.types.tsx"],
-  "include": ["src/__tests__/exact-optional.types.ts", "type-tests/select-parity/select-parity.types.tsx"]
+  "files": ["src/__tests__/exact-optional.types.ts", "type-tests/select-parity/select-parity.types.tsx", "type-tests/tooltip-parity/tooltip-parity.types.tsx"],
+  "include": ["src/__tests__/exact-optional.types.ts", "type-tests/select-parity/select-parity.types.tsx", "type-tests/tooltip-parity/tooltip-parity.types.tsx"]
 }

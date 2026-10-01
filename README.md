@@ -3797,22 +3797,28 @@ object:
 ```
 
 ```tsx
-<TooltipPrimitive.Provider delay={350}>
-  <TooltipPrimitive.Root>
-    <TooltipPrimitive.Trigger asChild>
-      <div tabIndex={0} style={{ padding: 8 }}>Copy</div>
-    </TooltipPrimitive.Trigger>
-    <TooltipPrimitive.Popup side="top" sideOffset={6}>
-      Copy message
-    </TooltipPrimitive.Popup>
-  </TooltipPrimitive.Root>
-</TooltipPrimitive.Provider>
+<TooltipPrimitive.Tooltip.Provider delay={350} closeDelay={80}>
+  <TooltipPrimitive.Tooltip.Root onOpenChange={(open, details) => console.log(open, details.reason)}>
+    <TooltipPrimitive.Tooltip.Trigger>Copy</TooltipPrimitive.Tooltip.Trigger>
+    <TooltipPrimitive.Tooltip.Portal>
+      <TooltipPrimitive.Tooltip.Positioner side="top" sideOffset={6}>
+        <TooltipPrimitive.Tooltip.Popup>
+          <TooltipPrimitive.Tooltip.Arrow />
+          Copy message
+        </TooltipPrimitive.Tooltip.Popup>
+      </TooltipPrimitive.Tooltip.Positioner>
+    </TooltipPrimitive.Tooltip.Portal>
+  </TooltipPrimitive.Tooltip.Root>
+</TooltipPrimitive.Tooltip.Provider>
 ```
 
 Combobox uses the native input for text editing, IME, clipboard, and focus.
-Tooltip `asChild` preserves the child ref and merges trigger behavior into that
-host element. All floating content uses GPUI's deferred `anchored()` layer,
-snaps inside the window, and occludes controls behind it.
+Tooltip parts accept `render`, state-based `className` and `style`, and expose
+Base UI state attributes. `Tooltip.Viewport` is optional unless animated
+content switches between triggers. The native Portal keeps children in the
+retained tree; its `container` prop does not select a destination. The shared
+floating Positioner uses GPUI's deferred `anchored()` layer, snaps inside the
+window, and occludes controls behind it.
 
 ### Overlay menus
 
