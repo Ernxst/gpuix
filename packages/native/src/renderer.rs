@@ -1979,8 +1979,11 @@ async fn run_ui_commands(
                 let origin = animation_frame_origin(&timestamp_origin, requested_timestamp_origin);
                 window.on_next_frame(move |_window, cx| {
                     let timestamp = animation_frame_timestamp_ms(origin, web_time::Instant::now());
-                    // Defer JS recovery until GPUI returns this window to the app.
-                    cx.defer(move |_| dispatch_animation_frame_callback(callback, timestamp));
+                    // on_next_frame runs inside handle.update, so enqueue JS until it returns.
+                    cx.spawn(async move |_cx| {
+                        dispatch_animation_frame_callback(callback, timestamp);
+                    })
+                    .detach();
                 });
             }),
             UiCommand::SetMenus { menus, response } => {
