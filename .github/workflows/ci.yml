@@ -217,12 +217,20 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Setup bun
         uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: false
+          rustflags: ""
 
       - name: Download macOS arm64 artifact
         uses: actions/download-artifact@v4
@@ -262,6 +270,64 @@ jobs:
       - name: Typecheck the example app
         run: bun run typecheck
         working-directory: example-app
+
+      - name: Test GPUI
+        run: cargo test -p gpui
+        working-directory: zed
+
+  test-linux:
+    name: test-linux
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && contains(inputs.targets, 'linux')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: false
+          rustflags: ""
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            gcc g++ clang \
+            libfontconfig-dev \
+            libwayland-dev \
+            libxkbcommon-x11-dev \
+            libx11-xcb-dev \
+            libssl-dev \
+            libzstd-dev \
+            libvulkan1 \
+            vulkan-validationlayers \
+            xvfb xauth
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Download Linux x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-x86_64-unknown-linux-gnu
+          path: packages/native/
+
+      - name: Run React tests
+        run: bun run test
+        working-directory: packages/react
+
+      - name: Run example tests
+        run: bun run test
+        working-directory: examples
+
+      - name: Test GPUI
+        run: xvfb-run -a cargo test -p gpui
+        working-directory: zed
 
   test-windows:
     name: test-windows
