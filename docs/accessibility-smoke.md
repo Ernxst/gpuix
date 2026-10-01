@@ -9,7 +9,7 @@ Start the shared fixture from the repository root:
 
 ```bash
 cd examples
-bun run accessibility
+bun --hot accessibility.tsx
 ```
 
 Keep the window open while running the check for that OS. A passing manual
@@ -79,7 +79,7 @@ type. Whether Narrator announces them correctly still needs this manual pass.
 
    ```bash
    cd examples
-   RUST_FONTCONFIG_DLOPEN=1 bun run accessibility
+   RUST_FONTCONFIG_DLOPEN=1 bun --hot accessibility.tsx
    ```
 
 2. Open Accerciser, select `GPUIX Accessibility Smoke`, and inspect the AT-SPI

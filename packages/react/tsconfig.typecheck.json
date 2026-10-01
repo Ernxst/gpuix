@@ -1,0 +1,19 @@
+{
+  // Every type-check program in this package. Each needs its own compiler
+  // options or module resolution, so they cannot share one program.
+  // `bun run typecheck` checks them all with `tsc --build --noEmit`.
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.json" },
+    { "path": "./tsconfig.test.json" },
+    { "path": "./tsconfig.exact-optional.json" },
+    { "path": "./tsconfig.webgpu-globals.json" },
+    { "path": "./tsconfig.webgpu-types.json" },
+    { "path": "./type-tests/select-parity/tsconfig.base-ui.json" },
+    { "path": "./type-tests/select-parity/tsconfig.gpuix.json" },
+    { "path": "./type-tests/combobox-parity/tsconfig.base-ui.json" },
+    { "path": "./type-tests/combobox-parity/tsconfig.gpuix.json" },
+    { "path": "./type-tests/webgpu/tsconfig.json" },
+    { "path": "./type-tests/webgpu/tsconfig.with-types.json" }
+  ]
+}

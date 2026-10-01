@@ -15,7 +15,10 @@
     },
     "skipLibCheck": true,
     "disableSourceOfProjectReferenceRedirect": true,
-    "noEmit": true
+    "noEmit": true,
+    // Nothing is emitted, but `tsc --build` writes its build info under
+    // `outDir`. Keep that out of the published `dist`.
+    "outDir": "./node_modules/.cache/typecheck"
   },
   "files": [
     "src/__tests__/exact-optional.types.ts",

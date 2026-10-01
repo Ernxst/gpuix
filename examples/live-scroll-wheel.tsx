@@ -1,7 +1,6 @@
 /**
- * Live-window scroll-wheel automation smoke target.
- *
- * Run its controller with `bun run live-scroll-wheel:smoke`.
+ * Live-window scroll-wheel automation target, driven by
+ * `live-scroll-wheel.test.ts`.
  */
 
 import React, { useState } from "react"

@@ -15,13 +15,14 @@ React/TypeScript renderers backed by GPUI, with native and browser targets. Matc
 
 Use Bun and the checked-in lockfile. In a new checkout, install with `bun install --frozen-lockfile` when dependencies are absent.
 
-- React build: `bun run build:react` from the repository root. Examples load `packages/react/dist`, so source-only test results do not establish that an example uses the change.
-- React tests: `bun run test` in `packages/react`; target the affected tests when appropriate.
-- Native build: `bun run build:native` from the repository root before running the React or examples tests. It uses Turbo's shared local task cache or builds with `test-support`, with Rust, Zed, toolchain, target, feature, and SDK inputs in the task hash. Release packing continues to use the direct native package build and does not restore a cached test-support binding. Restart the app after rebuilding; hot reload cannot replace a loaded native binary.
-- Browser build: `bun run web:wasm` from the repository root.
+- Build: `bun run build` from the repository root builds every package through Turbo in dependency order: native, then React, then plugins. For one package and what it depends on, run `bunx turbo run build --filter=@gpuix/react`. Turbo restores a cached build when the inputs are unchanged.
+- Tests: `bun run test` from the repository root, or `bunx turbo run test --filter=@gpuix/react` for one package. Turbo builds the package and its dependencies first, so tests never run against a stale `dist`. Examples load `packages/react/dist`, so source-only test results do not establish that an example uses the change.
+- Typecheck: `bun run typecheck` from the repository root. React's types depend on `packages/native/dist/index.d.ts`, which only the native build produces. React checks eleven programs, listed in `packages/react/tsconfig.typecheck.json`; add a new type-test config there.
+- Native build: `napi build` with `test-support`, written to `packages/native/dist`. The task hash covers the package, `rust-toolchain.toml` and `zed/`. Restart the app after rebuilding; hot reload cannot replace a loaded native binary.
+- Browser build: `bun scripts/web.ts --build-only` from the repository root.
 - Target directory: don't set `CARGO_TARGET_DIR` or pass `--target-dir`, including for one-off review builds. Cargo runs through mbx, which already gives each checkout its own target directory and deletes it when unused; a custom target directory bypasses mbx and is never cleaned up. Before the first native build in a new checkout, run `mkdir -p packages/native/target && mbx adopt packages/native`. Otherwise `napi build` creates `target/` as a plain directory before Cargo runs, and mbx stops the build in a terminal to ask whether to move it, which an unattended run cannot answer.
 
-The CI workflow is enabled. Pushes and pull requests build Linux and Windows and run the plugins tests. The macOS test job and `test-windows` run only on `workflow_dispatch`, so claims that tests pass on those platforms require a dispatched run on the PR head. Do not disable the workflow.
+The CI workflow is enabled. Pushes to `main` and pull requests build and test on macOS, Linux and Windows, and typecheck on Linux. A branch with no pull request gets a run only from `workflow_dispatch`. Do not disable the workflow.
 
 Verify the target changed: TypeScript checks do not compile Rust, and native checks do not validate the browser renderer. Consult the relevant package scripts or CI job for additional checks required by the change.
 

@@ -2,12 +2,6 @@
   "$schema": "./node_modules/turbo/schema.json",
   "cacheMaxSize": "5GB",
   "cacheMaxAge": "30d",
-  "globalDependencies": [
-    "zed/**"
-  ],
-  "futureFlags": {
-    "experimentalCargoWorkspaces": true,
-  },
   "tasks": {
     "dev": {
       "cache": false,

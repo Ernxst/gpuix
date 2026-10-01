@@ -4,19 +4,13 @@
 conformance harness, vendored byte-identical from
 `html/canvas/tools/yaml/` at web-platform-tests commit
 [`7413adf`](https://github.com/web-platform-tests/wpt/tree/7413adf41ac497181510ff906de6ba842bd21e48/html/canvas/tools/yaml).
-`scripts/convert-canvas-wpt.ts` pins the same SHA and stamps it into
-`generated/canvas-wpt.json`; re-vendoring means bumping both together. The files
-are third-party source under the W3C web-platform-tests BSD-3 license; see
-`THIRD_PARTY_NOTICES.md`.
+`generated/canvas-wpt.json` is the case table converted from that YAML and
+records the same SHA. The converter is `scripts/convert-canvas-wpt.ts` at gpuix
+commit `4d6ff429a4`; re-vendoring means restoring it and bumping both together.
+The files are third-party source under the W3C web-platform-tests BSD-3 license;
+see `THIRD_PARTY_NOTICES.md`.
 
-The harness never downloads tests. Regenerate the committed case table after
-updating the YAML:
-
-```sh
-bun scripts/convert-canvas-wpt.ts
-```
-
-Run it on the recording context and native retained-canvas renderer:
+The harness never downloads tests. Run it on the recording context and native retained-canvas renderer:
 
 ```sh
 bun run canvas:wpt

@@ -1,10 +1,28 @@
+/**
+ * Frame pacing on a live window: under calibrated JS work, both the forced
+ * timer and the native display link keep presenting, the pump's tick p95 stays
+ * under one refresh period, and the display link holds 90% of the refresh rate.
+ *
+ * Measures wall-clock timing, so it runs with the perf tests. Skips when the
+ * window is occluded, since an occluded window receives no frame callbacks.
+ */
+
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+import { describe, expect, it } from "vitest"
 import { launch } from "@gpuix/react/automation"
+import { isNativeTestRendererAvailable } from "@gpuix/react/testing"
 import {
   calibrateFramePacingWork,
   isPacingProgressing,
   isPumpCadenceBounded,
   meetsRefreshRatio,
 } from "./frame-pacing-calibration"
+
+const CWD = path.dirname(fileURLToPath(import.meta.url))
+
+const describeLive =
+  process.platform === "darwin" && isNativeTestRendererAvailable() ? describe : describe.skip
 
 const sampleCount = 60
 const sampleIntervalMs = 1_000 / 60
@@ -93,6 +111,7 @@ async function calibrateTimerTick(): Promise<TickCalibrationResult | null> {
   const app = await launch({
     command: "bun",
     args: ["frame-pacing.tsx"],
+    cwd: CWD,
     env: {
       PACE_FORCE_TIMER: "1",
       PACE_CALIBRATE_TIMER: "1",
@@ -125,6 +144,7 @@ async function measure(forceTimer: boolean, workMs: number): Promise<PacingResul
   const app = await launch({
     command: "bun",
     args: ["frame-pacing.tsx"],
+    cwd: CWD,
     env: {
       PACE_FORCE_TIMER: forceTimer ? "1" : "0",
       PACE_WORK_MS: workMs.toString(),
@@ -178,57 +198,51 @@ function report(result: PacingResult): void {
   )
 }
 
-const timerCalibration = await calibrateTimerTick()
-if (!timerCalibration) {
-  console.log("SKIP frame pacing: window occluded — cannot measure")
-  process.exit(0)
-}
-const calibration = calibrateFramePacingWork(
-  sampleIntervalMs,
-  timerCalibration.tickP50Ms,
-  calibrationMarginMs,
-  targetWorkMs
-)
-console.log(
-  `frame pacing calibration: tick p50 ${calibration.tickP50Ms.toFixed(2)}ms (${timerCalibration.ticks} timer ticks), refresh ${refreshHz.toFixed(1)}Hz / ${calibration.refreshPeriodMs.toFixed(2)}ms, calibrated JS work ${calibration.workMs.toFixed(2)}ms (${calibration.targetWorkMs.toFixed(1)}ms target, ${calibration.deadlineMarginMs.toFixed(1)}ms deadline margin)`
-)
+const OCCLUDED = "window occluded, cannot measure frame pacing"
 
-await new Promise((resolve) => setTimeout(resolve, 1_000))
-const timer = await measure(true, calibration.workMs)
-if (!timer) {
-  console.log("SKIP frame pacing: window occluded — cannot measure")
-  process.exit(0)
-}
-report(timer)
-await new Promise((resolve) => setTimeout(resolve, 1_000))
-const displayLink = await measure(false, calibration.workMs)
-if (!displayLink) {
-  console.log("SKIP frame pacing: window occluded — cannot measure")
-  process.exit(0)
-}
-report(displayLink)
+describeLive("live window frame pacing", () => {
+  it("keeps the timer and the display link presenting under calibrated work", async ({ skip }) => {
+    const timerCalibration = await calibrateTimerTick()
+    if (!timerCalibration) return skip(OCCLUDED)
 
-if (displayLink.frameSource !== "display-link") {
-  throw new Error(`Expected the native display-link source, received ${displayLink.frameSource}`)
-}
-if (timer.frameSource !== "timer") {
-  throw new Error(`Expected the forced timer source, received ${timer.frameSource}`)
-}
-for (const result of [timer, displayLink]) {
-  if (!isPacingProgressing(result.presents, result.ticks, result.hz)) {
-    throw new Error(
-      `Expected ${result.frameSource} pacing to keep progressing, received ${result.presents} presents, ${result.ticks} ticks, and ${result.hz.toFixed(1)} Hz`
+    const calibration = calibrateFramePacingWork(
+      sampleIntervalMs,
+      timerCalibration.tickP50Ms,
+      calibrationMarginMs,
+      targetWorkMs
     )
-  }
-  if (!isPumpCadenceBounded(result.tickP95Ms, sampleIntervalMs)) {
-    throw new Error(
-      `Expected ${result.frameSource} tick p95 below one refresh period (${sampleIntervalMs.toFixed(2)}ms), received ${result.tickP95Ms.toFixed(2)}ms`
+    console.log(
+      `frame pacing calibration: tick p50 ${calibration.tickP50Ms.toFixed(2)}ms (${timerCalibration.ticks} timer ticks), refresh ${refreshHz.toFixed(1)}Hz / ${calibration.refreshPeriodMs.toFixed(2)}ms, calibrated JS work ${calibration.workMs.toFixed(2)}ms (${calibration.targetWorkMs.toFixed(1)}ms target, ${calibration.deadlineMarginMs.toFixed(1)}ms deadline margin)`
     )
-  }
-}
-const minimumDisplayHz = refreshHz * minimumDisplayRefreshRatio
-if (!meetsRefreshRatio(displayLink.hz, refreshHz, minimumDisplayRefreshRatio)) {
-  throw new Error(
-    `Expected display-link pacing at or above ${(minimumDisplayRefreshRatio * 100).toFixed(0)}% of refresh (${minimumDisplayHz.toFixed(1)} Hz), received ${displayLink.hz.toFixed(1)} Hz`
-  )
-}
+
+    await new Promise((resolve) => setTimeout(resolve, 1_000))
+    const timer = await measure(true, calibration.workMs)
+    if (!timer) return skip(OCCLUDED)
+    report(timer)
+
+    await new Promise((resolve) => setTimeout(resolve, 1_000))
+    const displayLink = await measure(false, calibration.workMs)
+    if (!displayLink) return skip(OCCLUDED)
+    report(displayLink)
+
+    expect(displayLink.frameSource).toBe("display-link")
+    expect(timer.frameSource).toBe("timer")
+
+    for (const result of [timer, displayLink]) {
+      expect(
+        isPacingProgressing(result.presents, result.ticks, result.hz),
+        `${result.frameSource} pacing stalled at ${result.presents} presents, ${result.ticks} ticks and ${result.hz.toFixed(1)} Hz`
+      ).toBe(true)
+      expect(
+        isPumpCadenceBounded(result.tickP95Ms, sampleIntervalMs),
+        `${result.frameSource} tick p95 ${result.tickP95Ms.toFixed(2)}ms is not below one refresh period (${sampleIntervalMs.toFixed(2)}ms)`
+      ).toBe(true)
+    }
+
+    const minimumDisplayHz = refreshHz * minimumDisplayRefreshRatio
+    expect(
+      meetsRefreshRatio(displayLink.hz, refreshHz, minimumDisplayRefreshRatio),
+      `display-link pacing ${displayLink.hz.toFixed(1)} Hz is below ${(minimumDisplayRefreshRatio * 100).toFixed(0)}% of refresh (${minimumDisplayHz.toFixed(1)} Hz)`
+    ).toBe(true)
+  }, 120_000)
+})

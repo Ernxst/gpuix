@@ -957,7 +957,7 @@ Run the two-canvas animated indexed-geometry fixture with:
 
 ```sh
 cd examples
-bun run native-webgpu
+bun --hot native-webgpu.tsx
 ```
 
 ### Canvas image residency
@@ -5544,12 +5544,12 @@ realistically when measuring #58. This is functional automation and paced
 testing, not passive physical-input capture. GPUI has no separate momentum
 phase, so paced momentum samples are injected as `moved` events.
 
-The repository includes a real-window smoke target that sends a phased pixel
+The repository includes a real-window test that sends a phased pixel
 and line-delta sequence, then checks both the scroll event and scroll offset:
 
 ```bash
 cd examples
-bun run live-scroll-wheel:smoke
+bunx vitest run live-scroll-wheel.test.ts
 ```
 
 The window may briefly appear while the controller sends the gesture. The command
@@ -6930,12 +6930,8 @@ bun scripts/screenshots.ts
 ```
 
 Canvas equivalence uses committed Chromium goldens at a fixed 320×240 logical
-size and 2× device-pixel ratio. Playwright is needed only to regenerate them;
-the Vitest comparison path uses the native PNG decoder and does not load it.
-
-```bash
-bun run canvas:goldens
-```
+size and 2× device-pixel ratio. The Vitest comparison path uses the native PNG
+decoder and needs no browser.
 
 The equivalence suite is a local-macOS gate. Push CI is Linux-only and GPU
 capture is not treated as reliable in virtual machines.
