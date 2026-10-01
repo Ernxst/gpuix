@@ -566,6 +566,104 @@ describeNative("floating controls", () => {
     expect(testRoot.renderer.getAllText()).toContain("Selected: none")
   })
 
+  it("filters, navigates, selects, and clears grouped generic items with Base UI state", () => {
+    const groups = [
+      { label: "Frameworks", items: [{ id: "astro", label: "Astro" }, { id: "svelte", label: "Svelte" }] },
+      { label: "Tools", items: [{ id: "solid", label: "Solid" }] },
+    ]
+    const items = Combobox.createItems(groups, { getValue: (item) => item.id, getLabel: (item) => item.label })
+
+    function Demo() {
+      const [value, setValue] = useState<string | null>(null)
+      return (
+        <div style={{ width: 400, height: 300, padding: 12 }}>
+          <ComboboxPrimitive.Root items={items} limit={2} value={value} onValueChange={(next, details) => {
+            expect(["item-press", "clear-press"]).toContain(details.reason)
+            setValue(next)
+          }} onItemHighlighted={(next, details) => {
+            if (next !== undefined) {
+              expect(details.reason).toBe("keyboard")
+              expect([0, 1]).toContain(details.index)
+            }
+          }}>
+            <ComboboxPrimitive.InputGroup>
+              <ComboboxPrimitive.Label>Framework</ComboboxPrimitive.Label>
+              <ComboboxPrimitive.Input placeholder="Choose a framework" style={triggerStyle} />
+              <ComboboxPrimitive.Trigger aria-label="Toggle frameworks">
+                <ComboboxPrimitive.Value placeholder="Choose" />
+              </ComboboxPrimitive.Trigger>
+              <ComboboxPrimitive.Icon />
+              <ComboboxPrimitive.Clear data-testid="clear">Clear</ComboboxPrimitive.Clear>
+              <ComboboxPrimitive.Chips>
+                <ComboboxPrimitive.Chip>
+                  <ComboboxPrimitive.ChipRemove aria-label="Remove framework">Remove</ComboboxPrimitive.ChipRemove>
+                </ComboboxPrimitive.Chip>
+              </ComboboxPrimitive.Chips>
+            </ComboboxPrimitive.InputGroup>
+            <ComboboxPrimitive.Portal>
+              <ComboboxPrimitive.Backdrop />
+              <ComboboxPrimitive.Positioner>
+                <ComboboxPrimitive.Popup style={contentStyle}>
+                  <ComboboxPrimitive.Status />
+                  <ComboboxPrimitive.Empty>No matches</ComboboxPrimitive.Empty>
+                  <ComboboxPrimitive.List>
+                    {groups.map((group) => <ComboboxPrimitive.Group key={group.label} items={group.items}>
+                      <ComboboxPrimitive.GroupLabel>{group.label}</ComboboxPrimitive.GroupLabel>
+                      <ComboboxPrimitive.Collection>
+                        {(item, index) => (
+                          <ComboboxPrimitive.Item key={item.id} value={item} index={index} data-testid={`item-${item.id}`} style={itemStyle}>
+                            {item.label}<ComboboxPrimitive.ItemIndicator>Selected</ComboboxPrimitive.ItemIndicator>
+                          </ComboboxPrimitive.Item>
+                        )}
+                      </ComboboxPrimitive.Collection>
+                    </ComboboxPrimitive.Group>)}
+                    <ComboboxPrimitive.Row />
+                    <ComboboxPrimitive.Separator />
+                    <ComboboxPrimitive.Arrow />
+                  </ComboboxPrimitive.List>
+                </ComboboxPrimitive.Popup>
+              </ComboboxPrimitive.Positioner>
+            </ComboboxPrimitive.Portal>
+          </ComboboxPrimitive.Root>
+          <text>{`Selected: ${value ?? "none"}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    const input = testRoot.renderer.findByType("input")[0]!
+    expect(input.semantics?.role).toBe("combobox")
+    expect(input.customProps?.ariaHasPopup).toBe("listbox")
+    expect(input.customProps?.ariaAutoComplete).toBe("list")
+    expect(input.customProps?.ariaLabelledBy).toBeTruthy()
+    expect(input.customProps?.ariaExpanded).toBe(false)
+    testRoot.renderer.nativeSimulateClick(30, 25)
+    expect(testRoot.renderer.findByType("input")[0]?.customProps?.ariaExpanded).toBe(true)
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "s")
+    expect(testRoot.renderer.getAllText()).toContain("Svelte")
+    expect(testRoot.renderer.getAllText()).toContain("Solid")
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "down")
+    const firstActive = testRoot.renderer.findByType("input")[0]?.customProps?.ariaActiveDescendant
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "down")
+    const secondActive = testRoot.renderer.findByType("input")[0]?.customProps?.ariaActiveDescendant
+    expect(secondActive).not.toBe(firstActive)
+    expect(secondActive).toContain("item-1")
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "enter")
+    expect(testRoot.renderer.getAllText()).toContain("Selected: solid")
+    const inputBounds = input.getBoundingClientRect()
+    testRoot.renderer.nativeSimulateClick(inputBounds.x + inputBounds.width / 2, inputBounds.y + inputBounds.height / 2)
+    expect(testRoot.renderer.getAllText()).toContain("Selected")
+    const selectedItem = testRoot.renderer.findByTestId("item-solid")!
+    expect(selectedItem.customProps?.ariaSelected).toBe(true)
+    expect(selectedItem.customProps?.["data-selected"]).toBe("")
+    expect(selectedItem.semantics?.role).toBe("option")
+
+    const clear = testRoot.renderer.findByTestId("clear")!
+    const bounds = clear.getBoundingClientRect()
+    testRoot.renderer.nativeSimulateClick(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+    expect(testRoot.renderer.getAllText()).toContain("Selected: none")
+  })
+
   it("lets a Combobox consumer cancel Escape dismissal", () => {
     testRoot.render(
       <div style={{ width: 400, height: 240, padding: 12 }}>
@@ -586,6 +684,136 @@ describeNative("floating controls", () => {
     testRoot.renderer.nativeSimulateKeyDown(input.id, "escape")
 
     expect(testRoot.renderer.getAllText()).toContain("Alpha")
+  })
+
+  it("removes the value belonging to the pressed multi-select chip", () => {
+    function Demo() {
+      const [value, setValue] = useState(["alpha", "beta"])
+      return <div style={{ width: 400, height: 120, padding: 12 }}>
+        <Combobox.Root multiple value={value} onValueChange={(next) => setValue(next as string[])}>
+          <Combobox.Chips>{value.map((item) => <Combobox.Chip key={item}>
+            {item}<Combobox.ChipRemove data-testid={`remove-${item}`} aria-label={`Remove ${item}`}>×</Combobox.ChipRemove>
+          </Combobox.Chip>)}</Combobox.Chips>
+          <Combobox.Input style={triggerStyle} />
+        </Combobox.Root>
+        <text>{value.join(",")}</text>
+      </div>
+    }
+
+    testRoot.render(<Demo />)
+    const removeAlpha = testRoot.renderer.findByTestId("remove-alpha")!
+    const bounds = removeAlpha.getBoundingClientRect()
+    testRoot.renderer.nativeSimulateClick(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+    expect(testRoot.renderer.getAllText()).toContain("beta")
+    expect(testRoot.renderer.getAllText()).not.toContain("alpha")
+  })
+
+  it("stops item selection when the value callback cancels it", () => {
+    const inputChanges: string[] = []
+    testRoot.render(<div style={{ width: 400, height: 200, padding: 12 }}>
+      <Combobox.Root items={["Alpha"]} value={null}
+        onValueChange={(_value, details) => details.cancel()}
+        onInputValueChange={(_value, details) => inputChanges.push(details.reason)}>
+        <Combobox.Input style={triggerStyle} />
+        <Combobox.Popup><Combobox.List>{(item) => <Combobox.Item key={item} value={item}>{item}</Combobox.Item>}</Combobox.List></Combobox.Popup>
+      </Combobox.Root>
+    </div>)
+    const input = testRoot.renderer.findByType("input")[0]!
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "down enter")
+    expect(testRoot.renderer.findByType("input")[0]?.customProps?.ariaExpanded).toBe(true)
+    expect(inputChanges).not.toContain("item-press")
+  })
+
+  it("closes after a single-select value is accepted even when its input update is cancelled", () => {
+    const inputChanges: Array<{ reason: string; isItemPress?: boolean }> = []
+    const valueChanges: string[] = []
+    testRoot.render(<div style={{ width: 400, height: 200, padding: 12 }}>
+      <Combobox.Root items={["Alpha"]} onValueChange={(value) => valueChanges.push(value as string)}
+        onInputValueChange={(_value, details) => {
+          inputChanges.push(details)
+          if (details.reason === "item-press") details.cancel()
+        }}>
+        <Combobox.Input style={triggerStyle} />
+        <Combobox.Popup><Combobox.List>{(item) => <Combobox.Item key={item} value={item}>{item}</Combobox.Item>}</Combobox.List></Combobox.Popup>
+      </Combobox.Root>
+    </div>)
+    const input = testRoot.renderer.findByType("input")[0]!
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "down enter")
+    expect(valueChanges).toEqual(["Alpha"])
+    expect(testRoot.renderer.findByType("input")[0]?.customProps?.ariaExpanded).toBe(false)
+    expect(inputChanges).toContainEqual(expect.objectContaining({ reason: "item-press", isItemPress: undefined }))
+  })
+
+  it("reports item-press details when multiple selection clears the filter", () => {
+    const changes: Array<{ reason: string; isItemPress?: boolean }> = []
+    testRoot.render(<div style={{ width: 400, height: 200, padding: 12 }}>
+      <Combobox.Root items={["Alpha"]} multiple onInputValueChange={(_value, details) => changes.push(details)}>
+        <Combobox.Input style={triggerStyle} />
+        <Combobox.Popup><Combobox.List>{(item) => <Combobox.Item key={item} value={item}>{item}</Combobox.Item>}</Combobox.List></Combobox.Popup>
+      </Combobox.Root>
+    </div>)
+    const input = testRoot.renderer.findByType("input")[0]!
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "a down enter")
+    expect(changes).toContainEqual(expect.objectContaining({ reason: "input-clear", isItemPress: true }))
+  })
+
+  it("does not point an aria-labelled input at a missing Combobox.Label", () => {
+    testRoot.render(<Combobox.Root items={[]}>
+      <Combobox.Input aria-label="Search frameworks" />
+    </Combobox.Root>)
+    const input = testRoot.renderer.findByType("input")[0]!
+    expect(input.customProps?.ariaLabelledBy).toBeUndefined()
+    expect(input.customProps?.ariaLabel).toBe("Search frameworks")
+  })
+
+  it("keeps the generated label id when a runtime id override is supplied", () => {
+    testRoot.render(<Combobox.Root items={[]}>
+      <Combobox.Label {...({ id: "custom-label" } as {})}>Framework</Combobox.Label>
+      <Combobox.Input style={triggerStyle} />
+    </Combobox.Root>)
+    const input = testRoot.renderer.findByType("input")[0]!
+    expect(input.customProps?.ariaLabelledBy).toBeTruthy()
+    expect(input.customProps?.ariaLabelledBy).not.toBe("custom-label")
+  })
+
+  it("submits an empty value for a named single-select with no selection", () => {
+    const submitted: Array<Array<[string, string]>> = []
+    testRoot.render(<form style={{ width: 400, height: 160, padding: 12 }} onSubmit={(event) => {
+      event.preventDefault()
+      submitted.push([...event.formData.entries()].map(([name, value]) => [name, String(value)]))
+    }}>
+      <Combobox.Root items={["Alpha"]} name="framework">
+        <Combobox.Input style={triggerStyle} />
+      </Combobox.Root>
+      <button style={{ width: 80, height: 32 }}>Submit</button>
+    </form>)
+    const button = testRoot.getByRole("button", { name: "Submit" })
+    const bounds = button.getBoundingClientRect()
+    testRoot.renderer.nativeSimulateClick(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+    expect(submitted).toEqual([[ ["framework", ""] ]])
+  })
+
+  it("omits selected values from disabled single- and multiple-select fields", () => {
+    const submitted: Array<Array<[string, string]>> = []
+    testRoot.render(<form style={{ width: 400, height: 220, padding: 12 }} onSubmit={(event) => {
+      event.preventDefault()
+      submitted.push([...event.formData.entries()].map(([name, value]) => [name, String(value)]))
+    }}>
+      <Combobox.Root items={["Alpha"]} name="disabled-single" value="Alpha" disabled>
+        <Combobox.Input style={triggerStyle} />
+      </Combobox.Root>
+      <Combobox.Root items={["Beta"]} name="disabled-multiple" value={["Beta"]} multiple disabled>
+        <Combobox.Input style={triggerStyle} />
+      </Combobox.Root>
+      <Combobox.Root items={["Gamma"]} name="enabled" value="Gamma">
+        <Combobox.Input style={triggerStyle} />
+      </Combobox.Root>
+      <button style={{ width: 80, height: 32 }}>Submit</button>
+    </form>)
+    const button = testRoot.getByRole("button", { name: "Submit" })
+    const bounds = button.getBoundingClientRect()
+    testRoot.renderer.nativeSimulateClick(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+    expect(submitted).toEqual([[ ["enabled", "Gamma"] ]])
   })
 
   it("closes a Combobox when its input loses focus", () => {
