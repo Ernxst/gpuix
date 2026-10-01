@@ -5,6 +5,40 @@ import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 describeNative("zIndex stacking", () => {
+  it("routes pointer input through ordinary nested table content with no zIndex", () => {
+    const { render, renderer } = createTestRoot({ width: 160, height: 120, strictStyles: true })
+    const itemHover = vi.fn()
+    const producerHover = vi.fn()
+
+    render(
+      <main style={{ width: 160, height: 120 }}>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {Array.from({ length: 4 }, (_, index) => (
+            <section key={index} style={{ display: "flex", flexDirection: "column" }}>
+              <div role="row" style={{ height: 20 }}>
+                <button onMouseMove={itemHover} style={{ width: 160, height: 20 }}>
+                  Item {index}
+                </button>
+              </div>
+              <div role="row" style={{ height: 20 }}>
+                <a onMouseMove={producerHover} style={{ width: 160, height: 20 }}>
+                  Producer {index}
+                </a>
+              </div>
+            </section>
+          ))}
+        </div>
+      </main>
+    )
+
+    renderer.nativeSimulateMouseMove(40, 10)
+    renderer.nativeSimulateMouseMove(40, 30)
+
+    expect(itemHover).toHaveBeenCalled()
+    expect(producerHover).toHaveBeenCalled()
+    expect(renderer.drainStyleDiagnostics()).toEqual([])
+  })
+
   it("routes pointer input through a root-sized overlay to its child or the page", () => {
     const { render, renderer } = createTestRoot({ width: 160, height: 120, strictStyles: true })
     const pageClick = vi.fn()
