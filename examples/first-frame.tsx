@@ -28,6 +28,7 @@ import {
 } from '@gpuix/react'
 
 const focus = process.env.FIRST_FRAME_FOCUS !== '0'
+const show = process.env.FIRST_FRAME_SHOW !== '0'
 const animate = process.env.FIRST_FRAME_RAF === '1'
 const activate = process.env.FIRST_FRAME_ACTIVATE === '1'
 
@@ -62,7 +63,7 @@ function App() {
 }
 
 const renderer = createRenderer()
-renderer.init({ title: 'GPUIX first frame', width: 320, height: 200, focus })
+renderer.init({ title: 'GPUIX first frame', width: 320, height: 200, focus, show })
 // The capture needs the window, so it starts after `init`; the window stays
 // hidden until the first pump or an `activateWindow()` during the commit.
 renderer.startPresentTimingCapture()
@@ -73,8 +74,9 @@ const presents = renderer.takePresentTimestamps().length
 const loop = startFrameLoop(renderer)
 setTimeout(() => {
   const menus = renderer.testHasApplicationMenus()
+  const active = renderer.isActive()
   loop.stop()
-  console.log(`FIRST_FRAME ${JSON.stringify({ presents, menus })}`)
+  console.log(`FIRST_FRAME ${JSON.stringify({ presents, menus, active })}`)
   renderer.quit()
   process.exit(0)
 }, 500)

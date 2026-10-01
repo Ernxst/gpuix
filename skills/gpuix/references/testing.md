@@ -36,6 +36,7 @@ Tests render into a real native window placed offscreen, through Metal on macOS 
 - **Unpainted elements throw.** `getBoundingClientRect()` and every `userEvent` pointer helper throw on an element that painted nothing, such as a culled row. Neither returns zeros.
 - **`userEvent.keyboard(element, keys)` takes GPUI keystroke syntax**: space-separated, `"cmd-enter"`, `"shift-tab"`. user-event's `{Shift>}` syntax is not accepted.
 - **Goldens are exact and have no platform suffix by default.** A macOS golden fails on Windows. Add the platform with `configureScreenshots({ resolveScreenshotPath })`.
+- **Native test activation can be disabled.** Set `GPU-IX_TEST_DISABLE_WINDOW_ACTIVATION=1` in the native app's environment to skip explicit process and window activation. On macOS, test windows are shown behind other windows; on Windows, hidden windows are shown without activating them. On Wayland, the flag prevents GPU-IX from consuming a startup activation token, though the compositor may still focus a mapped window. The variable is unset by default, so app activation is unchanged. The sibling-window ordering regression test is the exception: it checks foreground stacking and runs only in CI or with `GPUIX_WINDOW_ORDER_TEST=1`.
 - **Keep test trees small.** Render and Tab cost grow with the tree: at 250 rows about 65 ms per render and 118 ms per Tab, against 1–2 ms for a small tree (#663).
 
 ## Entry points and setup

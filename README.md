@@ -5513,7 +5513,9 @@ prints `live scroll-wheel automation passed` on success.
 Every live-app check must set `GPUIX_BACKGROUND=1`, and the app entry must map
 that flag to `focus: false`. On macOS and Windows, automation uses the real
 window input and paint pipelines without making the window active, so taking
-the user's keyboard has no test benefit. Linux currently ignores `focus`.
+the user's keyboard has no test benefit. On Linux, `focus: false` prevents
+Wayland startup activation, but the window manager may still focus a mapped
+window.
 
 `fill()` and `press()` dispatch through the live GPUI window input pipeline, so
 native `<input>` and `<textarea>` elements receive GPUI's keyboard and IME
@@ -5731,6 +5733,15 @@ enough.
 | macOS | Metal | Yes |
 | Windows | DirectX | Yes |
 | Linux | Not yet | Waiting for GPUI's wgpu headless renderer |
+
+Some integration tests launch a real native app instead of using
+`TestGpuixRenderer`. Set `GPU-IX_TEST_DISABLE_WINDOW_ACTIVATION=1` in that
+app's environment to keep its windows from activating the process. On macOS,
+those windows are shown behind other windows; on Windows, hidden windows are
+shown without activation. On Wayland, the variable prevents GPU-IX from
+consuming a startup activation token, though the compositor may still focus a
+mapped window. The variable is unset by default, so normal app behaviour is
+unchanged.
 
 ### Consuming an unpublished checkout
 

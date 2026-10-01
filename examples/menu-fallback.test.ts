@@ -20,6 +20,10 @@ const BLOCKER_READY = 'MENU_FALLBACK_BLOCKER ready'
 // init() creates the native window and may spend variable time in AppKit.
 // The fallback's timing budget starts once that setup has returned.
 const FALLBACK_BOUND_MS = 500
+const TEST_ENV = {
+  ...process.env,
+  'GPU-IX_TEST_DISABLE_WINDOW_ACTIVATION': '1',
+}
 
 const describeLive =
   process.platform === 'darwin' && isNativeTestRendererAvailable() ? describe : describe.skip
@@ -76,7 +80,7 @@ async function runMenuFallback(env: Record<string, string>): Promise<{
 }> {
   const child = spawn('bun', ['menu-fallback.tsx'], {
     cwd: CWD,
-    env: { ...process.env, ...env },
+    env: { ...TEST_ENV, ...env },
   })
   let stderr = ''
   child.stderr.on('data', (chunk: Buffer) => {
@@ -109,7 +113,7 @@ describeLive('default menus for a window that presents no frames', () => {
   }, 30_000)
 
   it('installs the default menus and honors Cmd+Q for a window opened fully covered', async () => {
-    blocker = spawn('bun', ['menu-fallback-blocker.tsx'], { cwd: CWD })
+    blocker = spawn('bun', ['menu-fallback-blocker.tsx'], { cwd: CWD, env: TEST_ENV })
     await waitForLine(blocker, (line) => line.startsWith(BLOCKER_READY), 'blocker window ready')
 
     const { result, exitCode } = await runMenuFallback({ MENU_FALLBACK_FOCUS: '0' })

@@ -1508,6 +1508,8 @@ fn show_window_with_current_frame(ns_view: id, ns_window: id, activate: bool) {
         }
         if activate {
             let _: () = msg_send![ns_window, makeKeyAndOrderFront: nil];
+        } else if test_window_activation_disabled() {
+            let _: () = msg_send![ns_window, orderBack: nil];
         } else {
             let _: () = msg_send![ns_window, orderFront: nil];
         }
@@ -2006,11 +2008,30 @@ async fn run_ui_commands(
                 response.send(()).ok();
                 Ok(())
             }
-            UiCommand::ActivateWindow => window.update(cx, |_view, window, cx| {
-                cx.activate(true);
-                window.activate_window();
-                order_window_front_regardless(window);
-            }),
+            UiCommand::ActivateWindow => window
+                .update(cx, |_view, window, cx| {
+                    if test_window_activation_disabled() {
+                        #[cfg(target_os = "macos")]
+                        if let Some((ns_view, ns_window)) = ns_view(window).zip(ns_window(window)) {
+                            show_window_with_current_frame(ns_view, ns_window, false);
+                        }
+                        #[cfg(target_os = "windows")]
+                        {
+                            use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                            let handle = HasWindowHandle::window_handle(window)
+                                .map_err(|error| anyhow::anyhow!("no window handle: {error:?}"))?;
+                            if let RawWindowHandle::Win32(handle) = handle.as_raw() {
+                                gpui_windows::show_window_opened_hidden(handle.hwnd)?;
+                            }
+                        }
+                    } else {
+                        cx.activate(true);
+                        window.activate_window();
+                        order_window_front_regardless(window);
+                    }
+                    anyhow::Ok(())
+                })
+                .and_then(std::convert::identity),
             #[cfg(target_os = "windows")]
             UiCommand::RevealWindow { activate } => window
                 .update(cx, |_view, window, cx| {
@@ -3391,12 +3412,15 @@ impl GpuixRenderer {
         let menus = options.menus.clone();
         // `focus: false` must also skip `cx.activate`: the window flag only
         // decides key status inside the app, activation is what steals focus.
-        let activate = options.focus.unwrap_or(true);
+        let activate = options.focus.unwrap_or(true) && !test_window_activation_disabled();
         // Must match the `show` GPUI receives below: ordering a `show: false`
         // window front would reveal it, contradicting `activateWindow()` being
         // documented as the only way to reveal one.
         let show = options.show.unwrap_or(true);
-        let window_options = options.clone();
+        let mut window_options = options.clone();
+        if test_window_activation_disabled() {
+            window_options.focus = Some(false);
+        }
 
         let platform = Rc::new(gpui_macos::MacPlatform::new_embedded());
         let frame_request_callback = self.frame_request_callback.clone();
@@ -3644,12 +3668,15 @@ impl GpuixRenderer {
         let reduced_motion_override = options.reduced_motion;
         // `focus: false` must also skip `cx.activate`: the window flag only
         // decides key status inside the app, activation is what steals focus.
-        let activate = options.focus.unwrap_or(true);
+        let activate = options.focus.unwrap_or(true) && !test_window_activation_disabled();
         // Must match the `show` GPUI receives below: ordering a `show: false`
         // window front would reveal it, contradicting `activateWindow()` being
         // documented as the only way to reveal one.
         let show = options.show.unwrap_or(true);
-        let window_options = options.clone();
+        let mut window_options = options.clone();
+        if test_window_activation_disabled() {
+            window_options.focus = Some(false);
+        }
         let tree = self.tree.clone();
         let canvas_display_lists = self.canvas_display_lists.clone();
         let selection = self.selection.clone();
@@ -4819,6 +4846,28 @@ impl GpuixRenderer {
     pub fn activate_window(&self, _env: Env) -> Result<()> {
         #[cfg(target_os = "macos")]
         {
+            if test_window_activation_disabled() {
+                // A test can reveal the window for rendering without making
+                // the test process foreground or placing its window on top.
+                let has_pending_reveal = PENDING_WINDOW_REVEAL.with(|pending| {
+                    if let Some(mut reveal) = pending.take() {
+                        reveal.activate = false;
+                        pending.set(Some(reveal));
+                        true
+                    } else {
+                        false
+                    }
+                });
+                if has_pending_reveal {
+                    return reveal_pending_window();
+                }
+                return update_window(|_view, window, _cx| ns_view(window).zip(ns_window(window)))
+                    .map(|native| {
+                        if let Some((ns_view, ns_window)) = native {
+                            show_window_with_current_frame(ns_view, ns_window, false);
+                        }
+                    });
+            }
             // Before the first tick the window is still hidden: reveal it now,
             // focused, so it keeps its first frame and deferred default menus.
             PENDING_WINDOW_REVEAL.with(|pending| {
@@ -19380,6 +19429,11 @@ fn to_gpui_window_options(
     }
 
     gpui_options
+}
+
+/// Disable process and window activation for tests that create windows.
+fn test_window_activation_disabled() -> bool {
+    std::env::var_os("GPU-IX_TEST_DISABLE_WINDOW_ACTIVATION").is_some()
 }
 
 fn effective_window_min_size(options: &WindowOptions) -> Option<gpui::WindowMinSize> {

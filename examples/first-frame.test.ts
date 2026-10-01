@@ -30,12 +30,18 @@ interface FirstFrame {
   presents: number
   /** Whether the deferred default menus installed once frames ran. */
   menus: boolean
+  /** Whether the test window became active. */
+  active: boolean
 }
 
 function runFirstFrame(env: Record<string, string>): FirstFrame {
   const child = spawnSync('bun', ['first-frame.tsx'], {
     cwd: CWD,
-    env: { ...process.env, ...env },
+    env: {
+      ...process.env,
+      'GPU-IX_TEST_DISABLE_WINDOW_ACTIVATION': '1',
+      ...env,
+    },
     encoding: 'utf8',
     timeout: 30_000,
   })
@@ -52,17 +58,24 @@ describeLive('first presented frame', () => {
   it.each([
     ['a focused window', {}],
     ['an unfocused window', { FIRST_FRAME_FOCUS: '0' }],
+    ['a hidden window revealed by activation', { FIRST_FRAME_SHOW: '0', FIRST_FRAME_ACTIVATE: '1' }],
     ['a window animating from an effect', { FIRST_FRAME_RAF: '1' }],
     ['an unfocused window animating from an effect', { FIRST_FRAME_FOCUS: '0', FIRST_FRAME_RAF: '1' }],
   ])('presents the committed tree when revealing %s', (_name, env) => {
-    expect(runFirstFrame(env).presents).toBeGreaterThan(0)
+    const frame = runFirstFrame(env)
+    expect(frame.presents).toBeGreaterThan(0)
+    expect(frame.active).toBe(false)
   }, 60_000)
 
   it('keeps the first frame and default menus when a mount effect activates the window', () => {
-    expect(runFirstFrame({ FIRST_FRAME_ACTIVATE: '1' })).toEqual({ presents: 1, menus: true })
+    expect(runFirstFrame({ FIRST_FRAME_ACTIVATE: '1' })).toEqual({
+      presents: 1,
+      menus: true,
+      active: false,
+    })
   }, 60_000)
 
   it('installs the default menus after revealing a focused window', () => {
-    expect(runFirstFrame({}).menus).toBe(true)
+    expect(runFirstFrame({})).toMatchObject({ menus: true, active: false })
   }, 60_000)
 })
