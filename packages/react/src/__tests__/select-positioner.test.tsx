@@ -224,6 +224,53 @@ describeNative("Select.Positioner", () => {
     expect(popup.bottom).toBeLessThanOrEqual(trigger.top)
   })
 
+  it("returns to the requested side when the collision clears", () => {
+    function Demo() {
+      const [boundaryHeight, setBoundaryHeight] = useState(180)
+      return (
+        <Select.Root defaultOpen>
+          <Select.Trigger data-testid="trigger" aria-label="Fruit" style={{ position: "absolute", left: 100, top: 120, width: 60, height: 24 }}>
+            <Select.Value placeholder="Choose" />
+          </Select.Trigger>
+          <Select.Portal>
+            <Select.Positioner
+              data-testid="positioner"
+              side="bottom"
+              align="start"
+              collisionBoundary={{ x: 0, y: 0, width: 320, height: boundaryHeight }}
+              collisionPadding={0}
+              collisionAvoidance={{ side: "flip", align: "none" }}
+            >
+              <Select.Popup data-testid="popup" style={{ width: 120, height: 80 }}>
+                <Select.List><Select.Item value="apple">Apple</Select.Item></Select.List>
+                <button
+                  data-testid="expand-boundary"
+                  style={{ position: "absolute", left: 1, top: 1, width: 8, height: 8 }}
+                  onClick={() => setBoundaryHeight(240)}
+                />
+              </Select.Popup>
+            </Select.Positioner>
+          </Select.Portal>
+        </Select.Root>
+      )
+    }
+
+    screen.render(<Demo />)
+
+    const trigger = screen.getByTestId("trigger").getBoundingClientRect()
+    const popup = screen.getByTestId("popup")
+    expect(screen.getByTestId("positioner")).toHaveAttribute("data-side", "top")
+    expect(popup).toHaveAttribute("data-side", "top")
+    expect(popup.getBoundingClientRect().bottom).toBeLessThanOrEqual(trigger.top)
+
+    const expand = screen.getByTestId("expand-boundary").getBoundingClientRect()
+    screen.renderer.nativeSimulateClick(expand.left + 2, expand.top + 2)
+
+    expect(screen.getByTestId("positioner")).toHaveAttribute("data-side", "bottom")
+    expect(popup).toHaveAttribute("data-side", "bottom")
+    expect(popup.getBoundingClientRect().top).toBeGreaterThanOrEqual(trigger.bottom)
+  })
+
   it("flips alignment when only the opposite alignment fits the viewport", () => {
     screen.render(
       <Select.Root defaultOpen>

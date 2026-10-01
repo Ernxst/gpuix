@@ -549,35 +549,23 @@ export const FloatingPositioner = forwardRef<PublicInstance, PositionerProps>(
         : { top: collisionPadding?.top ?? 5, right: collisionPadding?.right ?? 5, bottom: collisionPadding?.bottom ?? 5, left: collisionPadding?.left ?? 5 }
       let resolvedSide: PositionerSide = side
       const sideAvoidance = collisionAvoidance?.side ?? "flip"
-      if (sideAvoidance === "flip") {
-        if (side === "bottom" && popupRect.top < anchorRect.top) resolvedSide = "top"
-        else if (side === "top" && popupRect.bottom > anchorRect.bottom) resolvedSide = "bottom"
-        else if (side === "right" && popupRect.left < anchorRect.left) resolvedSide = "left"
-        else if (side === "left" && popupRect.right > anchorRect.right) resolvedSide = "right"
-        else if (popupRect.bottom <= anchorRect.top) resolvedSide = "top"
-        else if (popupRect.top >= anchorRect.bottom) resolvedSide = "bottom"
-        else if (popupRect.right <= anchorRect.left) resolvedSide = "left"
-        else if (popupRect.left >= anchorRect.right) resolvedSide = "right"
-        else if (popupRect.top < anchorRect.top && popupRect.bottom <= anchorRect.bottom + 1) resolvedSide = "top"
-        else if (popupRect.left < anchorRect.left && popupRect.right <= anchorRect.right + 1) resolvedSide = "left"
-        if (boundaryRect) {
-          const oppositeSide: PositionerSide = side === "top" ? "bottom"
-            : side === "bottom" ? "top"
-              : side === "left" ? "right"
-                : side === "right" ? "left"
-                  : side === "inline-start" ? "inline-end" : "inline-start"
-          const offsetFor = (candidateSide: PositionerSide) => typeof sideOffset === "number"
-            ? sideOffset
-            : sideOffset({
-              side: candidateSide,
-              align,
-              anchor: nextDimensions.anchor,
-              positioner: nextDimensions.positioner,
-            })
-          const requestedOverflow = sideOverflow(side, anchorRect, popupRect, boundaryRect, padding, offsetFor(side))
-          const oppositeOverflow = sideOverflow(oppositeSide, anchorRect, popupRect, boundaryRect, padding, offsetFor(oppositeSide))
-          if (requestedOverflow > oppositeOverflow) resolvedSide = oppositeSide
-        }
+      if (sideAvoidance === "flip" && boundaryRect) {
+        const oppositeSide: PositionerSide = side === "top" ? "bottom"
+          : side === "bottom" ? "top"
+            : side === "left" ? "right"
+              : side === "right" ? "left"
+                : side === "inline-start" ? "inline-end" : "inline-start"
+        const offsetFor = (candidateSide: PositionerSide) => typeof sideOffset === "number"
+          ? sideOffset
+          : sideOffset({
+            side: candidateSide,
+            align,
+            anchor: nextDimensions.anchor,
+            positioner: nextDimensions.positioner,
+          })
+        const requestedOverflow = sideOverflow(side, anchorRect, popupRect, boundaryRect, padding, offsetFor(side))
+        const oppositeOverflow = sideOverflow(oppositeSide, anchorRect, popupRect, boundaryRect, padding, offsetFor(oppositeSide))
+        if (requestedOverflow > oppositeOverflow) resolvedSide = oppositeSide
       }
       let resolvedAlign: PositionerAlign = align
       if (boundaryRect && collisionAvoidance?.align === "flip" && (align === "start" || align === "end")) {
