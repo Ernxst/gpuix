@@ -1264,7 +1264,53 @@ describeNative("style properties", () => {
       expect(greedySelection).not.toBeNull()
       expect(balancedSelection).not.toBeNull()
       expect(balancedSelection).not.toBe(greedySelection)
-      expect(balancedSelection).toMatch(/…$/)
+      // Browsers paint the line-clamp ellipsis as generated content, so it is not part of
+      // the text returned by selection APIs.
+      expect(balancedSelection).not.toContain("…")
+      expect(longHeading).toContain(balancedSelection!)
+    })
+
+    it("keeps earlier forced-break groups when truncating a balanced clamp", () => {
+      const firstGroup = "This earlier forced-break group has a wide first line"
+      const lastGroup =
+        "Final heading words remain visible before this is a short tail followed by supercalifragilisticexpialidocious and more words"
+      const text = `${firstGroup}\n${lastGroup}`
+      function ForcedBreakHeading({ textWrap }: { textWrap: "wrap" | "balance" }) {
+        return (
+          <Center>
+            <div style={{ width: 260, padding: 16 }}>
+              <text
+                data-testid="forced-break-heading"
+                style={{ fontSize: 18, textWrap, lineClamp: 4, textOverflow: "ellipsis" }}
+              >
+                {text}
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      const greedy = createTestRoot()
+      greedy.render(<ForcedBreakHeading textWrap="wrap" />)
+      const balanced = createTestRoot()
+      balanced.render(<ForcedBreakHeading textWrap="balance" />)
+      const greedyId = greedy.renderer.findByTestId("forced-break-heading")!.id
+      const balancedId = balanced.renderer.findByTestId("forced-break-heading")!.id
+      const greedyBounds = greedy.renderer.getElementBounds(greedyId)!
+      const balancedBounds = balanced.renderer.getElementBounds(balancedId)!
+      expect(balancedBounds.height).toBe(greedyBounds.height)
+
+      const finalGroupStartY = balancedBounds.y + balancedBounds.height * 0.625
+      const finalGroupEndY = balancedBounds.y + balancedBounds.height * 0.875
+      const selectedLastGroup = balanced.renderer.dragSelect(
+        balancedBounds.x + 1,
+        finalGroupStartY,
+        balancedBounds.x + balancedBounds.width + 20,
+        finalGroupEndY,
+      )
+      expect(selectedLastGroup).not.toBeNull()
+      expect(selectedLastGroup).toMatch(/^Final heading/)
+      expect(selectedLastGroup).not.toContain("…")
     })
   })
 
