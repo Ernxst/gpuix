@@ -39,6 +39,25 @@ describeNative("zIndex stacking", () => {
     expect(renderer.drainStyleDiagnostics()).toEqual([])
   })
 
+  it("routes overlapping ordinary siblings to the later painted element", () => {
+    const { render, renderer } = createTestRoot({ width: 160, height: 120, strictStyles: true })
+    const earlierClick = vi.fn()
+    const laterClick = vi.fn()
+
+    render(
+      <main style={{ width: 160, height: 120 }}>
+        <button onClick={earlierClick} style={{ width: 100, height: 60, backgroundColor: "#00ff00" }} />
+        <button onClick={laterClick} style={{ position: "relative", top: -60, width: 100, height: 60, backgroundColor: "#ff0000" }} />
+      </main>
+    )
+
+    renderer.nativeSimulateClick(40, 30)
+
+    expect(laterClick).toHaveBeenCalledOnce()
+    expect(earlierClick).not.toHaveBeenCalled()
+    expect(renderer.drainStyleDiagnostics()).toEqual([])
+  })
+
   it("routes pointer input through a root-sized overlay to its child or the page", () => {
     const { render, renderer } = createTestRoot({ width: 160, height: 120, strictStyles: true })
     const pageClick = vi.fn()
