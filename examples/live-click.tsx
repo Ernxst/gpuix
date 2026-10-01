@@ -29,4 +29,9 @@ function App() {
   )
 }
 
-render(<App />, { title: "GPUIX AppKit click smoke", width: 360, height: 220 })
+render(<App />, {
+  title: "GPUIX AppKit click smoke",
+  width: 360,
+  height: 220,
+  focus: process.env.GPUIX_BACKGROUND !== "1",
+})
