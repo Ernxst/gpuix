@@ -299,6 +299,16 @@ jobs:
         shell: bash
         run: bun -e "const { statSync } = require('node:fs'); const { TestGpuixRenderer } = require('./packages/native'); const renderer = new TestGpuixRenderer(320, 200); renderer.applyBatch(JSON.stringify([['createElement',1,'text'],['setText',1,'Windows test renderer'],['setRoot',1]])); renderer.flush(); renderer.captureScreenshot('windows-test-renderer.png'); if (renderer.getAllText()[0] !== 'Windows test renderer' || statSync('windows-test-renderer.png').size === 0) throw new Error('TestGpuixRenderer did not render')"
 
+      # Run the focused UI Automation comparison before the full React suite;
+      # the old-pin branch intentionally reproduces unrelated renderer failures.
+      - name: Build React package for the Windows UIA comparison
+        run: bun run build
+        working-directory: packages/react
+
+      - name: Run focused Windows UI Automation test
+        run: bun run vitest run windows-accessibility.test.tsx
+        working-directory: examples
+
       - name: Run React tests
         run: bun run test
         working-directory: packages/react
