@@ -5045,9 +5045,11 @@ a state override such as `hover`:
 
 **Text:** `fontSize`, `fontFamily`, `fontWeight`, `letterSpacing`, `fontVariantNumeric` (`"normal"` or a space-separated set of `lining-nums` | `oldstyle-nums`, `proportional-nums` | `tabular-nums`, `diagonal-fractions` | `stacked-fractions`, `ordinal`, `slashed-zero`; inherited), `textDecoration` (`"underline"` | `"line-through"` | `"none"`), `textTransform` (`"none"` | `"uppercase"` | `"lowercase"`), `textAlign`, `lineHeight`, `whiteSpace`, `textWrap`, `textOverflow`, `lineClamp`. A bare number or numeric string, such as `1.4` or `"1.4"`, multiplies the resolved font size, matching `lineHeight` in React DOM; `"20px"` is an absolute length.
 
-`textWrap` accepts `"wrap"` and `"nowrap"`. `"balance"` and `"pretty"` are
-recognized but explicitly rejected with a strict-style diagnostic because GPUI
-does not yet implement those wrapping algorithms.
+`textWrap` accepts `"wrap"`, `"nowrap"` and `"balance"`. Native `"balance"`
+balances paragraphs with up to six visible lines; explicit line breaks are
+balanced separately. `lineClamp` limits the visible lines before balancing,
+and `textOverflow: "ellipsis"` stays on the final clamped line. `"pretty"` is
+not supported.
 
 **Lists:** `listStyle` and `listStyleType` accept only `"none"`. Native `<ul>`, `<ol>` and `<li>` paint no marker, so `"none"` is the one value that matches what is drawn; `"disc"`, `"decimal"` and every other marker are rejected with a strict-style diagnostic until markers are implemented. `listStylePosition` and `listStyleImage` remain unsupported and are rejected the same way.
 

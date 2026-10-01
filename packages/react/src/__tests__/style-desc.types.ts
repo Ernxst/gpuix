@@ -150,9 +150,14 @@ const invalidColor: StyleDesc = {
   background: 42,
 }
 
-const invalidTextWrap: StyleDesc = {
-  // @ts-expect-error GPUI has no balanced text wrapping mode.
+const validBalancedTextWrap: StyleDesc = {
   textWrap: "balance",
+}
+void validBalancedTextWrap
+
+const invalidTextWrap: StyleDesc = {
+  // @ts-expect-error GPUI does not support CSS text-wrap: pretty.
+  textWrap: "pretty",
 }
 
 const invalidHoverStyle: StyleDesc = {

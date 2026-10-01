@@ -694,7 +694,7 @@ export interface StyleDesc {
   textAlign?: "left" | "start" | "center" | "right"
   lineHeight?: LineHeightValue
   whiteSpace?: "normal" | "nowrap" | "pre"
-  textWrap?: "wrap" | "nowrap"
+  textWrap?: "wrap" | "nowrap" | "balance"
   textOverflow?: "ellipsis" | "ellipsis-start"
   lineClamp?: number
 

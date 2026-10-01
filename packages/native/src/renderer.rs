@@ -17706,6 +17706,7 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     match style.text_wrap.as_deref() {
         Some("nowrap") => el = el.whitespace_nowrap(),
         Some("wrap") => el = el.whitespace_normal(),
+        Some("balance") => el = el.text_wrap_balance(),
         _ => {}
     }
     match style.text_overflow.as_deref() {
