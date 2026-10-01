@@ -135,8 +135,12 @@ Colour fields accept named colours, `transparent`, 3/4/6/8-digit hex, `rgb[a]()`
 | `listStyle`, `listStyleType` | `none` only |
 
 `textWrap: "balance"` balances each explicit-line paragraph when it has at most
-six visible wrapped lines. `lineClamp` limits the lines considered before
-balancing, and `textOverflow: "ellipsis"` remains on the last clamped line.
+six visible wrapped lines on native. In the browser renderer it maps to CSS
+`text-wrap: balance` and follows the browser's own line limit. `lineClamp` limits
+the visible text before balancing; native adds an ellipsis after balancing and
+keeps it on the last clamped line. The browser renderer delegates balancing and
+ellipsis placement to CSS, where the visible clamped text is balanced before
+the ellipsis is applied.
 
 No user-agent styles apply: `h1` is not bold or large, `pre` needs `whiteSpace: "pre"`, `b`/`i`/`small` need explicit styles.
 

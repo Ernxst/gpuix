@@ -5047,9 +5047,12 @@ a state override such as `hover`:
 
 `textWrap` accepts `"wrap"`, `"nowrap"` and `"balance"`. Native `"balance"`
 balances paragraphs with up to six visible lines; explicit line breaks are
-balanced separately. `lineClamp` limits the visible lines before balancing,
-and `textOverflow: "ellipsis"` stays on the final clamped line. `"pretty"` is
-not supported.
+balanced separately. The browser renderer maps it to CSS `text-wrap: balance`
+and follows the browser's own line limit. `lineClamp` limits the visible text
+before balancing; native adds an ellipsis after balancing and keeps it on the
+final clamped line. The browser renderer delegates the balance and ellipsis
+placement to CSS, where the visible clamped text is balanced before the
+ellipsis is applied. `"pretty"` is not supported.
 
 **Lists:** `listStyle` and `listStyleType` accept only `"none"`. Native `<ul>`, `<ol>` and `<li>` paint no marker, so `"none"` is the one value that matches what is drawn; `"disc"`, `"decimal"` and every other marker are rejected with a strict-style diagnostic until markers are implemented. `listStylePosition` and `listStyleImage` remain unsupported and are rejected the same way.
 

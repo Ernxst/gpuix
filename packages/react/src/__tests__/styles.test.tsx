@@ -1208,34 +1208,63 @@ describeNative("style properties", () => {
     })
 
     it("balances the visible lines before placing a clamped ellipsis", () => {
-      const clamped = createTestRoot()
-      clamped.render(
-        <Center>
-          <div style={{ width: 220, padding: 16, backgroundColor: "#1e1e2e" }}>
-            <text
-              data-testid="clamped-heading"
-              style={{
-                color: "#cdd6f4",
-                fontSize: 18,
-                textWrap: "balance",
-                lineClamp: 2,
-                textOverflow: "ellipsis",
-              }}
-            >
-              {heading}. Additional words follow after the visible heading and should be replaced by an ellipsis.
-            </text>
-          </div>
-        </Center>,
-      )
+      const longHeading = `${heading}. Additional words follow after the visible heading and should be replaced by an ellipsis.`
+      function ClampedHeading({ textWrap }: { textWrap: "wrap" | "balance" }) {
+        return (
+          <Center>
+            <div style={{ width: 220, padding: 16, backgroundColor: "#1e1e2e" }}>
+              <text
+                data-testid="clamped-heading"
+                style={{
+                  color: "#cdd6f4",
+                  fontSize: 18,
+                  textWrap,
+                  lineClamp: 2,
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {longHeading}
+              </text>
+            </div>
+          </Center>
+        )
+      }
+
+      const greedy = createTestRoot()
+      greedy.render(<ClampedHeading textWrap="wrap" />)
+      const balanced = createTestRoot()
+      balanced.render(<ClampedHeading textWrap="balance" />)
+
+      const greedyId = greedy.renderer.findByTestId("clamped-heading")!.id
+      const balancedId = balanced.renderer.findByTestId("clamped-heading")!.id
+      const greedyBounds = greedy.renderer.getElementBounds(greedyId)!
+      const balancedBounds = balanced.renderer.getElementBounds(balancedId)!
+      expect(balancedBounds.height).toBe(greedyBounds.height)
+      expect(balancedBounds.height).toBeLessThan(70)
 
       const path = `${SCREENSHOT_DIR}/gpuix-text-wrap-balance-clamp-ellipsis.png`
       if (fs.existsSync(path)) fs.unlinkSync(path)
-      clamped.renderer.captureScreenshot(path)
+      balanced.renderer.captureScreenshot(path)
       expect(fs.existsSync(path)).toBe(true)
       expect(fs.statSync(path).size).toBeGreaterThan(0)
-      expect(
-        clamped.renderer.getElementBounds(clamped.renderer.findByTestId("clamped-heading")!.id)!.height,
-      ).toBeLessThan(70)
+
+      const secondLineY = balancedBounds.y + balancedBounds.height * 0.75
+      const greedySelection = greedy.renderer.dragSelect(
+        greedyBounds.x + 1,
+        greedyBounds.y + greedyBounds.height * 0.75,
+        greedyBounds.x + greedyBounds.width + 20,
+        greedyBounds.y + greedyBounds.height * 0.75,
+      )
+      const balancedSelection = balanced.renderer.dragSelect(
+        balancedBounds.x + 1,
+        secondLineY,
+        balancedBounds.x + balancedBounds.width + 20,
+        secondLineY,
+      )
+      expect(greedySelection).not.toBeNull()
+      expect(balancedSelection).not.toBeNull()
+      expect(balancedSelection).not.toBe(greedySelection)
+      expect(balancedSelection).toMatch(/…$/)
     })
   })
 
