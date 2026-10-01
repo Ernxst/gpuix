@@ -716,7 +716,7 @@ export const FloatingPositioner = forwardRef<PublicInstance, PositionerProps>(
     if (typeof render === "function") {
       content = render(contentProps, state)
     } else if (isValidElement<Props>(render)) {
-      content = renderSlot({ asChild: true, children: render, props: contentProps, ref })
+      content = renderSlot({ asChild: true, children: render, props: contentProps })
     } else {
       content = <div {...contentProps}>{children}</div>
     }

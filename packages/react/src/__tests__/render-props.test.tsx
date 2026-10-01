@@ -5,7 +5,7 @@ import * as TooltipPrimitive from "@gpuix/react/tooltip"
 import { Dialog } from "@gpuix/react/dialog"
 import * as Select from "@gpuix/react/select"
 import * as Combobox from "@gpuix/react/combobox"
-import { renderSlot } from "../components/floating.js"
+import { FloatingPositioner, renderSlot } from "../components/floating.js"
 import { createTestRoot, isNativeTestRendererAvailable, type TestRoot } from "../testing.js"
 import type { PublicInstance } from "../types/host.js"
 
@@ -74,6 +74,20 @@ describeNative("render element props", () => {
 
     ;(merged.props.ref as (value: PublicInstance) => void)({} as PublicInstance)
     expect(refs).toEqual(["render", "shared"])
+  })
+
+  it("calls FloatingPositioner's forwarded ref once for an element render", () => {
+    testRoot = createTestRoot()
+    const forwardedRef = vi.fn()
+    testRoot.render(
+      <FloatingPositioner
+        ref={forwardedRef}
+        render={<div data-testid="positioner-render" />}
+      />,
+    )
+
+    expect(testRoot.getByTestId("positioner-render")).toBeTruthy()
+    expect(forwardedRef).toHaveBeenCalledTimes(1)
   })
 
   it("matches the installed Base UI className and style merge order", () => {
