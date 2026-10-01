@@ -72,14 +72,19 @@ $automation = [System.Windows.Automation.AutomationElement]
 $byTitle = New-Object System.Windows.Automation.PropertyCondition($automation::NameProperty, $env:GPUIX_UIA_TITLE)
 $deadline = (Get-Date).AddSeconds(15)
 $lines = @()
+$foundWindow = $false
 do {
   $window = $automation::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Children, $byTitle)
   if ($window) {
-    $lines = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { "$($_.Current.ControlType.ProgrammaticName)\`t$($_.Current.Name)" })
+    $foundWindow = $true
+    $root = "WINDOW\`t$($window.Current.ControlType.ProgrammaticName)\`t$($window.Current.Name)\`tOffscreen=$($window.Current.IsOffscreen)"
+    $descendants = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { "$($_.Current.ControlType.ProgrammaticName)\`t$($_.Current.Name)" })
+    $lines = @($root) + $descendants
     if (@($lines | Where-Object { $_ -like "*\`tSave factory" }).Count -gt 0) { break }
   }
   Start-Sleep -Milliseconds 200
 } while ((Get-Date) -lt $deadline)
+if (-not $foundWindow) { $lines = @("WINDOW_NOT_FOUND\`t$($env:GPUIX_UIA_TITLE)") }
 $lines | ForEach-Object { Write-Output $_ }
 `
 
