@@ -73,9 +73,11 @@ highest open Dialog, Select, Combobox, or Tooltip. `Dialog.Trigger`,
 default focus ring.
 
 `Portal` mounts a full-window deferred layer with `<anchored fill="window">`.
-Its `container` prop is accepted for Base UI source compatibility and does not
-change the native portal target. All React children remain in the retained
-tree; this is a native overlay component, not a general DOM portal.
+Its `container` prop is accepted for Base UI source compatibility and is a
+no-op in the native renderer. All React children remain in the retained tree;
+this is a native overlay component, not a general DOM portal. Popup and
+Viewport expose `transitionStatus` and the `data-starting-style`/
+`data-ending-style` attributes through the native opening or closing frame.
 
 ## AlertDialog (`@gpuix/react/alert-dialog`)
 

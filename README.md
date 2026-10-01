@@ -3530,9 +3530,12 @@ import * as Dialog from "@gpuix/react/dialog"
 `actionsRef`, trigger IDs, render-function children, handles, and `modal` values
 `true`, `false`, and `"trap-focus"`. The native renderer traps focus for both
 modal modes; only `true` blocks interaction behind the full-window portal.
-`Portal` accepts Base UI's `container` prop for shared source compatibility, but
-native portals always fill the GPU-IX window. Parts accept Base UI's `render`,
-state-function `className` and `style`, and state/data attributes.
+`Portal` accepts Base UI's `container` prop for shared source compatibility;
+the prop is a no-op because native portals always fill the GPU-IX window. Parts
+accept Base UI's `render`, state-function `className` and `style`, and
+state/data attributes. Popup and Viewport expose `transitionStatus` and
+`data-starting-style`/`data-ending-style` during the native opening or closing
+frame; `onOpenChangeComplete` runs when that frame completes.
 
 A modal Popup reports `aria-modal`, traps Tab and Shift+Tab among painted tab
 stops, and focuses the Popup on open. Set `initialFocus` and `finalFocus` on

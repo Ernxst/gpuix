@@ -15,6 +15,7 @@ import React, {
 import type { ReactElement, ReactNode, RefObject } from "react"
 import type { GpuixKeyboardEvent, GpuixMouseEvent, GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
+import { cancelAnimationFrame, requestAnimationFrame } from "../frame-clock.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import { buttonProps } from "./button.js"
 import { DismissLayerScope, renderSlot, setRefs, useDismissLayer } from "./floating.js"
@@ -70,6 +71,7 @@ export interface DialogRootActions {
 
 export interface DialogContextValue {
   open: boolean
+  transitionStatus: DialogPartState["transitionStatus"]
   modal: DialogModal
   alert: boolean
   nested: boolean
@@ -137,13 +139,21 @@ function DialogRootImpl<Payload = unknown>({
   const [preventUnmountOnClose, setPreventUnmountOnClose] = useState(false)
   const [nestedDialogCounts, setNestedDialogCounts] = useState<Record<string, number>>({})
   const open = openProp ?? localOpen
+  const [transition, setTransition] = useState({ open, status: "none" as DialogPartState["transitionStatus"] })
+  if (transition.open !== open) setTransition({ open, status: open ? "starting" : "ending" })
+  const transitionStatus = transition.open === open ? transition.status : open ? "starting" : "ending"
+  const previousOpen = useRef(open)
+  const transitionFrame = useRef<number | null>(null)
+  const onCompleteRef = useRef(onOpenChangeComplete)
+  onCompleteRef.current = onOpenChangeComplete
   const [triggerId, setTriggerIdState] = useState<string | null>(triggerIdProp ?? defaultTriggerId ?? null)
   const [payload, setPayload] = useState<Payload | undefined>(undefined)
   const openRef = useRef(open)
   openRef.current = open
   const onChangeRef = useRef(onOpenChange)
   onChangeRef.current = onOpenChange
-  const isTopLayer = useDismissLayer(open)
+  const dismissLayer = useDismissLayer(open)
+  const isTopLayer = useCallback((event?: GpuixSyntheticEvent) => dismissLayer(event), [dismissLayer])
   const triggerRef = useRef<PublicInstance | null>(null)
   const titleId = useId()
   const descriptionId = useId()
@@ -181,6 +191,7 @@ function DialogRootImpl<Payload = unknown>({
       preventUnmountOnClose() { if (!nextOpen) shouldPreventUnmountOnClose = true },
     }
     onChangeRef.current?.(nextOpen, details)
+    if (!details.isPropagationAllowed) nativeEvent?.stopPropagation()
     if (details.isCanceled) return
     openRef.current = nextOpen
     if (openProp === undefined) setLocalOpen(nextOpen)
@@ -213,7 +224,20 @@ function DialogRootImpl<Payload = unknown>({
     ;(actionsRef as { current: DialogRootActions | null }).current = actions
     return () => { (actionsRef as { current: DialogRootActions | null }).current = null }
   }, [actionsRef, setOpen])
-  useEffect(() => { onOpenChangeComplete?.(open) }, [onOpenChangeComplete, open])
+  useEffect(() => {
+    if (previousOpen.current === open) return
+    previousOpen.current = open
+    if (transitionFrame.current !== null) cancelAnimationFrame(transitionFrame.current)
+    transitionFrame.current = requestAnimationFrame(() => {
+      transitionFrame.current = null
+      setTransition((current) => current.open === open ? { open, status: "none" } : current)
+      onCompleteRef.current?.(open)
+    })
+    return () => {
+      if (transitionFrame.current !== null) cancelAnimationFrame(transitionFrame.current)
+      transitionFrame.current = null
+    }
+  }, [open])
   useEffect(() => {
     if (triggerIdProp !== undefined) setTriggerIdState(triggerIdProp)
   }, [triggerIdProp])
@@ -226,6 +250,7 @@ function DialogRootImpl<Payload = unknown>({
 
   const context: DialogContextValue = {
     open,
+    transitionStatus,
     modal,
     alert,
     nested,
@@ -278,7 +303,7 @@ export interface DialogComponentProps<State> extends Omit<Props, "className" | "
 function partState(context: DialogContextValue): DialogPartState {
   return {
     open: context.open,
-    transitionStatus: "none",
+    transitionStatus: context.transitionStatus,
     nested: context.nested,
     nestedDialogOpen: context.nestedDialogOpen,
   }
@@ -288,8 +313,8 @@ function stateAttributes(state: DialogPartState): Props {
   return {
     "data-open": state.open ? "" : undefined,
     "data-closed": state.open ? undefined : "",
-    "data-starting-style": undefined,
-    "data-ending-style": undefined,
+    "data-starting-style": state.transitionStatus === "starting" ? "" : undefined,
+    "data-ending-style": state.transitionStatus === "ending" ? "" : undefined,
     "data-nested": state.nested ? "" : undefined,
     "data-nested-dialog-open": state.nestedDialogOpen ? "" : undefined,
   }
@@ -420,6 +445,7 @@ function resolveStyle<State>(value: DialogComponentProps<State>["style"], state:
 export const DialogTrigger = forwardRef<PublicInstance, DialogTriggerProps<unknown>>(DialogTriggerImpl)
 
 export interface DialogPortalProps extends DialogComponentProps<DialogPortalState> {
+  /** Accepted for Base UI source compatibility; native portals always target the GPU-IX window. */
   container?: HTMLElement | ShadowRoot | RefObject<HTMLElement | ShadowRoot | null> | null | undefined
   keepMounted?: boolean | undefined
 }
@@ -428,7 +454,7 @@ export const DialogPortal = forwardRef<PublicInstance, DialogPortalProps>(functi
   { container: _container, keepMounted = false, children, style, className, render, ...props }, ref,
 ) {
   const context = useDialogContext("Dialog.Portal")
-  if (!context.open && !keepMounted && !context.preventUnmountOnClose) return null
+  if (!context.open && context.transitionStatus !== "ending" && !keepMounted && !context.preventUnmountOnClose) return null
   const state: DialogPortalState = {}
   const resolvedStyle: StyleDesc = { display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "transparent", ...resolveStyle(style, state), pointerEvents: context.modal === true ? undefined : "none" }
   const portalProps = {
@@ -452,15 +478,15 @@ export const DialogBackdrop = forwardRef<PublicInstance, DialogBackdropProps>(fu
   { forceRender = false, children, style, onMouseDown, className, render, ...props }, ref,
 ) {
   const context = useDialogContext("Dialog.Backdrop")
-  if (!context.open && !forceRender && !context.preventUnmountOnClose) return null
-  const state = { open: context.open, transitionStatus: "none" as const }
+  if (!context.open && context.transitionStatus !== "ending" && !forceRender && !context.preventUnmountOnClose) return null
+  const state = { open: context.open, transitionStatus: context.transitionStatus }
   const elementProps: DialogComponentProps<typeof state> = {
     ...props,
     className,
     style: { position: "absolute", top: 0, right: 0, bottom: 0, left: 0, ...resolveStyle(style, state) },
     onMouseDown: (event: GpuixMouseEvent) => {
       onMouseDown?.(event)
-      if (!event.defaultPrevented && !context.alert && !context.disablePointerDismissal && context.isTopLayer(event)) context.setOpen(false, "outside-press", event)
+      if (!event.defaultPrevented && !context.alert && !context.disablePointerDismissal && context.isTopLayer()) context.setOpen(false, "outside-press", event)
     },
     children,
     render,
@@ -517,7 +543,7 @@ export const DialogPopup = forwardRef<PublicInstance, DialogPopupProps>(function
     }
   }, [context.isTopLayer, context.open, context.triggerRef, renderer])
 
-  if (!context.open && !context.preventUnmountOnClose) return null
+  if (!context.open && context.transitionStatus !== "ending" && !context.preventUnmountOnClose) return null
   const elementProps: DialogComponentProps<DialogPartState> = {
     ...props,
     role: context.alert ? "alertdialog" : "dialog",
@@ -530,7 +556,7 @@ export const DialogPopup = forwardRef<PublicInstance, DialogPopupProps>(function
     render,
     onKeyDown: (event: GpuixKeyboardEvent) => {
       onKeyDown?.(event)
-      if (event.key.toLowerCase() === "escape" && !context.alert && context.isTopLayer(event) && !event.defaultPrevented) context.setOpen(false, "escape-key", event)
+      if (event.key.toLowerCase() === "escape" && !context.alert && context.isTopLayer() && !event.defaultPrevented) context.setOpen(false, "escape-key", event)
       if (context.modal === false || event.key.toLowerCase() !== "tab" || event.defaultPrevented || !context.isTopLayer(event)) return
       const popup = popupRef.current
       if (!popup) return
@@ -552,7 +578,7 @@ export const DialogViewport = forwardRef<PublicInstance, DialogViewportProps>(fu
   { children, className, style, render, ...props }, ref,
 ) {
   const context = useDialogContext("Dialog.Viewport")
-  if (!context.open && !context.preventUnmountOnClose) return null
+  if (!context.open && context.transitionStatus !== "ending" && !context.preventUnmountOnClose) return null
   const state = partState(context)
   return renderPart("div", { ...props, role: "presentation", className, style, render, children, ...stateAttributes(state) }, state, ref)
 })
