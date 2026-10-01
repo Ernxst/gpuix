@@ -566,6 +566,97 @@ describeNative("floating controls", () => {
     expect(testRoot.renderer.getAllText()).toContain("Selected: none")
   })
 
+  it("filters, navigates, selects, and clears grouped generic items with Base UI state", () => {
+    const groups = [
+      { label: "Frameworks", items: [{ id: "astro", label: "Astro" }, { id: "svelte", label: "Svelte" }] },
+    ]
+    const items = Combobox.createItems(groups, { getValue: (item) => item.id, getLabel: (item) => item.label })
+
+    function Demo() {
+      const [value, setValue] = useState<string | null>(null)
+      return (
+        <div style={{ width: 400, height: 300, padding: 12 }}>
+          <ComboboxPrimitive.Root items={items} value={value} onValueChange={(next, details) => {
+            expect(["item-press", "clear-press"]).toContain(details.reason)
+            setValue(next)
+          }} onItemHighlighted={(next, details) => {
+            if (next !== undefined) {
+              expect(details.reason).toBe("keyboard")
+              expect(details.index).toBe(0)
+            }
+          }}>
+            <ComboboxPrimitive.InputGroup>
+              <ComboboxPrimitive.Label>Framework</ComboboxPrimitive.Label>
+              <ComboboxPrimitive.Input placeholder="Choose a framework" style={triggerStyle} />
+              <ComboboxPrimitive.Trigger aria-label="Toggle frameworks">
+                <ComboboxPrimitive.Value placeholder="Choose" />
+              </ComboboxPrimitive.Trigger>
+              <ComboboxPrimitive.Icon />
+              <ComboboxPrimitive.Clear data-testid="clear">Clear</ComboboxPrimitive.Clear>
+              <ComboboxPrimitive.Chips>
+                <ComboboxPrimitive.Chip>
+                  <ComboboxPrimitive.ChipRemove aria-label="Remove framework">Remove</ComboboxPrimitive.ChipRemove>
+                </ComboboxPrimitive.Chip>
+              </ComboboxPrimitive.Chips>
+            </ComboboxPrimitive.InputGroup>
+            <ComboboxPrimitive.Portal>
+              <ComboboxPrimitive.Backdrop />
+              <ComboboxPrimitive.Positioner>
+                <ComboboxPrimitive.Popup style={contentStyle}>
+                  <ComboboxPrimitive.Status />
+                  <ComboboxPrimitive.Empty>No matches</ComboboxPrimitive.Empty>
+                  <ComboboxPrimitive.List>
+                    <ComboboxPrimitive.Group items={groups[0]!.items}>
+                      <ComboboxPrimitive.GroupLabel>Frameworks</ComboboxPrimitive.GroupLabel>
+                      <ComboboxPrimitive.Collection>
+                        {(item) => (
+                          <ComboboxPrimitive.Item key={item.id} value={item} data-testid={`item-${item.id}`} style={itemStyle}>
+                            {item.label}<ComboboxPrimitive.ItemIndicator>Selected</ComboboxPrimitive.ItemIndicator>
+                          </ComboboxPrimitive.Item>
+                        )}
+                      </ComboboxPrimitive.Collection>
+                    </ComboboxPrimitive.Group>
+                    <ComboboxPrimitive.Row />
+                    <ComboboxPrimitive.Separator />
+                    <ComboboxPrimitive.Arrow />
+                  </ComboboxPrimitive.List>
+                </ComboboxPrimitive.Popup>
+              </ComboboxPrimitive.Positioner>
+            </ComboboxPrimitive.Portal>
+          </ComboboxPrimitive.Root>
+          <text>{`Selected: ${value ?? "none"}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<Demo />)
+    const input = testRoot.renderer.findByType("input")[0]!
+    expect(input.semantics?.role).toBe("combobox")
+    expect(input.customProps?.ariaHasPopup).toBe("listbox")
+    expect(input.customProps?.ariaAutoComplete).toBe("list")
+    expect(input.customProps?.ariaLabelledBy).toBeTruthy()
+    expect(input.customProps?.ariaExpanded).toBe(false)
+    testRoot.renderer.nativeSimulateClick(30, 25)
+    expect(testRoot.renderer.findByType("input")[0]?.customProps?.ariaExpanded).toBe(true)
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "sve")
+    expect(testRoot.renderer.getAllText()).toContain("Svelte")
+    expect(testRoot.renderer.getAllText()).not.toContain("Astro")
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "down enter")
+    expect(testRoot.renderer.getAllText()).toContain("Selected: svelte")
+    const inputBounds = input.getBoundingClientRect()
+    testRoot.renderer.nativeSimulateClick(inputBounds.x + inputBounds.width / 2, inputBounds.y + inputBounds.height / 2)
+    expect(testRoot.renderer.getAllText()).toContain("Selected")
+    const selectedItem = testRoot.renderer.findByTestId("item-svelte")!
+    expect(selectedItem.customProps?.ariaSelected).toBe(true)
+    expect(selectedItem.customProps?.["data-selected"]).toBe("")
+    expect(selectedItem.semantics?.role).toBe("option")
+
+    const clear = testRoot.renderer.findByTestId("clear")!
+    const bounds = clear.getBoundingClientRect()
+    testRoot.renderer.nativeSimulateClick(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+    expect(testRoot.renderer.getAllText()).toContain("Selected: none")
+  })
+
   it("lets a Combobox consumer cancel Escape dismissal", () => {
     testRoot.render(
       <div style={{ width: 400, height: 240, padding: 12 }}>

@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.exact-optional.json",
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "paths": {
+      "@combobox": ["dist/components/combobox.d.ts"]
+    }
+  },
+  "files": ["./combobox-parity.tsx"],
+  "include": ["./combobox-parity.tsx"]
+}

@@ -33,7 +33,7 @@ Each component is importable two ways: as a namespace from its subpath (`import 
   | `SelectPositioner` | `{ open, side, align, anchorHidden }` |
   | `SelectSeparator` | `{ orientation }` |
 
-  `ComboboxTrigger`, `ComboboxInput` and the Tooltip parts take plain styles; track their state yourself with `open`/`onOpenChange`. `Select.Root` renders no wrapper element and does not accept `className` or `style`.
+  Combobox and Tooltip parts also accept state functions. Combobox root renders no wrapper element, like Select root.
 
   ```tsx
   <SelectItem value="a" style={({ highlighted, selected }) => ({ backgroundColor: highlighted ? "#2c2c2c" : "#1a1a1a", color: selected ? "#fff" : "#bbb" })}>
@@ -43,12 +43,12 @@ Each component is importable two ways: as a namespace from its subpath (`import 
 
 - **`render` customises Select parts.** It accepts an element or a function receiving host props and state. Other controls that use `asChild` still require one child that forwards its ref and host props.
 - **Select Root renders no wrapper element.** Its Popup is positioned against the Trigger.
-- **Select provides `Portal`, `Backdrop`, `Positioner`, and `Arrow`.** Select's `Label` labels the field; use `GroupLabel` for item groups. Combobox and Tooltip do not expose those parts yet.
+- **Select and Combobox provide `Portal`, `Backdrop`, `Positioner`, and `Arrow`.** Both labels associate with their input/trigger; use `GroupLabel` for item groups. Both positioners use the shared `/floating` positioning contract.
 - **Give Popup an opaque background.** It defaults to `#1A1A1A` when neither `style` nor a compiled `className` sets a background. A background supplied by either wins; a translucent colour lets the page show through.
-- **Combobox filtering and keyboard navigation need `items: string[]` on Root and a function child on `ComboboxList`.** Static `ComboboxItem` children are never filtered, and one is keyboard-highlighted only when its value is in `items` and passes the filter, and `ComboboxEmpty` shows whenever the filtered list is empty (always, without `items`). This is the opposite of Select, where `items` is optional.
+- **Combobox filtering and keyboard navigation use the mounted items.** Pass `items` to Root and use either the `List` function child or `Collection` for grouped data. `createItems` maps generic source objects to primitive selection values and labels. `filteredItems` supports externally filtered lists; `useFilter` provides locale-aware contains/startsWith/endsWith matching, and `useFilteredItems` reads the current results inside Root. `items` is optional when composing explicit Item children.
 - **A controlled Select cannot be cleared with `value={undefined}`**: `undefined` means uncontrolled. Use `value={null}` to clear single-select mode. Values can be generic objects or primitives, and multiple mode uses arrays.
 - **Select keyboard support is minimal**: typeahead, Up/Down, Ctrl+N/Ctrl+P, Enter, Space and Escape. Home/End and PageUp/PageDown are not handled.
-- **Combobox and Tooltip set no ARIA roles**; add `role`, `ariaExpanded` and `ariaSelected` yourself. Select sets them.
+- **Combobox sets its listbox semantics.** Input has the combobox role and expanded, controls, active-descendant, and autocomplete state; List and Item expose listbox/option roles and selected/disabled state. State is also available to `className` and `style` functions.
 - **Tooltip opens instantly by default** (`delayDuration` 0; Base UI waits 600 ms), and opens on any focus, not only keyboard focus. Its delays use `setTimeout` on wall time, so `advanceAsyncClock` in tests does not move them.
 - **Combobox `autoHighlight` defaults to `false`**, so typing and pressing Enter selects nothing until an item is arrowed to. Pass `autoHighlight` for type-and-Enter.
 - **There is no Popover, Menu or message box.** `@gpuix/react/dialogs` is file pickers only (#572 for a message box). Dialog is available from `@gpuix/react/dialog`; it handles modal Tab focus, Escape dismissal, focus restoration and `aria-modal` in AccessKit.
@@ -115,26 +115,28 @@ The namespace follows Base UI 1.8.0: `Root`, `Label`, `Trigger`, `Value`, `Icon`
 
 ## Combobox (`@gpuix/react/combobox`)
 
-Parts: `Root`, `Input`, `Trigger`, `Value`, `Popup`, `List`, `Item`, `Empty`, `Group`, `Label`, `Separator` (the last three are plain `div`s).
+Parts: `Root`, `Label`, `Value`, `Input`, `InputGroup`, `Trigger`, `List`, `Status`, `Portal`, `Backdrop`, `Positioner`, `Popup`, `Arrow`, `Icon`, `Group`, `GroupLabel`, `Item`, `ItemIndicator`, `Chips`, `Chip`, `ChipRemove`, `Row`, `Collection`, `Empty`, `Clear`, `Separator`, plus `useFilter`, `useFilteredItems`, and `createItems`.
 
 ```tsx
 import * as Combobox from "@gpuix/react/combobox"
 
 <Combobox.Root items={frameworks}>
   <Combobox.Input placeholder="Framework" />
-  <Combobox.Popup>
-    <Combobox.Empty>No match</Combobox.Empty>
-    <Combobox.List>{(item) => <Combobox.Item key={item} value={item}>{item}</Combobox.Item>}</Combobox.List>
-  </Combobox.Popup>
+  <Combobox.Positioner>
+    <Combobox.Popup>
+      <Combobox.Empty>No match</Combobox.Empty>
+      <Combobox.List>{(item) => <Combobox.Item key={item} value={item}>{item}</Combobox.Item>}</Combobox.List>
+    </Combobox.Popup>
+  </Combobox.Positioner>
 </Combobox.Root>
 ```
 
-- **Root props**: `items?: string[]`, `value`/`defaultValue` (`string | string[] | null`), `onValueChange`, `inputValue`/`defaultInputValue`/`onInputValueChange`, `open`/`defaultOpen`/`onOpenChange`, `multiple`, `disabled`, `autoHighlight`, `filter` (`null` disables; `(item, query, itemToString) => boolean`), `itemToStringValue` (display, filtering and the text written into the input after selection).
-- **Default filter**: trimmed, case-insensitive substring; prefix matches first, then `items` order.
-- **Input** is a native `<input>`; click, focus and typing each open the popup. Escape or moving focus away closes it; Up/Down and Ctrl+N/Ctrl+P move the highlight (wrapping, skipping disabled) but do not reopen after Escape; Enter selects the highlighted item, and does nothing with no highlight.
+- **Root props**: generic `items` (flat, grouped or `createItems` collection), `filteredItems`, controlled/uncontrolled `value`, `inputValue`, and `open`, `onValueChange`, `onInputValueChange`, `onOpenChange`, `onItemHighlighted`, multiple selection, disabled/read-only/required, `autoHighlight`, `autoComplete`, `locale`, `filter`, `limit`, and item value/label/equality accessors. Root renders no host element.
+- **Default filter**: trimmed, locale-aware substring; prefix matches first, then `items` order. `autoComplete` controls the input's `aria-autocomplete` mode (`list` by default).
+- **Input** is a native `<input>`; it associates with Label and exposes combobox/listbox ARIA state. Click, focus and typing open the popup by default. Escape or moving focus away closes it; Up/Down and Ctrl+N/Ctrl+P move the highlight (wrapping, skipping disabled); Enter selects the highlighted item.
 - **Selection**: single mode sets the value, writes it into the input and closes; multiple mode toggles, clears the input and stays open.
 - **Popup** unmounts while closed; a press outside closes it; focus stays in the input.
-- **Missing from Base UI**: `InputGroup`, `Icon`, `Clear`, `Chips`, `Chip`, `ItemIndicator`, `Status`, `Portal`, `Positioner`, `GroupLabel`, `Arrow`; `limit`, `virtualized`, `openOnInputClick`, `grid`, `inline`, `readOnly`, `required`, `name`; non-string items; ARIA.
+- **State and styling**: parts accept `className` and `style` functions. Input, Trigger, Positioner, Popup, List and Item expose state via callbacks; interactive parts set their corresponding ARIA and `data-*` attributes. `Portal` is a render-through part in the native renderer; floating content is placed by the shared Positioner.
 
 ## Tooltip (`@gpuix/react/tooltip`)
 

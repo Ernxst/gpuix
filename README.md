@@ -3564,7 +3564,7 @@ Each primitive has a dedicated namespace entry point:
 |---|---|
 | `@gpuix/react/dialog` | `Root`, `Trigger`, `Portal`, `Backdrop`, `Popup`, `Title`, `Description`, `Close` |
 | `@gpuix/react/select` | `Root`, `Label`, `Trigger`, `Value`, `Icon`, `Portal`, `Backdrop`, `Positioner`, `Popup`, `List`, `Item`, `ItemIndicator`, `ItemText`, `Arrow`, `ScrollUpArrow`, `ScrollDownArrow`, `Group`, `GroupLabel`, `Separator` |
-| `@gpuix/react/combobox` | `Root`, `Input`, `Popup`, `List`, `Item`, `Empty` |
+| `@gpuix/react/combobox` | `Root`, `Label`, `Value`, `Input`, `InputGroup`, `Trigger`, `List`, `Status`, `Portal`, `Backdrop`, `Positioner`, `Popup`, `Arrow`, `Icon`, `Group`, `GroupLabel`, `Item`, `ItemIndicator`, `Chips`, `Chip`, `ChipRemove`, `Row`, `Collection`, `Empty`, `Clear`, `Separator`, `useFilter`, `useFilteredItems`, `createItems` |
 | `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Popup` |
 | `@gpuix/react/floating` | `FloatingLayer`, `PositionerProps`, `FloatingPositioner`, `renderSlot` |
 
@@ -3781,20 +3781,42 @@ The application still uses compound components, not one large configuration
 object:
 
 ```tsx
-<ComboboxPrimitive.Root items={['Next.js', 'SvelteKit', 'Astro']}>
-  <ComboboxPrimitive.Input style={{ width: 220, height: 36, padding: 8 }} />
-  <ComboboxPrimitive.Popup style={{ width: 220 }}>
-    <ComboboxPrimitive.Empty>No frameworks found.</ComboboxPrimitive.Empty>
-    <ComboboxPrimitive.List>
-      {(item) => (
-        <ComboboxPrimitive.Item key={item} value={item}>
-          {item}
-        </ComboboxPrimitive.Item>
-      )}
-    </ComboboxPrimitive.List>
-  </ComboboxPrimitive.Popup>
+const frameworks = ['Next.js', 'SvelteKit', 'Astro']
+
+<ComboboxPrimitive.Root items={frameworks}>
+  <ComboboxPrimitive.InputGroup>
+    <ComboboxPrimitive.Label>Framework</ComboboxPrimitive.Label>
+    <ComboboxPrimitive.Input placeholder="Search frameworks" />
+    <ComboboxPrimitive.Trigger aria-label="Show frameworks" />
+    <ComboboxPrimitive.Clear aria-label="Clear selection" />
+  </ComboboxPrimitive.InputGroup>
+  <ComboboxPrimitive.Positioner>
+    <ComboboxPrimitive.Popup>
+      <ComboboxPrimitive.Status />
+      <ComboboxPrimitive.Empty>No frameworks found.</ComboboxPrimitive.Empty>
+      <ComboboxPrimitive.List>
+        {(framework) => (
+          <ComboboxPrimitive.Item key={framework} value={framework}>
+            {framework}
+            <ComboboxPrimitive.ItemIndicator>Selected</ComboboxPrimitive.ItemIndicator>
+          </ComboboxPrimitive.Item>
+        )}
+      </ComboboxPrimitive.List>
+    </ComboboxPrimitive.Popup>
+  </ComboboxPrimitive.Positioner>
 </ComboboxPrimitive.Root>
 ```
+
+`Combobox.Root` renders no wrapper. It filters `items` as the input changes,
+and its List function child receives each visible item. `Combobox.createItems`
+adds typed source items with derived primitive values and labels; `Combobox.Collection`
+renders grouped collections, and `Combobox.useFilter` supplies locale-aware
+matching. Parts accept state functions for `className` and `style`. Combobox uses
+the shared `/floating` Positioner used by Select. The input exposes the
+combobox/listbox relationship and each item exposes its selected, highlighted,
+and disabled state through ARIA and `data-*` attributes.
+The root `autoComplete` option controls `aria-autocomplete` (`list` by default),
+and `locale` sets the default filter's string comparison locale.
 
 ```tsx
 <TooltipPrimitive.Provider delay={350}>
