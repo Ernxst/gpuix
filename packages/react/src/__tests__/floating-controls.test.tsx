@@ -793,6 +793,29 @@ describeNative("floating controls", () => {
     expect(submitted).toEqual([[ ["framework", ""] ]])
   })
 
+  it("omits selected values from disabled single- and multiple-select fields", () => {
+    const submitted: Array<Array<[string, string]>> = []
+    testRoot.render(<form style={{ width: 400, height: 220, padding: 12 }} onSubmit={(event) => {
+      event.preventDefault()
+      submitted.push([...event.formData.entries()].map(([name, value]) => [name, String(value)]))
+    }}>
+      <Combobox.Root items={["Alpha"]} name="disabled-single" value="Alpha" disabled>
+        <Combobox.Input style={triggerStyle} />
+      </Combobox.Root>
+      <Combobox.Root items={["Beta"]} name="disabled-multiple" value={["Beta"]} multiple disabled>
+        <Combobox.Input style={triggerStyle} />
+      </Combobox.Root>
+      <Combobox.Root items={["Gamma"]} name="enabled" value="Gamma">
+        <Combobox.Input style={triggerStyle} />
+      </Combobox.Root>
+      <button style={{ width: 80, height: 32 }}>Submit</button>
+    </form>)
+    const button = testRoot.getByRole("button", { name: "Submit" })
+    const bounds = button.getBoundingClientRect()
+    testRoot.renderer.nativeSimulateClick(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+    expect(submitted).toEqual([[ ["enabled", "Gamma"] ]])
+  })
+
   it("closes a Combobox when its input loses focus", () => {
     testRoot.render(
       <div style={{ width: 400, height: 240, padding: 12 }}>

@@ -468,9 +468,9 @@ export function ComboboxRoot<Value = unknown, Multiple extends boolean | undefin
         {children}
         {props.name && (multiple
           ? selectedValues.map((selected, index) => (
-            <input key={`${String(selected)}-${index}`} type="hidden" name={props.name} form={props.form} autoComplete={autoComplete} value={itemToStringValue(selected)} />
+            <input key={`${String(selected)}-${index}`} type="hidden" name={props.name} form={props.form} autoComplete={autoComplete} disabled={disabled} value={itemToStringValue(selected)} />
           ))
-          : <input type="hidden" name={props.name} form={props.form} autoComplete={autoComplete} value={value == null ? "" : itemToStringValue(value as Value)} />)}
+          : <input type="hidden" name={props.name} form={props.form} autoComplete={autoComplete} disabled={disabled} value={value == null ? "" : itemToStringValue(value as Value)} />)}
       </DismissLayerScope>
     </ComboboxContext.Provider>
   )
