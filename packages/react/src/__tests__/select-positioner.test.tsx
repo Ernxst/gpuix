@@ -192,4 +192,86 @@ describeNative("Select.Positioner", () => {
     expect(screen.getByTestId("popup")).toHaveAttribute("data-side", "bottom")
     expect(screen.getByTestId("popup")).toHaveAttribute("data-align", "start")
   })
+
+  it("flips alignment when only the opposite alignment fits the viewport", () => {
+    screen.render(
+      <Select.Root defaultOpen>
+        <Select.Trigger data-testid="trigger" aria-label="Fruit" style={{ position: "absolute", left: 280, top: 80, width: 32, height: 24 }}>
+          <Select.Value placeholder="Choose" />
+        </Select.Trigger>
+        <Select.Portal>
+          <Select.Positioner
+            data-testid="positioner"
+            style={(state) => ({ opacity: state.align === "end" ? 1 : 0.5 })}
+            side="bottom"
+            align="start"
+            collisionPadding={0}
+            collisionAvoidance={{ side: "none", align: "flip" }}
+          >
+            <Select.Popup data-testid="popup" style={{ width: 100, height: 60 }}>
+              <Select.List><Select.Item value="apple">Apple</Select.Item></Select.List>
+            </Select.Popup>
+          </Select.Positioner>
+        </Select.Portal>
+      </Select.Root>
+    )
+
+    const trigger = screen.getByTestId("trigger").getBoundingClientRect()
+    const popup = screen.getByTestId("popup").getBoundingClientRect()
+    expect(popup.right).toBeLessThanOrEqual(320)
+    expect(popup.right).toBeCloseTo(trigger.right)
+    expect(screen.getByTestId("positioner")).toHaveAttribute("data-side", "bottom")
+    expect(screen.getByTestId("positioner")).toHaveAttribute("data-align", "end")
+    expect(screen.getByTestId("positioner").style.opacity).toBe(1)
+    expect(screen.getByTestId("popup")).toHaveAttribute("data-align", "end")
+  })
+
+  it("shifts a side placement without changing its requested side", () => {
+    screen.render(
+      <Select.Root defaultOpen>
+        <Select.Trigger data-testid="trigger" aria-label="Fruit" style={{ position: "absolute", left: 120, top: 210, width: 60, height: 24 }}>
+          <Select.Value placeholder="Choose" />
+        </Select.Trigger>
+        <Select.Portal>
+          <Select.Positioner
+            data-testid="positioner"
+            side="bottom"
+            align="start"
+            collisionPadding={0}
+            collisionAvoidance={{ side: "shift", align: "none" }}
+          >
+            <Select.Popup data-testid="popup" style={{ width: 100, height: 60 }}>
+              <Select.List><Select.Item value="apple">Apple</Select.Item></Select.List>
+            </Select.Popup>
+          </Select.Positioner>
+        </Select.Portal>
+      </Select.Root>
+    )
+
+    const positioner = screen.getByTestId("positioner")
+    expect(positioner).toHaveAttribute("data-side", "bottom")
+    expect(screen.getByTestId("popup")).toHaveAttribute("data-side", "bottom")
+  })
+
+  it("intersects clipping ancestors with custom boundaries extending past the viewport", () => {
+    screen.render(
+      <Select.Root defaultOpen>
+        <Select.Trigger data-testid="trigger" aria-label="Fruit" style={{ position: "absolute", left: 330, top: 80, width: 30, height: 24 }}>
+          <Select.Value placeholder="Choose" />
+        </Select.Trigger>
+        <Select.Portal>
+          <Select.Positioner
+            data-testid="positioner"
+            collisionBoundary={["clipping-ancestors", { x: 300, y: 0, width: 200, height: 240 }]}
+          >
+            <Select.Popup data-testid="popup">
+              <Select.List><Select.Item value="apple">Apple</Select.Item></Select.List>
+            </Select.Popup>
+          </Select.Positioner>
+        </Select.Portal>
+      </Select.Root>
+    )
+
+    expect(screen.getByTestId("positioner")).toHaveAttribute("data-anchor-hidden", "")
+  })
 })

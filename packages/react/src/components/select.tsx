@@ -440,7 +440,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
       unregisterItem,
       isItemEqualToValue: compareValues,
     }),
-    [open, value, multiple, disabled, readOnly, focused, items, labels, activeValue, listId, listMounted, popupPosition, scrollability, compareValues]
+    [open, value, multiple, disabled, readOnly, highlightItemOnHover, focused, items, labels, activeValue, listId, listMounted, popupPosition, scrollability, compareValues]
   )
 
   return (

@@ -28,7 +28,7 @@ export type StateStyle<State> = StyleDesc | ((state: State) => StyleDesc)
 export type PositionerSide = FloatingSide | "inline-start" | "inline-end"
 export type PositionerAlign = FloatingAlign
 export type PositionerRect = { x: number; y: number; width: number; height: number }
-export type PositionerBoundary = "clipping-ancestors" | Element | Element[] | PositionerRect
+export type PositionerBoundary = "clipping-ancestors" | Element | Array<Element | "clipping-ancestors"> | PositionerRect
 export type PositionerOffsetFunction = (data: {
   side: PositionerSide
   align: PositionerAlign
@@ -408,10 +408,14 @@ function paddingInset(padding: PositionerProps["collisionPadding"]): number {
   return Math.max(padding.top ?? 0, padding.right ?? 0, padding.bottom ?? 0, padding.left ?? 0)
 }
 
-function rectOfBoundary(boundary: PositionerBoundary | undefined): PositionerRect | null {
-  if (!boundary || boundary === "clipping-ancestors") return null
+function rectOfBoundary(
+  boundary: PositionerBoundary | undefined,
+  viewport: PositionerRect | null
+): PositionerRect | null {
+  if (!boundary) return null
+  if (boundary === "clipping-ancestors") return viewport
   if (Array.isArray(boundary)) {
-    const rects = boundary.map(rectOfBoundary).filter((rect): rect is PositionerRect => rect !== null)
+    const rects = boundary.map((entry) => rectOfBoundary(entry, viewport)).filter((rect): rect is PositionerRect => rect !== null)
     if (rects.length === 0) return null
     const left = Math.max(...rects.map((rect) => rect.x))
     const top = Math.max(...rects.map((rect) => rect.y))
@@ -424,6 +428,24 @@ function rectOfBoundary(boundary: PositionerBoundary | undefined): PositionerRec
     return { x: rect.x, y: rect.y, width: rect.width, height: rect.height }
   }
   return boundary
+}
+
+function alignmentOverflow(
+  side: PositionerSide,
+  align: PositionerAlign,
+  anchor: Pick<DOMRect, "left" | "right" | "top" | "bottom" | "width" | "height">,
+  positioner: Pick<DOMRect, "left" | "right" | "top" | "bottom" | "width" | "height">,
+  boundary: PositionerRect,
+  padding: { top: number; right: number; bottom: number; left: number }
+): number {
+  const verticalSide = physicalSide(side) === "top" || physicalSide(side) === "bottom"
+  const start = verticalSide
+    ? align === "start" ? anchor.left : align === "end" ? anchor.right - positioner.width : anchor.left + (anchor.width - positioner.width) / 2
+    : align === "start" ? anchor.top : align === "end" ? anchor.bottom - positioner.height : anchor.top + (anchor.height - positioner.height) / 2
+  const size = verticalSide ? positioner.width : positioner.height
+  const min = verticalSide ? boundary.x + padding.left : boundary.y + padding.top
+  const max = verticalSide ? boundary.x + boundary.width - padding.right : boundary.y + boundary.height - padding.bottom
+  return Math.max(min - start, 0) + Math.max(start + size - max, 0)
 }
 
 /** A renderer-neutral positioner contract shared by floating controls. */
@@ -475,9 +497,8 @@ export const FloatingPositioner = forwardRef<PublicInstance, PositionerProps>(
       ? anchorNode.getBoundingClientRect()
       : null
     const viewport = renderer?.getWindowSize?.()
-    const boundaryRect = rectOfBoundary(collisionBoundary) ?? (viewport
-      ? { x: 0, y: 0, width: viewport.width, height: viewport.height }
-      : null)
+    const viewportRect = viewport ? { x: 0, y: 0, width: viewport.width, height: viewport.height } : null
+    const boundaryRect = rectOfBoundary(collisionBoundary, viewportRect) ?? viewportRect
     useLayoutEffect(() => {
       if (!open || !anchorRect || !positionerRef.current) {
         setMeasuredPlacement(null)
@@ -495,7 +516,8 @@ export const FloatingPositioner = forwardRef<PublicInstance, PositionerProps>(
         ? current
         : nextDimensions)
       let resolvedSide: PositionerSide = side
-      if (collisionAvoidance?.side !== "none") {
+      const sideAvoidance = collisionAvoidance?.side ?? "flip"
+      if (sideAvoidance === "flip") {
         if (side === "bottom" && popupRect.top < anchorRect.top) resolvedSide = "top"
         else if (side === "top" && popupRect.bottom > anchorRect.bottom) resolvedSide = "bottom"
         else if (side === "right" && popupRect.left < anchorRect.left) resolvedSide = "left"
@@ -507,9 +529,24 @@ export const FloatingPositioner = forwardRef<PublicInstance, PositionerProps>(
         else if (popupRect.top < anchorRect.top && popupRect.bottom <= anchorRect.bottom + 1) resolvedSide = "top"
         else if (popupRect.left < anchorRect.left && popupRect.right <= anchorRect.right + 1) resolvedSide = "left"
       }
-      const resolvedAlign: PositionerAlign = align
+      let resolvedAlign: PositionerAlign = align
+      const padding = typeof collisionPadding === "number"
+        ? { top: collisionPadding, right: collisionPadding, bottom: collisionPadding, left: collisionPadding }
+        : { top: collisionPadding?.top ?? 5, right: collisionPadding?.right ?? 5, bottom: collisionPadding?.bottom ?? 5, left: collisionPadding?.left ?? 5 }
+      if (boundaryRect && collisionAvoidance?.align === "flip" && (align === "start" || align === "end")) {
+        const oppositeAlign = align === "start" ? "end" : "start"
+        const currentOverflow = alignmentOverflow(resolvedSide, align, anchorRect, popupRect, boundaryRect, padding)
+        const oppositeOverflow = alignmentOverflow(resolvedSide, oppositeAlign, anchorRect, popupRect, boundaryRect, padding)
+        if (currentOverflow > 0 && oppositeOverflow === 0) {
+          resolvedAlign = oppositeAlign
+        }
+      }
       const requestedPosition = resolvedSide === side
-        ? position
+        ? resolvedAlign === align
+          ? position
+          : resolvedSide === "top" || resolvedSide === "bottom"
+            ? { x: resolvedAlign === "start" ? anchorRect.left : resolvedAlign === "end" ? anchorRect.right : anchorRect.left + anchorRect.width / 2, y: resolvedSide === "top" ? anchorRect.top : anchorRect.bottom }
+            : { x: resolvedSide === "left" ? anchorRect.left : anchorRect.right, y: resolvedAlign === "start" ? anchorRect.top : resolvedAlign === "end" ? anchorRect.bottom : anchorRect.top + anchorRect.height / 2 }
         : resolvedSide === "top"
           ? { x: resolvedAlign === "start" ? anchorRect.left : resolvedAlign === "end" ? anchorRect.right : anchorRect.left + anchorRect.width / 2, y: anchorRect.top }
           : resolvedSide === "bottom"
@@ -521,10 +558,7 @@ export const FloatingPositioner = forwardRef<PublicInstance, PositionerProps>(
         measuredPlacement.requestedSide === side && measuredPlacement.requestedAlign === align &&
         measuredPlacement.requestedPosition?.x === requestedPosition?.x && measuredPlacement.requestedPosition?.y === requestedPosition?.y
       let nextPosition = sameRequest ? measuredPlacement.position : requestedPosition
-      if (boundaryRect && (collisionAvoidance?.align !== "none" || collisionAvoidance?.side !== "none")) {
-        const padding = typeof collisionPadding === "number"
-          ? { top: collisionPadding, right: collisionPadding, bottom: collisionPadding, left: collisionPadding }
-          : { top: collisionPadding?.top ?? 5, right: collisionPadding?.right ?? 5, bottom: collisionPadding?.bottom ?? 5, left: collisionPadding?.left ?? 5 }
+      if (boundaryRect && resolvedAlign === align && (collisionAvoidance?.align !== "none" || collisionAvoidance?.side !== "none")) {
         const left = boundaryRect.x + padding.left
         const top = boundaryRect.y + padding.top
         const right = boundaryRect.x + boundaryRect.width - padding.right
