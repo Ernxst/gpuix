@@ -300,6 +300,23 @@ describeNative("render", () => {
     expect(screen.renderer.getWindowTitle()).toBe(baseTitle)
   })
 
+  it("clears a removed title that was the sole root before rendering visible content", () => {
+    const screen = render(<text>Initial content</text>)
+    const baseTitle = screen.renderer.getWindowTitle()
+    screen.rerender(<title>Temporary root title</title>)
+    expect(screen.renderer.getWindowTitle()).toBe("Temporary root title")
+
+    screen.rerender(null)
+    expect(screen.renderer.getWindowTitle()).toBe(baseTitle)
+
+    screen.rerender(<text>Visible route content</text>)
+    expect(screen.renderer.getWindowTitle()).toBe(baseTitle)
+    expect(screen.renderer.getAllText()).toEqual(["Visible route content"])
+
+    screen.rerender(<title>Next route title</title>)
+    expect(screen.renderer.getWindowTitle()).toBe("Next route title")
+  })
+
   it("accepts suppressHydrationWarning and updates the title", () => {
     const screen = render(<title suppressHydrationWarning>First</title>)
     expect(screen.renderer.getWindowTitle()).toBe("First")
