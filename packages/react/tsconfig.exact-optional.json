@@ -4,8 +4,15 @@
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true,
     "disableSourceOfProjectReferenceRedirect": true,
+    "rootDir": ".",
+    "baseUrl": ".",
+    "paths": {
+      "@gpuix/react": ["dist/index.d.ts"],
+      "@gpuix/react/select": ["dist/components/select.d.ts"],
+      "@gpuix/react/*": ["dist/*"]
+    },
     "noEmit": true
   },
-  "files": ["src/__tests__/exact-optional.types.ts"],
-  "include": ["src/__tests__/exact-optional.types.ts"]
+  "files": ["src/__tests__/exact-optional.types.ts", "type-tests/select-parity/select-parity.types.tsx"],
+  "include": ["src/__tests__/exact-optional.types.ts", "type-tests/select-parity/select-parity.types.tsx"]
 }
