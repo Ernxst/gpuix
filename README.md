@@ -3634,6 +3634,11 @@ the app.
 
 Each primitive has a dedicated namespace entry point:
 
+Import the named component namespace and use its parts, for example
+`import { Select } from "@gpuix/react/select"` followed by
+`<Select.Root>…</Select.Root>`. Select also keeps its direct `<Select>` root
+and module-level part aliases for existing code.
+
 | Import | Main parts |
 |---|---|
 | `@gpuix/react/dialog` | `Root`, `Trigger`, `Portal`, `Backdrop`, `Popup`, `Title`, `Description`, `Close` |

@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.exact-optional.json",
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "paths": {
+      "@base-ui/react/select": ["dist/components/select.d.ts"],
+      "@gpuix/react/select": ["dist/components/select.d.ts"],
+      "@gpuix/react/jsx-runtime": ["jsx-runtime.d.ts"]
+    }
+  },
+  "files": ["./select-parity.types.tsx"],
+  "include": ["./select-parity.types.tsx"]
+}

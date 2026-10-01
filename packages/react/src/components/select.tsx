@@ -1093,6 +1093,28 @@ export const SelectScrollDownArrow = forwardRef<PublicInstance, SelectScrollArro
   }
 )
 
+export namespace Select {
+  export const Root = Select
+  export const Trigger = SelectTrigger
+  export const Value = SelectValue
+  export const Icon = SelectIcon
+  export const Portal = SelectPortal
+  export const Backdrop = SelectBackdrop
+  export const Positioner = SelectPositioner
+  export const Popup = SelectPopup
+  export const List = SelectList
+  export const Item = SelectItem
+  export const ItemIndicator = SelectItemIndicator
+  export const ItemText = SelectItemText
+  export const Arrow = SelectArrow
+  export const ScrollUpArrow = SelectScrollUpArrow
+  export const ScrollDownArrow = SelectScrollDownArrow
+  export const Group = SelectGroup
+  export const GroupLabel = SelectGroupLabel
+  export const Label = SelectLabel
+  export const Separator = SelectSeparator
+}
+
 export {
   Select as Root,
   SelectPopup as Popup,
