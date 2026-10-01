@@ -817,6 +817,7 @@ export class TestRenderer implements NativeRenderer {
   private pickerResults: Array<string[] | string | null> = []
   private pickerRequestLog: PickerRequest[] = []
   private webGpuCanvasIds = new Set<number>()
+  private windowTitle: string | undefined
   private readonly asyncTaskMode: "eager" | "manual"
 
   get pickerRequests(): ReadonlyArray<PickerRequest> {
@@ -1746,9 +1747,14 @@ export class TestRenderer implements NativeRenderer {
     return JSON.parse(this.native.getAccessibilityTree())
   }
 
-  /** Read the title GPUI last exposed in its drawn accessibility tree. */
+  /** Set title state without asking the native test window to open a title bar. */
+  setWindowTitle(title: string): void {
+    this.windowTitle = title
+  }
+
+  /** Read the explicitly set title, or GPUI's last drawn title by default. */
   getWindowTitle(): string | null {
-    return this.getAccessibilityTree().frame?.window_title ?? null
+    return this.windowTitle ?? this.getAccessibilityTree().frame?.window_title ?? null
   }
 
   /** Every element the native tree holds, reachable or not. `toJSON()` walks
@@ -1875,6 +1881,7 @@ export class TestRenderer implements NativeRenderer {
    *  for the caller to drain or dispatch. */
   resetWindowState(): void {
     this.native.resetWindowState()
+    this.windowTitle = undefined
     resetAnimationFrameSource(this)
     this.animationFrameCallbacks = []
     this.animationFrameRequestCount = 0

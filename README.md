@@ -1137,6 +1137,16 @@ function Reveal() {
 
 Outside React, call it on the renderer that `createRenderer()` returned.
 
+Change the renderer window title after launch with `setWindowTitle()`. It is
+available on native and browser renderers and does not add a `<title>` element:
+
+```tsx
+function RenameWindow() {
+  const renderer = useGpuixRequired()
+  return <div onClick={() => renderer.setWindowTitle?.('Search')}>Rename</div>
+}
+```
+
 Opening a shown window (`focus` and `show` both default) and calling
 `activateWindow()` both request app activation, but the OS can refuse that
 request, most often when several processes ask for it at once. Either way the
@@ -3485,7 +3495,16 @@ state boundary; reads and action injection use that last snapshot and its
 installed listeners until the next explicit draw. This is not a parallel
 reconstruction from React props.
 `renderer.getWindowTitle()` reads the window title from that same last-drawn
-accessibility frame, or returns `null` when the frame has no title.
+accessibility frame, or returns `null` when the frame has no title. After a test
+component calls `useGpuixRequired().setWindowTitle(title)`, the test renderer's
+`getWindowTitle()` returns that title. Read it from the `render()` result:
+
+```tsx
+const screen = render(<App />)
+expect(screen.renderer.getWindowTitle()).toBe('Search')
+```
+
+The test title is reset when the shared test window resets.
 See [the platform accessibility smoke guide](./docs/accessibility-smoke.md) for
 the manual OS and screen-reader checks that snapshots cannot prove.
 

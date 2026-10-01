@@ -98,6 +98,28 @@ Text matching follows Testing Library: trimmed, whitespace-collapsed, exact; `{ 
 
 A `TestElement` has `id`, `type`, `style` (declared, not resolved), `text`, `events`, `children`, `parentElement`, `getBoundingClientRect()` (painted border box in logical pixels), `dataTestId`, `authorId`, `customProps` and `semantics`. Read hover, focus and other state styles with `renderer.getResolvedStyle(id)`.
 
+Set the test window title through the renderer context, as an app does after
+launch, then read it from the `render()` result. `getWindowTitle()` returns the
+set value until the shared test window resets:
+
+```tsx
+import { useEffect } from 'react'
+import { expect, it } from 'vitest'
+import { useGpuixRequired } from '@gpuix/react'
+import { render } from '@gpuix/react/testing'
+
+function SetTitle() {
+  const renderer = useGpuixRequired()
+  useEffect(() => renderer.setWindowTitle?.('Search'), [renderer])
+  return null
+}
+
+it('sets and reads the window title', () => {
+  const screen = render(<SetTitle />)
+  expect(screen.renderer.getWindowTitle()).toBe('Search')
+})
+```
+
 ## `userEvent` and native input
 
 `userEvent` methods return promises: `click`, `dblClick` and `hover` (at the centre of the painted bounds, through GPUI hit-testing), `unhover` (moves the pointer outside the element, or to (-1, -1)), `type(el, text)` (focuses, then types keystroke by keystroke), `clear(el)` (`cmd-a` on macOS, `ctrl-a` elsewhere, then `backspace`), `tab({ shift })`, and `keyboard(el, keys)`. There is no `setup()`, `pointer()`, `selectOptions`, `upload` or `paste`. Each keystroke is committed before the next, so `"tab a"` types `a` into the element that took focus. Keyboard input draws only when a key changed something: a Tab draws once, to report the focus move, and a key nothing handles draws nothing.

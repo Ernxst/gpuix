@@ -189,7 +189,7 @@ All from `@gpuix/react`.
 | Hook | Returns |
 |---|---|
 | `useGpuix()` | `{ renderer }`; `{ renderer: null }` outside a GPU-IX root. |
-| `useGpuixRequired()` | The renderer; throws outside a root (its message names a `GpuixProvider`, which does not exist: `root.render` provides the context). Window controls (`activateWindow`, `minimizeWindow`, `zoomWindow`, `toggleFullscreen`), `scrollToItem`, `focusElement` and `getElementBounds` live on it. |
+| `useGpuixRequired()` | The renderer; throws outside a root (its message names a `GpuixProvider`, which does not exist: `root.render` provides the context). Window controls (`activateWindow`, `minimizeWindow`, `zoomWindow`, `toggleFullscreen`, `setWindowTitle`), `scrollToItem`, `focusElement` and `getElementBounds` live on it. |
 | `useWindowSize()` | `{ width, height, scaleFactor }` in logical px, updated on native resize. The replacement for `window.innerWidth` and media queries. |
 | `useWindowInsets({ intervalMs })` | Safe-area and on-screen keyboard insets, polled (default every 100 ms). |
 | `useTextSearch({ query, … })` | `{ props, total, active, next, previous, goTo }`; spread `props` on the searched container. |
