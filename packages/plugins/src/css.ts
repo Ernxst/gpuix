@@ -22,7 +22,7 @@ export function cleanId(id: string): string {
 }
 
 export function isCssModule(id: string): boolean {
-  return cleanId(id).endsWith(".module.css")
+  return CSS_MODULE_RESOLVE_RE.test(id)
 }
 
 export function cssModuleId(sourceId: string): string {
@@ -36,6 +36,7 @@ export function isCssModuleId(id: string): boolean {
 }
 
 export function sourceIdFromCssModuleId(id: string): string {
+  if (!id.startsWith(CSS_MODULE_PREFIX)) return cleanId(id)
   return decodeURIComponent(id.slice(CSS_MODULE_PREFIX.length))
 }
 
@@ -171,7 +172,12 @@ export async function resolveCssModule(
   framework: string,
 ): Promise<string | undefined> {
   if (!isCssModule(id)) return undefined
-  if (framework === "bun") return cssModuleId(resolveBunCssModule(id, importer))
+  if (framework === "bun") {
+    const resolved = importer && id.startsWith("#")
+      ? resolveBunCssDependency(id, importer)
+      : resolveBunCssModule(id, importer)
+    return resolved ? cssModuleId(cleanId(resolved)) : undefined
+  }
   if (framework !== "vite") return undefined
 
   const resolved = await (context as ViteResolveContext).resolve?.(id, importer, {
@@ -265,12 +271,20 @@ export function gpuixCssModules(options: CssModulesOptions = {}): Plugin {
  * without this plugin hands the renderer strings it cannot resolve.
  */
 export function gpuixCssModulesBun(options: CssModulesOptions = {}): BunPlugin {
+  return createBunCssModulesPlugin(options)
+}
+
+function createBunCssModulesPlugin(options: CssModulesOptions): BunPlugin {
   return {
     name: "gpuix-css-modules",
     setup(build) {
-      build.onResolve({ filter: /\.module\.css$/ }, ({ path: id, importer }) => ({
-        path: resolveBunCssModule(id, importer),
-      }))
+      build.onResolve({ filter: /\.module\.css(?:[?#].*)?$/ }, ({ path: id, importer }) => {
+        if (id.startsWith("#") || !id.startsWith(".") && !path.isAbsolute(id)) {
+          const resolved = importer ? resolveBunCssDependency(id, importer) : undefined
+          return resolved ? { path: cleanId(resolved) } : undefined
+        }
+        return { path: resolveBunCssModule(id, importer) }
+      })
 
       build.onLoad({ filter: /\.module\.css$/, namespace: "file" }, async ({ path: id }) => ({
         contents: await compileCssModuleCode(
@@ -278,6 +292,7 @@ export function gpuixCssModulesBun(options: CssModulesOptions = {}): BunPlugin {
           id,
           options.plugins,
           resolveBunCssDependency,
+          undefined,
         ),
         loader: "js",
         resolveDir: path.dirname(id),

@@ -21,10 +21,14 @@ import { gpuixDev } from "@gpuix/plugins/bun"
 Bun.plugin(gpuixDev())
 ```
 
-The preload must run before the application imports any CSS modules.
-Bun's runtime watcher does not currently re-run files handled by custom
-`onLoad` plugins, so restart the process after changing a CSS module. JavaScript
-and TypeScript changes continue to use Bun's hot reload.
+The preload must run before the application imports any CSS modules. CSS module
+imports are resolved by the plugin, including package `imports` specifiers such
+as `#styles/utilities.module.css` and exported package subpaths such as
+`style-pkg/utilities.module.css`. Bun's runtime watcher does not currently
+re-run CSS modules handled by custom `onLoad` plugins, under either `--hot` or
+`--watch`; restart the process after changing one. Vite also keeps the current
+compiled styles until the importer is reloaded, for both relative and package
+imports. JavaScript and TypeScript changes continue to use Bun's hot reload.
 
 ## Bun build
 
@@ -69,6 +73,15 @@ import styles from "./button.module.css"
 export function Button() {
   return <div className={styles.button}>Save</div>
 }
+```
+
+Package `imports` and exported package subpaths can also be imported from
+JavaScript and TypeScript; they resolve to the same compiled style object as a
+relative import:
+
+```ts
+import utilities from "#styles/utilities.module.css"
+import tokens from "style-pkg/tokens.module.css"
 ```
 
 A web build resolves that import to a class name and applies the stylesheet. A

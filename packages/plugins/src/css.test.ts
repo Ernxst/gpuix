@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "bun:test"
-import { existsSync } from "node:fs"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
+import { existsSync, realpathSync } from "node:fs"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { createServer, type ViteDevServer } from "vite"
@@ -39,11 +40,12 @@ test("compiles CSS modules in a plain Vite config, with no gpuix environment", a
     'export { default as styles } from "./button.module.css"\n',
   )
 
+  const cssPlugin = gpuixCssModules()
   server = await createServer({
     appType: "custom",
     configFile: false,
     root: fixture,
-    plugins: [gpuixCssModules()],
+    plugins: [cssPlugin],
   })
 
   const module = (await server.ssrLoadModule("/entry.ts")) as {
@@ -60,6 +62,88 @@ test("compiles CSS modules in a plain Vite config, with no gpuix environment", a
     false,
   )
 })
+
+test("Vite imports CSS modules through package imports like relative imports", async () => {
+  fixture = await mkdtemp(path.join(os.tmpdir(), "gpuix-css-vite-imports-"))
+  await writeFile(
+    path.join(fixture, "package.json"),
+    JSON.stringify({ imports: { "#styles/*": "./src/styles/*" } }),
+  )
+  await mkdir(path.join(fixture, "src/styles"), { recursive: true })
+  const stylePackage = path.join(fixture, "node_modules/style-package")
+  await mkdir(stylePackage, { recursive: true })
+  await writeFile(
+    path.join(stylePackage, "package.json"),
+    JSON.stringify({ name: "style-package", exports: { "./card.module.css": "./card.module.css" } }),
+  )
+  await writeFile(path.join(stylePackage, "card.module.css"), ".card { display: flex; }\n")
+  await writeFile(path.join(fixture, "src/styles/card.module.css"), ".card { display: flex; }\n")
+  await writeFile(
+    path.join(fixture, "entry.ts"),
+    'import relative from "./src/styles/card.module.css"\nimport queried from "./src/styles/card.module.css?used"\nimport aliased from "#styles/card.module.css"\nimport exported from "style-package/card.module.css"\nexport default { relative: relative.card, queried: queried.card, aliased: aliased.card, exported: exported.card }\n',
+  )
+
+  server = await createServer({
+    appType: "custom",
+    configFile: false,
+    root: fixture,
+    plugins: [gpuixCssModules()],
+  })
+  const loaded = (await server.ssrLoadModule("/entry.ts")).default as Record<string, unknown>
+  expect(loaded.aliased).toEqual(loaded.relative)
+  expect(loaded.queried).toEqual(loaded.relative)
+  expect(loaded.exported).toEqual({ display: "flex" })
+  expect(Object.getOwnPropertySymbols(loaded.exported as object)).toContain(
+    Symbol.for("gpuix.compiledStyle"),
+  )
+  expect(Object.getOwnPropertySymbols(loaded.aliased as object)).toContain(
+    Symbol.for("gpuix.compiledStyle"),
+  )
+  const source = path.join(fixture, "src/styles/card.module.css")
+  await writeFile(source, ".card { display: block; }\n")
+  server.watcher.emit("change", realpathSync(source))
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  const updated = (await server.ssrLoadModule("/entry.ts")).default as Record<string, unknown>
+  expect(updated.aliased).toEqual(updated.relative)
+  expect(updated.relative).toEqual({ display: "flex" })
+})
+
+test("Vitest imports CSS modules through package imports like relative imports", async () => {
+  fixture = await mkdtemp(path.join(path.dirname(fileURLToPath(import.meta.url)), ".css-vitest-imports-"))
+  await mkdir(path.join(fixture, "src/styles"), { recursive: true })
+  await writeFile(
+    path.join(fixture, "package.json"),
+    JSON.stringify({ imports: { "#styles/*": "./src/styles/*" } }),
+  )
+  await writeFile(path.join(fixture, "src/styles/card.module.css"), ".card { color: blue; }\n")
+  const stylePackage = path.join(fixture, "node_modules/style-package")
+  await mkdir(stylePackage, { recursive: true })
+  await writeFile(
+    path.join(stylePackage, "package.json"),
+    JSON.stringify({ name: "style-package", exports: { "./card.module.css": "./card.module.css" } }),
+  )
+  await writeFile(path.join(stylePackage, "card.module.css"), ".card { color: green; }\n")
+  await writeFile(
+    path.join(fixture, "entry.test.ts"),
+    'import { expect, test } from "vitest"\nimport relative from "./src/styles/card.module.css"\nimport aliased from "#styles/card.module.css"\nimport exported from "style-package/card.module.css"\ntest("uses the compiled style", () => { expect(aliased.card).toEqual(relative.card); expect(exported.card).toEqual({ color: "green" }); expect(Object.getOwnPropertySymbols(aliased.card)).toContain(Symbol.for("gpuix.compiledStyle")); expect(Object.getOwnPropertySymbols(exported.card)).toContain(Symbol.for("gpuix.compiledStyle")) })\n',
+  )
+  const cssPlugin = pathToFileURL(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "css.ts")).href
+  await writeFile(
+    path.join(fixture, "vitest.config.mts"),
+    `import { gpuixCssModules } from ${JSON.stringify(cssPlugin)}\nexport default { plugins: [gpuixCssModules()], test: { include: ["entry.test.ts"] } }\n`,
+  )
+
+  const vitest = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../react/node_modules/.bin/vitest",
+  )
+  const result = Bun.spawnSync([vitest, "run", "--config", path.join(fixture, "vitest.config.mts")], {
+    cwd: fixture,
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  expect(result.exitCode, `${result.stdout.toString()}\n${result.stderr.toString()}`).toBe(0)
+}, 30_000)
 
 test("resolves and watches a composed CSS module in Vite", async () => {
   fixture = await mkdtemp(path.join(path.dirname(fileURLToPath(import.meta.url)), ".css-vite-composes-"))
@@ -166,6 +250,45 @@ test("compiles CSS modules for Bun's bundler, which otherwise emits class names"
   expect(await build([gpuixCssModulesBun()])).toMatch(/card:\s*\{\s*display:\s*"flex"\s*\}/)
   // Bun's own CSS modules name the class instead, which the renderer cannot use.
   expect(await build([])).toMatch(/card:\s*"card_/)
+})
+
+test("Bun.build imports package CSS modules like relative imports", async () => {
+  fixture = await mkdtemp(path.join(path.dirname(fileURLToPath(import.meta.url)), ".css-bun-imports-"))
+  await mkdir(path.join(fixture, "src/styles"), { recursive: true })
+  await mkdir(path.join(fixture, "src/bun"), { recursive: true })
+  await writeFile(
+    path.join(fixture, "package.json"),
+    JSON.stringify({ imports: { "#styles/*": { bun: "./src/bun/*", default: "./src/styles/*" } } }),
+  )
+  await writeFile(path.join(fixture, "src/styles/card.module.css"), ".card { color: blue; }\n")
+  await writeFile(path.join(fixture, "src/bun/card.module.css"), ".card { color: red; }\n")
+  const stylePackage = path.join(fixture, "node_modules/style-package")
+  await mkdir(stylePackage, { recursive: true })
+  await writeFile(
+    path.join(stylePackage, "package.json"),
+    JSON.stringify({ name: "style-package", exports: { "./card.module.css": "./card.module.css" } }),
+  )
+  await writeFile(path.join(stylePackage, "card.module.css"), ".card { color: green; }\n")
+  await writeFile(
+    path.join(fixture, "entry.ts"),
+    'import relative from "./src/bun/card.module.css"\nimport aliased from "#styles/card.module.css"\nimport exported from "style-package/card.module.css"\nif (JSON.stringify(relative.card) !== JSON.stringify(aliased.card)) throw new Error("CSS imports differ")\nconsole.log(JSON.stringify({ relative: relative.card, aliased: aliased.card, exported: exported.card }))\n',
+  )
+
+  const result = await Bun.build({
+    entrypoints: [path.join(fixture, "entry.ts")],
+    target: "bun",
+    plugins: [gpuixCssModulesBun()],
+  })
+  expect(result.success, result.logs.map(String).join("\n")).toBe(true)
+  const outputFile = path.join(fixture, "entry-built.js")
+  await writeFile(outputFile, await result.outputs[0]!.text())
+  const output = Bun.spawnSync([process.execPath, outputFile], { stdout: "pipe", stderr: "pipe" })
+  expect(output.exitCode, output.stderr.toString()).toBe(0)
+  expect(JSON.parse(output.stdout.toString())).toEqual({
+    relative: { color: "red" },
+    aliased: { color: "red" },
+    exported: { color: "green" },
+  })
 })
 
 test("resolves composed CSS modules in Bun.build()", async () => {

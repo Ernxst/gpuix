@@ -18,7 +18,7 @@ A declaration that compiles is not always one the renderer accepts. The compiler
 
 ## Traps
 
-- **Import CSS modules from JS by relative path only.** Bun resolves a JS-level `.module.css` import with `path.resolve(importer dir, id)`, so `@/ui/x.module.css` and `pkg/x.module.css` resolve to the wrong file. A `#ui/x.module.css` specifier fails in both: the plugin strips everything after `#` (`css.ts` `cleanId`), so Bun resolves it to the importer's directory and Vite hands it to its own CSS handling, which yields class-name strings. Inside CSS, `@import` and `composes … from` do resolve package and `#` imports.
+- **CSS modules can be imported from JS by relative path, package `imports`, or exported package subpath.** For example, `import utilities from "#styles/utilities.module.css"` and `import tiles from "style-pkg/tile.module.css"` compile to the same tagged style objects as relative imports. The specifier is resolved from the importing JS file using the host bundler's package conditions. CSS `@import` and `composes … from` support the same package and `#` forms.
 - **Only the supported descendant forms compile.** `.a:hover .b`, `.a:active .b`, `.a:focus .b`, `.a:focus-visible .b`, and `.a:focus-within .b` are supported. Plain descendants, children (`>`), compound classes (`.a.b`), and attribute selectors fail the build. There are no `data-*` state attributes to target anyway.
 - **One ancestor per descendant class.** `.card:hover .title` together with `.panel:hover .title` fails: `selector ".panel:hover .title" conflicts with selector ".card:hover .title"`.
 - **A descendant rendered outside its selector ancestor does not match.** `.a:hover .b` gives `.a` a generated `hoverGroup` and `.b` a `hoverWithinGroup`; if an element with class `b` has no `a` ancestor, the state never applies and no diagnostic is emitted, matching CSS selector behaviour.
@@ -31,7 +31,7 @@ A declaration that compiles is not always one the renderer accepts. The compiler
 - **`transition` belongs on the base class rule only.** Inside `:hover` or another state it fails the build; the `transition-*` longhands are rejected everywhere.
 - **Plain descendant rules nested inside a class are rejected.** `postcss-nesting` flattens `.card { .label {} }` to `.card .label`. `&:hover` and `&:hover .label` are fine.
 - **`bun build --compile` on the command line compiles no CSS modules.** It takes no plugins, so each import becomes Bun's class-name string and paints nothing; strict mode is off in the binary, so this only warns. Build with `Bun.build({ compile, plugins: [gpuixCssModulesBun()] })` (`packages/plugins/README.md`).
-- **An edited CSS module needs a process restart under `bun --hot`.** Bun's watcher does not re-run plugin-loaded files. Vite watches the module and its imports.
+- **CSS module edits do not refresh their JS importers automatically.** In the tested setup, Bun's CSS plugin does not re-run plugin-loaded modules under either `--hot` or `--watch`, for relative or package imports. Vite also retains the previous compiled styles until the importer is reloaded, for both relative and package imports. Restart Bun or reload the Vite importer after editing the module.
 - **An empty rule produces no key.** `.a {}` makes `styles.a` `undefined`.
 
 ## Wiring
