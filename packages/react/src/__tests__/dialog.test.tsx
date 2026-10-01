@@ -21,24 +21,34 @@ describeNative("Dialog", () => {
   it("cycles Tab and Shift+Tab within a modal popup", () => {
     const first = React.createRef<PublicInstance>()
     const last = React.createRef<PublicInstance>()
+    const close = React.createRef<PublicInstance>()
     screen.render(
-      <Dialog defaultOpen modal="trap-focus">
-        <DialogPortal>
-          <DialogPopup>
-            <DialogTitle>Confirm</DialogTitle>
-            <button ref={first} ariaLabel="First" />
-            <button ref={last} ariaLabel="Last" />
-          </DialogPopup>
-        </DialogPortal>
-      </Dialog>
+      <Dialog.Root defaultOpen modal="trap-focus">
+        <Dialog.Trigger ariaLabel="Open confirm dialog" />
+        <Dialog.Portal>
+          <Dialog.Backdrop />
+          <Dialog.Viewport>
+            <Dialog.Popup>
+              <Dialog.Title>Confirm</Dialog.Title>
+              <Dialog.Description>Confirm this action.</Dialog.Description>
+              <button ref={first} ariaLabel="First" />
+              <button ref={last} ariaLabel="Last" />
+              <Dialog.Close ref={close}>Close</Dialog.Close>
+            </Dialog.Popup>
+          </Dialog.Viewport>
+        </Dialog.Portal>
+      </Dialog.Root>
     )
 
     expect(screen.renderer.getActiveElement()).toBeDefined()
     screen.renderer.focusElement(last.current!.id)
     screen.renderer.simulateKeystrokes("tab")
-    expect(screen.renderer.getActiveElement()).toBe(first.current!.id)
+    expect(screen.renderer.getActiveElement()).toBe(close.current!.id)
     screen.renderer.simulateKeystrokes("shift-tab")
     expect(screen.renderer.getActiveElement()).toBe(last.current!.id)
+    screen.renderer.focusElement(first.current!.id)
+    screen.renderer.simulateKeystrokes("shift-tab")
+    expect(screen.renderer.getActiveElement()).toBe(close.current!.id)
   })
 
   it("keeps focus on an empty modal popup for Tab and Shift+Tab", () => {
@@ -158,14 +168,32 @@ describeNative("Dialog", () => {
   it("opens a Dialog.Trigger with Enter and Space", () => {
     const trigger = React.createRef<PublicInstance>()
     const changes: Array<{ open: boolean; reason: string }> = []
-    screen.render(
-      <Dialog onOpenChange={(open, details) => changes.push({ open, reason: details.reason })}>
-        <DialogTrigger ref={trigger} ariaLabel="Open dialog" />
-        <DialogPortal>
-          <DialogPopup><DialogTitle>Keyboard dialog</DialogTitle></DialogPopup>
-        </DialogPortal>
-      </Dialog>
-    )
+    function ControlledDialog() {
+      const [open, setOpen] = React.useState(false)
+      return (
+        <Dialog.Root
+          open={open}
+          onOpenChange={(nextOpen, details) => {
+            changes.push({ open: nextOpen, reason: details.reason })
+            setOpen(nextOpen)
+          }}
+        >
+          <Dialog.Trigger ref={trigger} ariaLabel="Open dialog" />
+          <Dialog.Portal>
+            <Dialog.Backdrop />
+            <Dialog.Viewport>
+              <Dialog.Popup>
+                <Dialog.Title>Keyboard dialog</Dialog.Title>
+                <Dialog.Description>Opened from the trigger.</Dialog.Description>
+                <Dialog.Close>Close dialog</Dialog.Close>
+              </Dialog.Popup>
+            </Dialog.Viewport>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )
+    }
+
+    screen.render(<ControlledDialog />)
 
     screen.renderer.focusElement(trigger.current!.id)
     screen.renderer.simulateKeystrokes("enter")
@@ -173,9 +201,15 @@ describeNative("Dialog", () => {
     expect(changes.at(-1)).toEqual({ open: true, reason: "trigger-press" })
     screen.renderer.simulateKeystrokes("escape")
     expect(changes.at(-1)).toEqual({ open: false, reason: "escape-key" })
+    expect(screen.queryByRole("dialog", { name: "Keyboard dialog" })).toBeNull()
+    expect(screen.renderer.getActiveElement()).toBe(trigger.current!.id)
     screen.renderer.focusElement(trigger.current!.id)
     screen.renderer.simulateKeystrokes("space")
     expect(screen.getByRole("dialog", { name: "Keyboard dialog" })).toBeDefined()
+    screen.renderer.focusElement(screen.getByRole("button", { name: "Close dialog" }).id)
+    screen.renderer.simulateKeystrokes("enter")
+    expect(screen.queryByRole("dialog", { name: "Keyboard dialog" })).toBeNull()
+    expect(changes.at(-1)).toEqual({ open: false, reason: "close-press" })
   })
 
   it("dispatches keyboard button activation as a bubbling click event", () => {
@@ -332,6 +366,7 @@ describeNative("Dialog", () => {
         defaultOpen
         onOpenChange={(open, details) => changes.push({ open, reason: details.reason })}
       >
+        <AlertDialog.Trigger>Open alert</AlertDialog.Trigger>
         <AlertDialog.Portal>
           <AlertDialog.Backdrop />
           <AlertDialog.Viewport>
