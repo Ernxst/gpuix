@@ -1,6 +1,6 @@
 ---
 name: gpuix
-description: Build, style, test and debug React apps that render with GPU-IX (the Ernxst/gpuix fork of GPUIX; packages @gpuix/react, @gpuix/native, @gpuix/plugins), a React renderer that paints with GPUI instead of a DOM. Use this whenever code imports @gpuix/*, uses jsxImportSource "@gpuix/react", renders <text>, <virtual-list>, <anchored> or style.hover, compiles .module.css with @gpuix/plugins, or when choosing a UI library, CSS, event or DOM API for a GPU-IX desktop app, even if the user only says "the desktop app" or "the native build". It lists what GPU-IX supports, what it lacks compared with a browser, and the traps that cost the most debugging time.
+description: Build, style, test and debug React apps that render with GPU-IX (the galaxiajs/gpuix fork of GPUIX; packages @gpuix/react, @gpuix/native, @gpuix/plugins), a React renderer that paints with GPUI instead of a DOM. Use this whenever code imports @gpuix/*, uses jsxImportSource "@gpuix/react", renders <text>, <virtual-list>, <anchored> or style.hover, compiles .module.css with @gpuix/plugins, or when choosing a UI library, CSS, event or DOM API for a GPU-IX desktop app, even if the user only says "the desktop app" or "the native build". It lists what GPU-IX supports, what it lacks compared with a browser, and the traps that cost the most debugging time.
 license: Apache-2.0
 ---
 
@@ -70,7 +70,7 @@ Select, Combobox, and Tooltip Positioners share anchor, side/alignment offset, c
 ## When something does not work
 
 1. Look for a style diagnostic in the console (development), or call `renderer.drainStyleDiagnostics()` in a test. Both need strict styles, which are on by default outside production; pass `strictStyles: true` to `render()` or `createTestRoot()` otherwise.
-2. Check the reference file's Traps and its open-issues table; many gaps are tracked on https://github.com/Ernxst/gpuix/issues.
+2. Check the reference file's Traps and its open-issues table; many gaps are tracked on https://github.com/galaxiajs/gpuix/issues.
 3. Confirm the prop or value against `StyleDesc`, `Props` and the element prop types in `@gpuix/react`'s `types/host.d.ts`.
 4. Reproduce it in a test with `createTestRoot()` and assert numbers (bounds, text, resolved style) rather than pixels.
 5. If no issue tracks the gap, raise it with the user before working around it; do not file by default. Give them the

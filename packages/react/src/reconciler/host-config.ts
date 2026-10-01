@@ -2553,7 +2553,7 @@ function promoteContainerRoot(
   }
 
   // Native ordered roots should replace this temporary wrapper:
-  // https://github.com/Ernxst/gpuix/issues/619
+  // https://github.com/galaxiajs/gpuix/issues/619
   const root = createImplicitRoot(container)
   // A direct root owns any existing live regions. Move their current values
   // before reparenting that application root, so no stale pair remains below

@@ -1,7 +1,7 @@
 # GPUIX
 
 > [!NOTE]
-> **Ernxst/gpuix** is a fork of [remorses/gpuix](https://github.com/remorses/gpuix), built
+> **galaxiajs/gpuix** is a fork of [remorses/gpuix](https://github.com/remorses/gpuix), built
 > around one specific goal: **one codebase for desktop and web**, with DOM and CSS semantics as the
 > source of truth. Every public-surface decision here is tested against one question — does the
 > same consumer code behave identically when it runs under `react-dom` in a browser? Upstream and
@@ -12,7 +12,7 @@
 > **The `@gpuix/native` and `@gpuix/react` packages on the npm registry are upstream's**,
 > published by upstream's maintainer, so `bun add @gpuix/react` installs upstream, not this fork.
 > This fork does **not** publish to npm. Its builds are distributed as tarballs attached to
-> [this repository's GitHub releases](https://github.com/Ernxst/gpuix/releases) under those package
+> [this repository's GitHub releases](https://github.com/galaxiajs/gpuix/releases) under those package
 > names — install them per
 > [Consuming an unpublished checkout](#consuming-an-unpublished-checkout) (the `overrides`
 > entry is required), or build from a checkout.
@@ -73,12 +73,12 @@ cd examples && bun --hot mail.tsx
 ## Quickstart
 
 This fork ships from no npm registry, so you either pin the tarballs attached to its
-[GitHub releases](https://github.com/Ernxst/gpuix/releases) or build the native and React
+[GitHub releases](https://github.com/galaxiajs/gpuix/releases) or build the native and React
 packages from a checkout once and pin the packed tarballs yourself. Building from a checkout
 needs a Rust toolchain — see [Building](#building) for the prerequisites.
 
 ```bash
-git clone --recurse-submodules https://github.com/Ernxst/gpuix
+git clone --recurse-submodules https://github.com/galaxiajs/gpuix
 cd gpuix && bun install && bun run build
 cd packages/native && bun pm pack
 cd ../react && bun pm pack
@@ -99,7 +99,7 @@ bun add -d @types/react typescript
 > `bun add @gpuix/react react` installs **upstream's** packages, not this fork. Those two names on
 > the npm registry belong to [remorses/gpuix](https://github.com/remorses/gpuix) and are published
 > by upstream's maintainer. This fork attaches its own tarballs to
-> [its GitHub releases](https://github.com/Ernxst/gpuix/releases) under the same names instead of
+> [its GitHub releases](https://github.com/galaxiajs/gpuix/releases) under the same names instead of
 > publishing to npm.
 
 Release versions follow semver with a fixed `-fork` suffix, and all three packages share the same
@@ -109,11 +109,11 @@ that release's tarball. For example, `0.26.0-fork` uses this tag and these packa
 ```json
 {
   "dependencies": {
-    "@gpuix/react": "https://github.com/Ernxst/gpuix/releases/download/%40gpuix/react%400.26.0-fork/gpuix-react-0.26.0-fork.tgz",
-    "@gpuix/plugins": "https://github.com/Ernxst/gpuix/releases/download/%40gpuix/react%400.26.0-fork/gpuix-plugins-0.26.0-fork.tgz"
+    "@gpuix/react": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.0-fork/gpuix-react-0.26.0-fork.tgz",
+    "@gpuix/plugins": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.0-fork/gpuix-plugins-0.26.0-fork.tgz"
   },
   "overrides": {
-    "@gpuix/native": "https://github.com/Ernxst/gpuix/releases/download/%40gpuix/react%400.26.0-fork/gpuix-native-0.26.0-fork.tgz"
+    "@gpuix/native": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.0-fork/gpuix-native-0.26.0-fork.tgz"
   }
 }
 ```
@@ -485,7 +485,7 @@ GitHub will 404 the API. Optional: put a Cloudflare cache in front of
 
 ### Start from the example app
 
-[`example-app/`](https://github.com/Ernxst/gpuix/tree/main/example-app) is a complete todo app in one file, with `dev`,
+[`example-app/`](https://github.com/galaxiajs/gpuix/tree/main/example-app) is a complete todo app in one file, with `dev`,
 `build`, `web:dev` and `typecheck` scripts already wired. Copy the folder,
 change `@gpuix/native` and `@gpuix/react` from `workspace:^` to the tarballs you
 packed in [Quickstart](#quickstart), and run `bun install`.
@@ -500,14 +500,14 @@ lists what GPU-IX supports and the traps that differ from React DOM. Install
 it into an app's agent setup with:
 
 ```bash
-npx skills add Ernxst/gpuix --skill gpuix
+npx skills add galaxiajs/gpuix --skill gpuix
 ```
 
 ## Examples
 
 | Example | Run | What it shows |
 |---|---|---|
-| **todo** | `bun run dev` in [`example-app/`](https://github.com/Ernxst/gpuix/tree/main/example-app) | The starting point: one file, a `<virtual-list>`, a native `<input>`, and an animated sidebar |
+| **todo** | `bun run dev` in [`example-app/`](https://github.com/galaxiajs/gpuix/tree/main/example-app) | The starting point: one file, a `<virtual-list>`, a native `<input>`, and an animated sidebar |
 | **blurred window** | `bun run blurred-window` | A macOS frosted-glass surface using GPUI's native vibrancy backdrop and transparent titlebar |
 | **chat** | `bun --hot chat.tsx` | A GPUIX app: transparent titlebar, animated sidebar, per-thread transcripts, demo replies, composer, `<markdown>` |
 | **timeline** | `bun --hot timeline.tsx` | A video-editor timeline: clip dragging, edge trimming with snapping, playhead scrubbing, marquee selection, zoom under the pointer, and a two-axis pan with a frozen ruler and track column |
@@ -519,14 +519,14 @@ npx skills add Ernxst/gpuix --skill gpuix
 | **diff** | `bun --hot diff.tsx` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
 | **web** | `bun run web` from the repository root | The ChatGPT example rendered in a browser canvas with WebGPU |
 
-The todo app lives in [`example-app/`](https://github.com/Ernxst/gpuix/tree/main/example-app) and is meant to be copied.
-The rest live in [`examples/`](https://github.com/Ernxst/gpuix/tree/main/examples). All of them use hardcoded data.
+The todo app lives in [`example-app/`](https://github.com/galaxiajs/gpuix/tree/main/example-app) and is meant to be copied.
+The rest live in [`examples/`](https://github.com/galaxiajs/gpuix/tree/main/examples). All of them use hardcoded data.
 
 CI compiles a standalone **chat** binary on `workflow_dispatch` runs, one per target, and uploads
 each as a `example-chat-<target>` **workflow artifact**. Running one needs no Bun and no Rust
-install. Nothing attaches those artifacts to a [release](https://github.com/Ernxst/gpuix/releases)
+install. Nothing attaches those artifacts to a [release](https://github.com/galaxiajs/gpuix/releases)
 automatically — a release asset is put there by hand. The fork's
-[releases](https://github.com/Ernxst/gpuix/releases) carry the package tarballs; chat binaries
+[releases](https://github.com/galaxiajs/gpuix/releases) carry the package tarballs; chat binaries
 are attached when a dispatch run has built them. If a release has none, the example comes from a
 checkout; the commands below are what an unpacked download looks like.
 
@@ -5301,7 +5301,7 @@ await app.screenshot({ path: 'sent.png' })
 ```
 
 That is the chat example. The real test lives in
-[`examples/chat.test.tsx`](https://github.com/Ernxst/gpuix/blob/main/examples/chat.test.tsx).
+[`examples/chat.test.tsx`](https://github.com/galaxiajs/gpuix/blob/main/examples/chat.test.tsx).
 
 ```
 createTestRoot()          browser render()          launch({ command, args })
@@ -7028,10 +7028,10 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 
 ## Documentation
 
-See [AGENTS.md](https://github.com/Ernxst/gpuix/blob/main/AGENTS.md) for detailed architecture, communication flow, and contributing guide.
+See [AGENTS.md](https://github.com/galaxiajs/gpuix/blob/main/AGENTS.md) for detailed architecture, communication flow, and contributing guide.
 
 - [Layout cache measurement](docs/measurements/2026-09-07-layout-cache.md)
 
 ## License
 
-[Apache-2.0](https://github.com/Ernxst/gpuix/blob/main/LICENSE)
+[Apache-2.0](https://github.com/galaxiajs/gpuix/blob/main/LICENSE)
