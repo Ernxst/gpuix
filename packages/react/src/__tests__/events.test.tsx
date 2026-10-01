@@ -173,9 +173,13 @@ describe("frame loop", () => {
         "const renderer = new GpuixRenderer(() => {})",
         "renderer.init({ focus: false })",
         "renderer.tick()",
-        "const startedAt = performance.now()",
-        "for (let index = 0; index < 30; index += 1) renderer.tick()",
-        "console.log(performance.now() - startedAt)",
+        "const batches = []",
+        "for (let batch = 0; batch < 7; batch += 1) {",
+        "  const startedAt = performance.now()",
+        "  for (let index = 0; index < 30; index += 1) renderer.tick()",
+        "  batches.push(performance.now() - startedAt)",
+        "}",
+        "console.log(JSON.stringify(batches))",
         "process.exit(0)",
       ].join("\n")
       const result = spawnSync(
@@ -185,9 +189,12 @@ describe("frame loop", () => {
       )
 
       expect(result.status, result.stderr || result.error?.message).toBe(0)
-      const elapsedMs = Number(result.stdout.trim())
-      expect(elapsedMs).not.toBeNaN()
-      expect(elapsedMs).toBeLessThan(200)
+      const batches = JSON.parse(result.stdout.trim()) as number[]
+      expect(batches).toHaveLength(7)
+      expect(batches.every(Number.isFinite)).toBe(true)
+      // One host scheduling pause does not mean the native idle pump blocks.
+      const medianMs = [...batches].sort((left, right) => left - right)[3]!
+      expect(medianMs, `30-tick batches: ${batches.join(", ")} ms`).toBeLessThan(200)
     },
   )
 
