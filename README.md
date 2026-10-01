@@ -12,8 +12,8 @@
 > **The `@gpuix/native` and `@gpuix/react` packages on the npm registry are upstream's**,
 > published by upstream's maintainer, so `bun add @gpuix/react` installs upstream, not this fork.
 > This fork does **not** publish to npm. Its builds are distributed as tarballs attached to
-> [this repository's GitHub releases](https://github.com/Ernxst/gpuix/releases) under the same two
-> names — install those per
+> [this repository's GitHub releases](https://github.com/Ernxst/gpuix/releases) under those package
+> names — install them per
 > [Consuming an unpublished checkout](#consuming-an-unpublished-checkout) (the `overrides`
 > entry is required), or build from a checkout.
 
@@ -101,6 +101,24 @@ bun add -d @types/react typescript
 > by upstream's maintainer. This fork attaches its own tarballs to
 > [its GitHub releases](https://github.com/Ernxst/gpuix/releases) under the same names instead of
 > publishing to npm.
+
+Release versions follow semver with a fixed `-fork` suffix, and all three packages share the same
+exact version. Pin the React and plugins tarballs from one release and override `@gpuix/native` to
+that release's tarball. For example, `0.26.0-fork` uses this tag and these package URLs:
+
+```json
+{
+  "dependencies": {
+    "@gpuix/react": "https://github.com/Ernxst/gpuix/releases/download/%40gpuix/react%400.26.0-fork/gpuix-react-0.26.0-fork.tgz",
+    "@gpuix/plugins": "https://github.com/Ernxst/gpuix/releases/download/%40gpuix/react%400.26.0-fork/gpuix-plugins-0.26.0-fork.tgz"
+  },
+  "overrides": {
+    "@gpuix/native": "https://github.com/Ernxst/gpuix/releases/download/%40gpuix/react%400.26.0-fork/gpuix-native-0.26.0-fork.tgz"
+  }
+}
+```
+
+When upgrading, change the tag and all three versioned tarball URLs together.
 
 The rest of this Quickstart is the same whichever packages you installed.
 
@@ -736,14 +754,16 @@ prevented Tab or Shift+Tab keydown likewise keeps focus on the current element.
 - **`@gpuix/native`** — Rust bindings to GPUI. It publishes napi-rs desktop binaries and a wasm-bindgen browser build, both backed by `GpuixRenderer`, `RetainedTree`, `build_element()`, and `apply_styles()`.
 - **`@gpuix/react`** — React reconciler, event registry, and TypeScript types. Implements the `react-reconciler` host config using the mutation API.
 
-Pin `@gpuix/react` and `@gpuix/native` to the **same exact version**. GPUIX is
-still pre-1.0. Breaking changes can land before v1. Upgrade both together.
+Pin `@gpuix/native`, `@gpuix/react`, and `@gpuix/plugins` to the **same exact
+release version**. Versions follow semver with a fixed `-fork` suffix, such as
+`0.26.0-fork`; React pins native and plugins pins React. GPUIX is still pre-1.0.
+Breaking changes can land before v1, so upgrade all three together.
 
 ## Building
 
 This section is for **working on GPUIX itself**. To build an app with it, see
-[Quickstart](#quickstart) instead — which, until this fork publishes releases,
-starts from the same checkout and the same prerequisites.
+[Quickstart](#quickstart) instead. It covers installing a GitHub release or
+building the packages from a checkout.
 
 ### Prerequisites
 
