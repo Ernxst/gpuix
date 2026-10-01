@@ -28,7 +28,7 @@ jobs:
       contents: read
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-      TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
     steps:
       - name: Clone repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -63,7 +63,7 @@ jobs:
       contents: read
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-      TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
     steps:
       - name: Clone repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -98,6 +98,8 @@ jobs:
 
   test:
     name: Test (${{ matrix.os }})
+    # Waits for the build so the packages come from the cache.
+    needs: build
     strategy:
       fail-fast: false
       matrix:
@@ -108,7 +110,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-      TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
     permissions:
       contents: read
     steps:
