@@ -270,6 +270,11 @@ jobs:
         run: bun run vitest run src/__tests__/img.test.tsx
         working-directory: packages/react
 
+      - name: Run focused menu fallback integration test
+        if: inputs.test_scope == 'focused'
+        run: bun run vitest run menu-fallback.test.ts
+        working-directory: examples
+
       - name: Run example tests
         if: inputs.test_scope != 'focused'
         run: bun run test
