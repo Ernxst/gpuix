@@ -1,6 +1,6 @@
 /// Pixel-comparison test for `boxShadow` layering and inset geometry, against
-/// Chromium reference PNGs committed at `packages/react/shadow-goldens/`
-/// (regenerate with `bun run shadow:goldens`). This intentionally compares
+/// Chromium reference PNGs committed at `packages/react/goldens/shadow/`
+/// (rendered by `scripts/shadow-goldens.ts` at commit 4d6ff429a4). This intentionally compares
 /// actual rendered pixels, not a formula-derived expected image: the goal is
 /// browser parity, not agreement with our own geometry math.
 
@@ -17,7 +17,7 @@ import { SHOTS_DIR } from "./test-utils.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
-const goldenDirectory = fileURLToPath(new URL("../../shadow-goldens", import.meta.url))
+const goldenDirectory = fileURLToPath(new URL("../../goldens/shadow", import.meta.url))
 
 const HARD_EDGE_CHANNEL_JUMP = 24
 // A crisp rectangle edge (no blur) rasterizes slightly differently between
@@ -155,7 +155,7 @@ function readGolden(testCase: (typeof shadowCases)[number], dpr: number): RgbaIm
   const goldenPath = path.join(goldenDirectory, `${testCase.name}-dpr${dpr}.png`)
   expect(
     fs.existsSync(goldenPath),
-    `Missing golden ${goldenPath}; regenerate with \`bun run shadow:goldens\``
+    `Missing golden ${goldenPath}; its generator is scripts/shadow-goldens.ts at commit 4d6ff429a4`
   ).toBe(true)
   return decodePng(fs.readFileSync(goldenPath), `${testCase.name} golden`)
 }

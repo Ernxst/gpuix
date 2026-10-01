@@ -1,6 +1,6 @@
 /// Pixel-comparison test for the CSS 135deg repeating-hatch geometry, against
-/// Chromium reference PNGs committed at `packages/react/hatch-goldens/`
-/// (regenerate with `bun run hatch:goldens`). This intentionally compares
+/// Chromium reference PNGs committed at `packages/react/goldens/hatch/`
+/// (rendered by `scripts/hatch-goldens.ts` at commit 4d6ff429a4). This intentionally compares
 /// actual rendered pixels, not a formula-derived expected image: the goal is
 /// browser parity, not agreement with our own geometry math.
 
@@ -17,7 +17,7 @@ import { SHOTS_DIR } from "./test-utils.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
-const goldenDirectory = fileURLToPath(new URL("../../hatch-goldens", import.meta.url))
+const goldenDirectory = fileURLToPath(new URL("../../goldens/hatch", import.meta.url))
 
 const MAX_CHANNEL_DELTA = 2
 // Excludes the outermost logical pixel, where GPUI's and Chromium's edge
@@ -84,7 +84,7 @@ describeNative("background 135deg repeating-hatch matches Chromium", { timeout: 
         const goldenPath = path.join(goldenDirectory, `${testCase.name}-dpr${dpr}.png`)
         expect(
           fs.existsSync(goldenPath),
-          `Missing golden ${goldenPath}; regenerate with \`bun run hatch:goldens\``
+          `Missing golden ${goldenPath}; its generator is scripts/hatch-goldens.ts at commit 4d6ff429a4`
         ).toBe(true)
 
         const testRoot = createTestRoot({

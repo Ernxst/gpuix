@@ -38,10 +38,10 @@ const describeNative = isNativeTestRendererAvailable() ? describe : describe.ski
 // Test GPU canvas presentation exists only in the macOS test-support build.
 const itMacOS = process.platform === "darwin" ? it : it.skip
 const canvasImageFixture = fileURLToPath(
-  new URL("../../canvas-goldens/__fixtures__/canvas-image-source.png", import.meta.url)
+  new URL("../../goldens/canvas/__fixtures__/canvas-image-source.png", import.meta.url)
 )
 const corruptCanvasImageFixture = fileURLToPath(
-  new URL("../../canvas-goldens/__fixtures__/canvas-image-corrupt.png", import.meta.url)
+  new URL("../../goldens/canvas/__fixtures__/canvas-image-corrupt.png", import.meta.url)
 )
 const canvasImageDataUrl = `data:image/png;base64,${readFileSync(canvasImageFixture).toString("base64")}`
 

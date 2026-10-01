@@ -3882,7 +3882,7 @@ export class CanvasComparisonSkippedError extends Error {
   }
 }
 
-const canvasGoldenDirectory = fileURLToPath(new URL("../canvas-goldens", import.meta.url))
+const canvasGoldenDirectory = fileURLToPath(new URL("../goldens/canvas", import.meta.url))
 const canvasFixtureDirectory = path.join(canvasGoldenDirectory, "__fixtures__")
 const canvasScreenshotDirectory = fileURLToPath(new URL("../screenshots", import.meta.url))
 const DEFAULT_CANVAS_MAX_CHANNEL_DELTA = 16
@@ -3967,7 +3967,7 @@ export function expectCanvasMatchesBrowser(
   const goldenPath = options.goldenPath ?? canvasGoldenPath(resolved)
   if (!existsSync(goldenPath)) {
     return skipCanvasComparison(
-      `browser golden is absent at ${goldenPath}; regenerate it with \`bun run canvas:goldens\``,
+      `browser golden is absent at ${goldenPath}`,
       options.skip
     )
   }

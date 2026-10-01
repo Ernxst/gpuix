@@ -62,7 +62,7 @@ interface Stats {
 
 const imageFixture = fileURLToPath(
   new URL(
-    '../packages/react/canvas-goldens/__fixtures__/canvas-image-source.png',
+    '../packages/react/goldens/canvas/__fixtures__/canvas-image-source.png',
     import.meta.url,
   ),
 )
