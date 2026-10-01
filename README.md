@@ -3565,7 +3565,7 @@ Each primitive has a dedicated namespace entry point:
 | `@gpuix/react/dialog` | `Root`, `Trigger`, `Portal`, `Backdrop`, `Popup`, `Title`, `Description`, `Close` |
 | `@gpuix/react/select` | `Root`, `Label`, `Trigger`, `Value`, `Icon`, `Portal`, `Backdrop`, `Positioner`, `Popup`, `List`, `Item`, `ItemIndicator`, `ItemText`, `Arrow`, `ScrollUpArrow`, `ScrollDownArrow`, `Group`, `GroupLabel`, `Separator` |
 | `@gpuix/react/combobox` | `Root`, `Input`, `Popup`, `List`, `Item`, `Empty` |
-| `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Popup` |
+| `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Portal`, `Positioner`, `Popup`, `Arrow`, `Viewport`, `Handle`, `createHandle` |
 | `@gpuix/react/floating` | `FloatingLayer`, `PositionerProps`, `FloatingPositioner`, `renderSlot` |
 
 In Select, `Label` labels the field and `GroupLabel` labels an item group.
@@ -3797,22 +3797,30 @@ object:
 ```
 
 ```tsx
-<TooltipPrimitive.Provider delay={350}>
-  <TooltipPrimitive.Root>
-    <TooltipPrimitive.Trigger asChild>
-      <div tabIndex={0} style={{ padding: 8 }}>Copy</div>
-    </TooltipPrimitive.Trigger>
-    <TooltipPrimitive.Popup side="top" sideOffset={6}>
-      Copy message
-    </TooltipPrimitive.Popup>
-  </TooltipPrimitive.Root>
-</TooltipPrimitive.Provider>
+<TooltipPrimitive.Tooltip.Provider delay={350} closeDelay={80}>
+  <TooltipPrimitive.Tooltip.Root onOpenChange={(open, details) => console.log(open, details.reason)}>
+    <TooltipPrimitive.Tooltip.Trigger>Copy</TooltipPrimitive.Tooltip.Trigger>
+    <TooltipPrimitive.Tooltip.Portal>
+      <TooltipPrimitive.Tooltip.Positioner side="top" sideOffset={6}>
+        <TooltipPrimitive.Tooltip.Popup>
+          <TooltipPrimitive.Tooltip.Arrow />
+          Copy message
+        </TooltipPrimitive.Tooltip.Popup>
+      </TooltipPrimitive.Tooltip.Positioner>
+    </TooltipPrimitive.Tooltip.Portal>
+  </TooltipPrimitive.Tooltip.Root>
+</TooltipPrimitive.Tooltip.Provider>
 ```
 
 Combobox uses the native input for text editing, IME, clipboard, and focus.
-Tooltip `asChild` preserves the child ref and merges trigger behavior into that
-host element. All floating content uses GPUI's deferred `anchored()` layer,
-snaps inside the window, and occludes controls behind it.
+Tooltip parts accept `render`, state-based `className` and `style`, and expose
+Base UI state attributes. `Tooltip.Viewport` is optional unless animated
+content switches between triggers. The native Portal keeps children in the
+retained tree; its `container` prop does not select a destination. The shared
+floating Positioner uses GPUI's deferred `anchored()` layer, snaps inside the
+window, and occludes controls behind it. A disabled Trigger suppresses tooltip
+interaction without disabling its rendered control; disabling an open Root
+closes the tooltip. Multiple triggers retain their own anchors and payloads.
 
 ### Overlay menus
 
