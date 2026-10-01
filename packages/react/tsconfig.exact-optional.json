@@ -7,6 +7,7 @@
     "paths": {
       "@gpuix/react": ["dist/index.d.ts"],
       "@gpuix/react/select": ["dist/components/select.d.ts"],
+      "@gpuix/react/combobox": ["dist/components/combobox.d.ts"],
       "@gpuix/react/tooltip": ["dist/components/tooltip.d.ts"],
       "@gpuix/react/dialog": ["./dist/components/dialog.d.ts"],
       "@gpuix/react/alert-dialog": ["./dist/components/alert-dialog.d.ts"],
@@ -20,12 +21,14 @@
     "src/__tests__/exact-optional.types.ts",
     "src/__tests__/dialog-parity.types.tsx",
     "type-tests/select-parity/select-parity.types.tsx",
-    "type-tests/tooltip-parity/tooltip-parity.types.tsx"
+    "type-tests/tooltip-parity/tooltip-parity.types.tsx",
+    "type-tests/floating-positioner-parity/floating-positioner-parity.types.tsx"
   ],
   "include": [
     "src/__tests__/exact-optional.types.ts",
     "src/__tests__/dialog-parity.types.tsx",
     "type-tests/select-parity/select-parity.types.tsx",
-    "type-tests/tooltip-parity/tooltip-parity.types.tsx"
+    "type-tests/tooltip-parity/tooltip-parity.types.tsx",
+    "type-tests/floating-positioner-parity/floating-positioner-parity.types.tsx"
   ]
 }
