@@ -2058,8 +2058,9 @@ export type GpuixDocumentListenerOptions = boolean | { capture?: boolean; passiv
 /**
  * The part of `Document` GPU-IX can answer from its retained tree, for the one
  * root of the one native window. It is not a DOM `Document`: there is no
- * `createElement` or `querySelector`, and it is not an `EventTarget`; it
- * accepts only function listeners for `pointerup` and `pointercancel`.
+ * `createElement`, and it is not an `EventTarget`; it accepts only function
+ * listeners for `pointerup` and `pointercancel`. Selector queries return no
+ * matches because the facade has no selector engine.
  */
 export interface GpuixDocument {
   /**
@@ -2088,6 +2089,10 @@ export interface GpuixDocument {
   readonly activeElement: PublicInstance | null
   /** The first mounted element in tree order whose `id` prop matches, or null. */
   getElementById(elementId: string): PublicInstance | null
+  /** Always returns null; the facade does not evaluate CSS selectors. */
+  querySelector(selector: string): PublicInstance | null
+  /** Always returns an empty array; the facade does not evaluate CSS selectors. */
+  querySelectorAll(selector: string): PublicInstance[]
 }
 
 // Public instance exposed via refs. Type-specific interfaces deepen this seam

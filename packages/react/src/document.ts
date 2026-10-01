@@ -3,12 +3,13 @@
  * `globalThis.document`, and that `PublicInstance.ownerDocument` returns, when
  * the host has no document of its own.
  *
- * It answers four questions from the retained tree: `getElementById()`,
- * `activeElement`, `body`, and `defaultView`. It also takes `pointerup` and
+ * It answers questions from the retained tree: `getElementById()`,
+ * `activeElement`, `body`, and `defaultView`. Selector queries return no
+ * matches because the facade has no selector engine. It also takes `pointerup` and
  * `pointercancel` function listeners, which run when a press in the window
  * ends or is cancelled; see `./document-listeners.js`. It is not a DOM
- * `Document` or `EventTarget`: it has no `createElement`, `querySelector`,
- * other event types, or style computation. The separate
+ * `Document` or `EventTarget`: it has no `createElement`, other event types,
+ * or style computation. The separate
  * `window.getComputedStyle()` shim answers only `display` and `visibility`;
  * it does not make this facade a full DOM document.
  *
@@ -118,6 +119,12 @@ function createGpuixDocument(): GpuixDocument {
       const container = latestAttachedContainer()
       if (!container) return null
       return elementById(container, String(elementId), () => true) ?? null
+    },
+    querySelector(_selector: string): PublicInstance | null {
+      return null
+    },
+    querySelectorAll(_selector: string): PublicInstance[] {
+      return []
     },
   }
 }

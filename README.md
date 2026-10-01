@@ -5606,6 +5606,8 @@ When the entry installed it, every ref's `ownerDocument` is the same object:
 import "@gpuix/react/globals"
 
 document.getElementById("email")         // first mounted element with that id prop, or null
+document.querySelector("button")         // null; CSS selectors are not evaluated
+document.querySelectorAll("button")      // []; CSS selectors are not evaluated
 document.activeElement                   // the focused host element, or body when nothing has focus
 document.body                            // the root host element of the mounted tree
 document.defaultView                     // the global window
@@ -5633,9 +5635,10 @@ was added and is dropped when that root unmounts. As in the DOM, adding the
 same function, type, and capture flag twice registers it once, and removing it
 needs the same three. Capture listeners run first.
 
-The facade is not a DOM `Document` or `EventTarget`. It has no
-`createElement()` or `querySelector()`. The separate `window.getComputedStyle()`
-shim answers only `display` and `visibility`. Its
+The facade is not a DOM `Document` or `EventTarget`. Its `querySelector()`
+always returns `null` and `querySelectorAll()` always returns an empty array;
+it does not evaluate CSS selectors. It has no `createElement()`. The separate
+`window.getComputedStyle()` shim answers only `display` and `visibility`. Its
 listener methods take no other event type, no `handleEvent` object, and
 neither the `once` nor the `signal` option: such a call registers nothing and
 logs one `console.warn`. There is no `dispatchEvent()` on the document, and
