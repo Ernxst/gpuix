@@ -4,9 +4,15 @@
     "//"
   ],
   "tasks": {
+    // Inputs name what Cargo compiles. An edit to the README, the Rust examples
+    // or the browser files leaves the addon's hash alone.
     "build": {
       "inputs": [
-        "$TURBO_DEFAULT$",
+        "src/**",
+        "build.rs",
+        "Cargo.toml",
+        "Cargo.lock",
+        ".cargo/**",
         "$TURBO_ROOT$/rust-toolchain.toml",
         "$TURBO_ROOT$/zed/**"
       ],
@@ -19,10 +25,13 @@
         "RUNNER_OS",
         "RUNNER_ARCH",
         "CARGO*",
+        "!CARGO",
         "!CARGO_HOME",
         "!CARGO_TARGET_DIR",
         "RUST*",
         "!RUSTUP_HOME",
+        "!RUSTC_WRAPPER",
+        "!RUSTC_WORKSPACE_WRAPPER",
         "CC*",
         "CXX*",
         "AR*",
@@ -41,6 +50,10 @@
       // Passed through but not hashed: where the toolchain and SDKs live on
       // this machine. Hashing them would stop two runners sharing a build.
       "passThroughEnv": [
+        "CARGO",
+        "RUSTC_WRAPPER",
+        "RUSTC_WORKSPACE_WRAPPER",
+        "MBX_*",
         "CARGO_HOME",
         "CARGO_TARGET_DIR",
         "RUSTUP_HOME",
@@ -60,7 +73,11 @@
     // Keep its inputs and environment in step with `build`.
     "build:release": {
       "inputs": [
-        "$TURBO_DEFAULT$",
+        "src/**",
+        "build.rs",
+        "Cargo.toml",
+        "Cargo.lock",
+        ".cargo/**",
         "$TURBO_ROOT$/rust-toolchain.toml",
         "$TURBO_ROOT$/zed/**"
       ],
@@ -71,10 +88,13 @@
         "RUNNER_OS",
         "RUNNER_ARCH",
         "CARGO*",
+        "!CARGO",
         "!CARGO_HOME",
         "!CARGO_TARGET_DIR",
         "RUST*",
         "!RUSTUP_HOME",
+        "!RUSTC_WRAPPER",
+        "!RUSTC_WORKSPACE_WRAPPER",
         "CC*",
         "CXX*",
         "AR*",
@@ -91,6 +111,10 @@
         "NAPI_RS_*"
       ],
       "passThroughEnv": [
+        "CARGO",
+        "RUSTC_WRAPPER",
+        "RUSTC_WORKSPACE_WRAPPER",
+        "MBX_*",
         "CARGO_HOME",
         "CARGO_TARGET_DIR",
         "RUSTUP_HOME",
