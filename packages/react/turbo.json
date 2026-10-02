@@ -1,0 +1,16 @@
+{
+  "$schema": "../../node_modules/turbo/schema.json",
+  "extends": [
+    "//"
+  ],
+  "tasks": {
+    // The parity type tests resolve `@gpuix/react/*` to this package's own
+    // declarations in `dist`, so the typecheck needs this package built too.
+    "typecheck": {
+      "dependsOn": [
+        "build"
+      ],
+      "outputs": []
+    }
+  }
+}
