@@ -177,8 +177,10 @@ jobs:
         if: runner.os == 'macOS'
         uses: ./.github/actions/macos
 
-      # Arguments after `--` change the hash of every task in the run, so the
-      # shard jobs restore the build first and then run the test task alone.
+      # The shard runs outside turbo. Arguments after `--` change the hash of
+      # every task in the run, so turbo would miss the cached build, and
+      # `--only` leaves the build and the operating system out of the test's
+      # hash, so turbo would replay a result from another build or platform.
       - name: Restore the build
         if: matrix.part.shard
         shell: bash
@@ -187,7 +189,8 @@ jobs:
       - name: Test React
         if: matrix.part.shard
         shell: bash
-        run: bunx turbo run test --filter=@gpuix/react --only -- --shard=${{ matrix.part.shard }}
+        working-directory: packages/react
+        run: bun run test --shard=${{ matrix.part.shard }}
 
       - name: Test the other packages
         if: ${{ !matrix.part.shard }}
