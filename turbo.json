@@ -40,6 +40,12 @@
         "VITEST_SHARD"
       ],
       "description": "Run workspace tests in dependency order."
-    }
+    },
+    "//#lint:dependencies": {
+      "description": "Check workspace dependency versions and protocols with Syncpack."
+    },
+    "//#lint:monorepo": {
+      "description": "Check monorepo package and dependency consistency with Sherif."
+    },
   }
 }

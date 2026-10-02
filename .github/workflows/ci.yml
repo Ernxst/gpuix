@@ -30,6 +30,30 @@ env:
 permissions: {}
 
 jobs:
+  lint:
+    name: Lint
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 1
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+    permissions:
+      contents: read
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup bun
+        uses: ./.github/actions/bun
+
+      - name: Lint monorepo
+        run: bunx turbo run "//#lint:monorepo"
+
+      - name: Lint dependencies
+        run: bunx turbo run "//#lint:dependencies"
+
   typecheck:
     name: Typecheck
     # Waits for the build so the native binding's types come from the cache.
