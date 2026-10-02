@@ -3800,8 +3800,10 @@ including inline styles, event handlers, and refs.
 Select positioning uses the native window viewport, anchor, side/alignment and
 offset options. A custom `collisionBoundary` may be a rectangle, host element,
 or array of boundaries (arrays use their intersection); object-valued
-`collisionPadding` is applied per edge. `anchorHidden` reports an anchor that
-falls outside the effective boundary. On the native renderer,
+`collisionPadding` is applied per edge, with omitted object edges set to zero;
+the default is five pixels on every edge. Padding determines when a Positioner
+flips and how far it shifts inside the effective boundary. `anchorHidden`
+reports an anchor that falls outside that boundary. On the native renderer,
 `collisionBoundary="clipping-ancestors"` means the window viewport.
 
 The native renderer accepts but does not implement `positionMethod`, `sticky`,
@@ -3945,11 +3947,11 @@ previous trigger. The Positioner follows the active rendered Trigger and
 places the popup on its requested side. `Tooltip.Viewport` is optional unless
 animated content switches between triggers. The native Portal keeps children
 in the retained tree; its `container` prop does not select a destination. The
-shared floating Positioner uses GPUI's deferred `anchored()` layer, snaps inside
-the window, and occludes controls behind it. A disabled Trigger suppresses
-tooltip interaction without disabling its rendered control; disabling an open
-Root closes the tooltip. Multiple triggers retain their own anchors and
-payloads.
+shared floating Positioner uses GPUI's deferred `anchored()` layer, flips and
+shifts against the padded window boundary, and occludes controls behind it. A
+disabled Trigger suppresses tooltip interaction without disabling its rendered
+control; disabling an open Root closes the tooltip. Multiple triggers retain
+their own anchors and payloads.
 
 ### Overlay menus
 

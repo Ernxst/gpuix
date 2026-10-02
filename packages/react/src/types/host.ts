@@ -1632,7 +1632,7 @@ export interface AnchoredProps extends Props {
     | "leftCenter"
   offset?: { x: number; y: number }
   fit?: "switch" | "snap" | "none"
-  snapMargin?: number
+  snapMargin?: number | { top?: number; right?: number; bottom?: number; left?: number }
   deferred?: boolean
   priority?: number
   occlude?: boolean

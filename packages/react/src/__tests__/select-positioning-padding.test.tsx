@@ -16,8 +16,11 @@ describeNative("Select popup collision padding", () => {
 
   function renderSelect(
     edge: Edge = "left",
-    collisionPadding?: number,
-    collisionAvoidance?: Select.SelectPositionerProps["collisionAvoidance"]
+    collisionPadding?: number | { top?: number; right?: number; bottom?: number; left?: number },
+    collisionAvoidance?: Select.SelectPositionerProps["collisionAvoidance"],
+    sideOverride?: "top" | "right" | "bottom" | "left",
+    popupHeight = 100,
+    resolvedSides?: string[],
   ) {
     const scenario = edgeScenario(edge)
     screen.render(
@@ -26,8 +29,8 @@ describeNative("Select popup collision padding", () => {
           <Select.Value placeholder="Pick a fruit" />
         </Select.Trigger>
         <Select.Portal>
-          <Select.Positioner side={scenario.side} align="center" sideOffset={4} collisionPadding={collisionPadding} collisionAvoidance={collisionAvoidance}>
-            <Select.Popup data-testid="popup" style={{ width: 144, height: 100 }}>
+          <Select.Positioner data-testid="positioner" side={sideOverride ?? scenario.side} align="center" sideOffset={4} collisionPadding={collisionPadding} collisionAvoidance={collisionAvoidance} className={(state) => { resolvedSides?.push(state.side); return undefined }}>
+            <Select.Popup data-testid="popup" style={{ width: 144, height: popupHeight }}>
               <Select.List>
                 <Select.Item value="apple">Apple</Select.Item>
                 <Select.Item value="pear">Pear</Select.Item>
@@ -50,6 +53,26 @@ describeNative("Select popup collision padding", () => {
     renderSelect("left", 5)
 
     expectEdgePadding(screen.getByTestId("popup").getBoundingClientRect(), "left")
+  })
+
+  it("applies asymmetric padding from a per-side object", () => {
+    renderSelect("left", { left: 13 })
+
+    expect(screen.getByTestId("popup").getBoundingClientRect().left).toBe(13)
+  })
+
+  it("allows zero collision padding", () => {
+    renderSelect("left", 0)
+
+    expect(screen.getByTestId("popup").getBoundingClientRect().left).toBe(0)
+  })
+
+  it("keeps the side flip and shifts the flipped popup inside the padded edge", () => {
+    const resolvedSides: string[] = []
+    renderSelect("top", undefined, undefined, "top", 112, resolvedSides)
+
+    expect(resolvedSides.at(-1)).toBe("bottom")
+    expect(screen.getByTestId("popup").getBoundingClientRect().bottom).toBe(155)
   })
 
   it("applies the edge inset when collision avoidance uses shift", () => {
