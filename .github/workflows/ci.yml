@@ -93,8 +93,7 @@ jobs:
       # lands, so Linux checks that the addon builds without it.
       - name: Build the native addon without test-support
         if: runner.os == 'Linux'
-        working-directory: packages/native
-        run: bun run build:release
+        run: bunx turbo run build:release --filter=@gpuix/native
 
   test:
     name: Test (${{ matrix.os }})

@@ -56,6 +56,56 @@
         "GPUI_FXC_PATH"
       ]
     },
+    // The same build without `test-support`, which does not compile on Linux.
+    // Keep its inputs and environment in step with `build`.
+    "build:release": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/rust-toolchain.toml",
+        "$TURBO_ROOT$/zed/**"
+      ],
+      "outputs": [
+        "dist/*"
+      ],
+      "env": [
+        "RUNNER_OS",
+        "RUNNER_ARCH",
+        "CARGO*",
+        "!CARGO_HOME",
+        "!CARGO_TARGET_DIR",
+        "RUST*",
+        "!RUSTUP_HOME",
+        "CC*",
+        "CXX*",
+        "AR*",
+        "CFLAGS*",
+        "CXXFLAGS*",
+        "CPPFLAGS*",
+        "LDFLAGS*",
+        "MACOSX_*",
+        "IPHONEOS_*",
+        "DEPLOYMENT_TARGET*",
+        "VCToolsVersion",
+        "WindowsSDKVersion",
+        "ZIG*",
+        "NAPI_RS_*"
+      ],
+      "passThroughEnv": [
+        "CARGO_HOME",
+        "CARGO_TARGET_DIR",
+        "RUSTUP_HOME",
+        "SDKROOT",
+        "DEVELOPER_DIR",
+        "VCTOOLS*",
+        "WINDOWSSDK*",
+        "WindowsSdkDir",
+        "INCLUDE",
+        "LIB",
+        "PKG_CONFIG*",
+        "VCPKG*",
+        "GPUI_FXC_PATH"
+      ]
+    },
     "build:debug": {
       "cache": false,
       "passThroughEnv": [
