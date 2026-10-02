@@ -102,9 +102,9 @@ describeNative("Tooltip Base UI parity tree", () => {
 
     testRoot.render(
       <Tooltip.Root defaultOpen>
-        <Tooltip.Positioner>
+        <Tooltip.Portal><Tooltip.Positioner>
           <Tooltip.Popup>Popup content</Tooltip.Popup>
-        </Tooltip.Positioner>
+        </Tooltip.Positioner></Tooltip.Portal>
       </Tooltip.Root>
     )
 
@@ -124,11 +124,23 @@ describeNative("Tooltip Base UI parity tree", () => {
     }
   })
 
+  it("reports an error when Tooltip.Positioner is rendered outside Tooltip.Portal", () => {
+    const testRoot = createTestRoot()
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      testRoot.render(<Tooltip.Root defaultOpen><Tooltip.Positioner /></Tooltip.Root>)
+      expect(error.mock.calls.flat().join(" ")).toContain("Base UI: <Tooltip.Portal> is missing.")
+    } finally {
+      error.mockRestore()
+      testRoot.unmount()
+    }
+  })
+
   it("keeps a closed Tooltip.Popup unmounted by default", () => {
     const testRoot = createTestRoot()
     testRoot.render(
       <Tooltip.Root>
-        <Tooltip.Positioner><Tooltip.Popup data-testid="closed-popup">Content</Tooltip.Popup></Tooltip.Positioner>
+        <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="closed-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
       </Tooltip.Root>
     )
     expect(testRoot.renderer.findByTestId("closed-popup")).toBeUndefined()
@@ -195,9 +207,9 @@ describeNative("Tooltip Base UI parity tree", () => {
       <Tooltip.Provider delay={100}>
         <Tooltip.Root>
           <Tooltip.Trigger data-testid="delayed-trigger" style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-          <Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner>
             <Tooltip.Popup>Delayed content</Tooltip.Popup>
-          </Tooltip.Positioner>
+          </Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
       </Tooltip.Provider>
     )
@@ -219,9 +231,9 @@ describeNative("Tooltip Base UI parity tree", () => {
       <Tooltip.Provider delay={10}>
         <Tooltip.Root>
           <Tooltip.Trigger data-testid="override-trigger" delay={100} style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-          <Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner>
             <Tooltip.Popup>Override content</Tooltip.Popup>
-          </Tooltip.Positioner>
+          </Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
       </Tooltip.Provider>
     )
@@ -242,7 +254,7 @@ describeNative("Tooltip Base UI parity tree", () => {
       <Tooltip.Provider delay={0}>
         <Tooltip.Root>
           <Tooltip.Trigger data-testid="zero-delay-trigger" style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-          <Tooltip.Positioner><Tooltip.Popup>Zero-delay content</Tooltip.Popup></Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Zero-delay content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
       </Tooltip.Provider>
     )
@@ -260,9 +272,9 @@ describeNative("Tooltip Base UI parity tree", () => {
       <Tooltip.Provider delay={0} closeDelay={100}>
         <Tooltip.Root>
           <Tooltip.Trigger data-testid="close-delay-trigger" style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-          <Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner>
             <Tooltip.Popup>Close delay content</Tooltip.Popup>
-          </Tooltip.Positioner>
+          </Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
       </Tooltip.Provider>
     )
@@ -285,7 +297,7 @@ describeNative("Tooltip Base UI parity tree", () => {
       <Tooltip.Provider delay={0} closeDelay={closeDelay}>
         <Tooltip.Root>
           <Tooltip.Trigger data-testid="updated-close-delay-trigger" style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-          <Tooltip.Positioner><Tooltip.Popup>Updated close-delay content</Tooltip.Popup></Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Updated close-delay content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
       </Tooltip.Provider>
     )
@@ -312,7 +324,7 @@ describeNative("Tooltip Base UI parity tree", () => {
           {[0, 1].map((index) => (
             <Tooltip.Root key={index}>
               <Tooltip.Trigger data-testid={`group-trigger-${index}`} style={{ position: "absolute", left: index * 180, top: 80, width: 120, height: 32 }}>Trigger {index}</Tooltip.Trigger>
-              <Tooltip.Positioner><Tooltip.Popup data-testid={`group-popup-${index}`}>Content {index}</Tooltip.Popup></Tooltip.Positioner>
+              <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid={`group-popup-${index}`}>Content {index}</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
             </Tooltip.Root>
           ))}
         </div>
@@ -337,7 +349,7 @@ describeNative("Tooltip Base UI parity tree", () => {
               <Tooltip.Trigger data-testid={`timeout-trigger-${index}`} style={{ position: "absolute", left: index * 180, top: 80, width: 120, height: 32 }}>
                 Trigger {index}
               </Tooltip.Trigger>
-              <Tooltip.Positioner><Tooltip.Popup data-testid={`timeout-popup-${index}`}>Content {index}</Tooltip.Popup></Tooltip.Positioner>
+              <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid={`timeout-popup-${index}`}>Content {index}</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
             </Tooltip.Root>
           ))}
         </div>
@@ -368,7 +380,7 @@ describeNative("Tooltip Base UI parity tree", () => {
       <Tooltip.Provider delay={0} timeout={400}>
         <Tooltip.Root>
           <Tooltip.Trigger data-testid="instant-trigger" delay={100} style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-          <Tooltip.Positioner><Tooltip.Popup data-testid="instant-popup">Content</Tooltip.Popup></Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="instant-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
       </Tooltip.Provider>
     )
@@ -388,9 +400,9 @@ describeNative("Tooltip Base UI parity tree", () => {
     testRoot.render(
       <Tooltip.Root defaultOpen={false}>
         <Tooltip.Trigger data-testid="hover-trigger" delay={0} style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-        <Tooltip.Positioner>
+        <Tooltip.Portal><Tooltip.Positioner>
           <Tooltip.Popup>Hover content</Tooltip.Popup>
-        </Tooltip.Positioner>
+        </Tooltip.Positioner></Tooltip.Portal>
       </Tooltip.Root>
     )
 
@@ -405,7 +417,7 @@ describeNative("Tooltip Base UI parity tree", () => {
       <div style={{ width: 400, height: 300 }}>
         <Tooltip.Root>
           <Tooltip.Trigger data-testid="leave-trigger" delay={0} style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-          <Tooltip.Positioner><Tooltip.Popup>Leave content</Tooltip.Popup></Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Leave content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
       </div>
     )
@@ -424,7 +436,7 @@ describeNative("Tooltip Base UI parity tree", () => {
       <div>
         <Tooltip.Root>
           <Tooltip.Trigger data-testid="blur-trigger">Trigger</Tooltip.Trigger>
-          <Tooltip.Positioner><Tooltip.Popup>Blur content</Tooltip.Popup></Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Blur content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
         <button data-testid="blur-next">Next</button>
       </div>
@@ -480,7 +492,7 @@ describeNative("Tooltip Base UI parity tree", () => {
       <div>
         <Tooltip.Root>
           <Tooltip.Trigger data-testid="tab-focus-trigger">Trigger</Tooltip.Trigger>
-          <Tooltip.Positioner><Tooltip.Popup>Focus content</Tooltip.Popup></Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Focus content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
         <button data-testid="tab-focus-next">Next</button>
       </div>
@@ -503,7 +515,7 @@ describeNative("Tooltip Base UI parity tree", () => {
       const roots = [0, 1, 2].map((index) => (
         <Tooltip.Root key={index}>
           <Tooltip.Trigger data-testid={`independent-trigger-${index}`}>Trigger {index}</Tooltip.Trigger>
-          <Tooltip.Positioner><Tooltip.Popup data-testid={`independent-popup-${index}`}>Content {index}</Tooltip.Popup></Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid={`independent-popup-${index}`}>Content {index}</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
       ))
       testRoot.render(
@@ -532,7 +544,7 @@ describeNative("Tooltip Base UI parity tree", () => {
         {[0, 1, 2].map((index) => (
           <Tooltip.Root key={index}>
             <Tooltip.Trigger data-testid={`focus-root-trigger-${index}`}>Trigger {index}</Tooltip.Trigger>
-            <Tooltip.Positioner><Tooltip.Popup data-testid={`focus-root-popup-${index}`}>Content {index}</Tooltip.Popup></Tooltip.Positioner>
+            <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid={`focus-root-popup-${index}`}>Content {index}</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
           </Tooltip.Root>
         ))}
         <button data-testid="focus-root-next">Next</button>
@@ -554,7 +566,7 @@ describeNative("Tooltip Base UI parity tree", () => {
     const testRoot = createTestRoot()
     testRoot.render(
       <Tooltip.Root defaultOpen>
-        <Tooltip.Positioner><Tooltip.Popup>Initially open content</Tooltip.Popup></Tooltip.Positioner>
+        <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Initially open content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
       </Tooltip.Root>
     )
     expect(testRoot.renderer.getAllText()).toContain("Initially open content")
@@ -565,9 +577,9 @@ describeNative("Tooltip Base UI parity tree", () => {
     const testRoot = createTestRoot()
     testRoot.render(
       <Tooltip.Root defaultOpen open={false}>
-        <Tooltip.Positioner>
+        <Tooltip.Portal><Tooltip.Positioner>
           <Tooltip.Popup>Controlled content</Tooltip.Popup>
-        </Tooltip.Positioner>
+        </Tooltip.Positioner></Tooltip.Portal>
       </Tooltip.Root>
     )
 
@@ -581,7 +593,7 @@ describeNative("Tooltip Base UI parity tree", () => {
     testRoot.render(
       <Tooltip.Root open={false} onOpenChange={(open) => changes.push(open)}>
         <Tooltip.Trigger data-testid="controlled-closed-trigger" delay={0} style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-        <Tooltip.Positioner><Tooltip.Popup>Controlled content</Tooltip.Popup></Tooltip.Positioner>
+        <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Controlled content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
       </Tooltip.Root>
     )
 
@@ -597,7 +609,7 @@ describeNative("Tooltip Base UI parity tree", () => {
     testRoot.render(
       <Tooltip.Root open onOpenChange={(open) => changes.push(open)}>
         <Tooltip.Trigger data-testid="controlled-open-trigger" delay={0} style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-        <Tooltip.Positioner><Tooltip.Popup>Controlled content</Tooltip.Popup></Tooltip.Positioner>
+        <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Controlled content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
       </Tooltip.Root>
     )
 
@@ -613,9 +625,9 @@ describeNative("Tooltip Base UI parity tree", () => {
     testRoot.render(
       <Tooltip.Root onOpenChange={(open) => changes.push(open)}>
         <Tooltip.Trigger data-testid="callback-trigger" delay={0} style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-        <Tooltip.Positioner>
+        <Tooltip.Portal><Tooltip.Positioner>
           <Tooltip.Popup>Callback content</Tooltip.Popup>
-        </Tooltip.Positioner>
+        </Tooltip.Positioner></Tooltip.Portal>
       </Tooltip.Root>
     )
 
@@ -630,9 +642,9 @@ describeNative("Tooltip Base UI parity tree", () => {
     testRoot.render(
       <Tooltip.Root disabled onOpenChange={(open) => changes.push(open)}>
         <Tooltip.Trigger data-testid="disabled-root-trigger" delay={0} style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-        <Tooltip.Positioner>
+        <Tooltip.Portal><Tooltip.Positioner>
           <Tooltip.Popup>Disabled content</Tooltip.Popup>
-        </Tooltip.Positioner>
+        </Tooltip.Positioner></Tooltip.Portal>
       </Tooltip.Root>
     )
 
@@ -646,7 +658,7 @@ describeNative("Tooltip Base UI parity tree", () => {
     const testRoot = createTestRoot()
     const render = (disabled: boolean) => testRoot.render(
       <Tooltip.Root defaultOpen disabled={disabled}>
-        <Tooltip.Positioner><Tooltip.Popup data-testid="became-disabled-popup">Content</Tooltip.Popup></Tooltip.Positioner>
+        <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="became-disabled-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
       </Tooltip.Root>
     )
     render(false)
@@ -662,9 +674,9 @@ describeNative("Tooltip Base UI parity tree", () => {
       <div>
         <Tooltip.Root>
           <Tooltip.Trigger data-testid="disabled-trigger" disabled>Disabled</Tooltip.Trigger>
-          <Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner>
             <Tooltip.Popup>Disabled focus content</Tooltip.Popup>
-          </Tooltip.Positioner>
+          </Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
       </div>
     )
@@ -679,9 +691,9 @@ describeNative("Tooltip Base UI parity tree", () => {
     testRoot.render(
       <Tooltip.Root onOpenChange={(open, details) => { if (open) details.cancel() }}>
         <Tooltip.Trigger data-testid="cancel-trigger" delay={0} style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-        <Tooltip.Positioner>
+        <Tooltip.Portal><Tooltip.Positioner>
           <Tooltip.Popup>Cancelled content</Tooltip.Popup>
-        </Tooltip.Positioner>
+        </Tooltip.Positioner></Tooltip.Portal>
       </Tooltip.Root>
     )
 
@@ -708,7 +720,7 @@ describeNative("Tooltip Base UI parity tree", () => {
           }}
         >
           <Tooltip.Trigger data-testid="propagation-trigger">Trigger</Tooltip.Trigger>
-          <Tooltip.Positioner><Tooltip.Popup>Content</Tooltip.Popup></Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
       </div>
     )
@@ -776,7 +788,7 @@ describeNative("Tooltip Base UI parity tree", () => {
     testRoot.render(
       <div>
         <Tooltip.Root handle={handle}>
-          <Tooltip.Positioner><Tooltip.Popup data-testid="imperative-popup">Content</Tooltip.Popup></Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="imperative-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
         <Tooltip.Trigger id="imperative-trigger" handle={handle}>Trigger</Tooltip.Trigger>
       </div>
@@ -794,7 +806,7 @@ describeNative("Tooltip Base UI parity tree", () => {
     const handle = Tooltip.createTooltipHandle()
     testRoot.render(
       <>
-        <Tooltip.Root handle={handle}><Tooltip.Positioner><Tooltip.Popup>Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Root>
+        <Tooltip.Root handle={handle}><Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal></Tooltip.Root>
         <Tooltip.Trigger id="registered-trigger" handle={handle}>Trigger</Tooltip.Trigger>
       </>
     )
@@ -829,7 +841,7 @@ describeNative("Tooltip Base UI parity tree", () => {
     testRoot.render(
       <>
         <Tooltip.Root handle={handle}>
-          <Tooltip.Positioner><Tooltip.Popup data-testid="detached-popup">Content</Tooltip.Popup></Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="detached-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
         <Tooltip.Trigger id="detached-trigger" handle={handle}>Trigger</Tooltip.Trigger>
       </>
@@ -863,8 +875,8 @@ describeNative("Tooltip Base UI parity tree", () => {
     try {
       testRoot.render(
         <>
-          <Tooltip.Root handle={handle}><Tooltip.Positioner><Tooltip.Popup>First</Tooltip.Popup></Tooltip.Positioner></Tooltip.Root>
-          <Tooltip.Root handle={handle}><Tooltip.Positioner><Tooltip.Popup>Second</Tooltip.Popup></Tooltip.Positioner></Tooltip.Root>
+          <Tooltip.Root handle={handle}><Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>First</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal></Tooltip.Root>
+          <Tooltip.Root handle={handle}><Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Second</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal></Tooltip.Root>
         </>
       )
       testRoot.renderer.advanceAsyncClock(20)
@@ -990,7 +1002,7 @@ describeNative("Tooltip Base UI parity tree", () => {
     const testRoot = createTestRoot()
     testRoot.render(
       <Tooltip.Root defaultOpen open>
-        <Tooltip.Positioner><Tooltip.Popup data-testid="controlled-initially-open">Content</Tooltip.Popup></Tooltip.Positioner>
+        <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="controlled-initially-open">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
       </Tooltip.Root>
     )
     expect(testRoot.renderer.findByTestId("controlled-initially-open")).toBeDefined()
@@ -1000,11 +1012,11 @@ describeNative("Tooltip Base UI parity tree", () => {
   it.each([true, false])("sets positioner pointer-events when disableHoverablePopup=%s", async (disableHoverablePopup) => {
     const testRoot = createTestRoot()
     testRoot.render(
-      <Tooltip.Root disableHoverablePopup={disableHoverablePopup}>
+      <Tooltip.Root defaultOpen disableHoverablePopup={disableHoverablePopup}>
         <Tooltip.Trigger data-testid="pointer-events-trigger" delay={0} style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-        <Tooltip.Positioner data-testid="pointer-events-positioner" trackCursorAxis="both">
+        <Tooltip.Portal><Tooltip.Positioner data-testid="pointer-events-positioner" trackCursorAxis="both">
           <Tooltip.Popup>Content</Tooltip.Popup>
-        </Tooltip.Positioner>
+        </Tooltip.Positioner></Tooltip.Portal>
       </Tooltip.Root>
     )
     const trigger = testRoot.renderer.findByTestId("pointer-events-trigger")!
@@ -1022,7 +1034,7 @@ describeNative("Tooltip Base UI parity tree", () => {
     const changes: boolean[] = []
     testRoot.render(
       <Tooltip.Root onOpenChange={(open) => changes.push(open)}>
-        <Tooltip.Positioner><Tooltip.Popup>Content</Tooltip.Popup></Tooltip.Positioner>
+        <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
       </Tooltip.Root>
     )
     expect(changes).toEqual([])
@@ -1036,7 +1048,7 @@ describeNative("Tooltip Base UI parity tree", () => {
       <Tooltip.Provider delay={100}>
         <Tooltip.Root>
           <Tooltip.Trigger data-testid="pointerdown-delay-trigger">Trigger</Tooltip.Trigger>
-          <Tooltip.Positioner><Tooltip.Popup data-testid="pointerdown-delay-popup">Content</Tooltip.Popup></Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="pointerdown-delay-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
       </Tooltip.Provider>
     )
@@ -1056,7 +1068,7 @@ describeNative("Tooltip Base UI parity tree", () => {
       <Tooltip.Provider delay={100}>
         <Tooltip.Root>
           <Tooltip.Trigger data-testid="early-press-trigger" closeOnClick={false}>Trigger</Tooltip.Trigger>
-          <Tooltip.Positioner><Tooltip.Popup data-testid="early-press-popup">Content</Tooltip.Popup></Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="early-press-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
       </Tooltip.Provider>
     )
@@ -1076,7 +1088,7 @@ describeNative("Tooltip Base UI parity tree", () => {
       <div style={{ width: 600, height: 400 }}>
         <Tooltip.Root onOpenChange={(open, details) => changes.push({ open, reason: details.reason })}>
           <Tooltip.Trigger data-testid="reopen-after-press" delay={100} style={{ position: "absolute", left: 220, top: 180, width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-          <Tooltip.Positioner side="top"><Tooltip.Popup data-testid="reopen-after-press-popup" style={{ width: 100, height: 24 }}>Content</Tooltip.Popup></Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner side="top"><Tooltip.Popup data-testid="reopen-after-press-popup" style={{ width: 100, height: 24 }}>Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
       </div>
     )
@@ -1107,7 +1119,7 @@ describeNative("Tooltip Base UI parity tree", () => {
         actionsRef={actionsRef}
         onOpenChange={(open, details) => { if (!open) details.preventUnmountOnClose() }}
       >
-        <Tooltip.Positioner><Tooltip.Popup data-testid="action-unmount-popup">Content</Tooltip.Popup></Tooltip.Positioner>
+        <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="action-unmount-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
       </Tooltip.Root>
     )
     expect(testRoot.renderer.findByTestId("action-unmount-popup")).toBeDefined()
@@ -1122,7 +1134,7 @@ describeNative("Tooltip Base UI parity tree", () => {
       <div>
         <Tooltip.Root>
           <Tooltip.Trigger data-testid="instant-state-trigger" delay={0}>Trigger</Tooltip.Trigger>
-          <Tooltip.Positioner><Tooltip.Popup data-testid="instant-state-popup">Content</Tooltip.Popup></Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="instant-state-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
         <button data-testid="instant-state-next">Next</button>
       </div>
@@ -1177,9 +1189,9 @@ describeNative("Tooltip Base UI parity tree", () => {
       <Tooltip.Provider delay={0}>
         <Tooltip.Root>
         <Tooltip.Trigger data-testid="escape-trigger" delay={0} style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-        <Tooltip.Positioner>
+        <Tooltip.Portal><Tooltip.Positioner>
           <Tooltip.Popup>Escape content</Tooltip.Popup>
-        </Tooltip.Positioner>
+        </Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
       </Tooltip.Provider>
     )
@@ -1207,7 +1219,7 @@ describeNative("Tooltip Base UI parity tree", () => {
     const actionsRef = React.createRef<Tooltip.TooltipRootActions>()
     testRoot.render(
       <Tooltip.Root defaultOpen actionsRef={actionsRef}>
-        <Tooltip.Positioner><Tooltip.Popup data-testid="action-popup">Content</Tooltip.Popup></Tooltip.Positioner>
+        <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="action-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
       </Tooltip.Root>
     )
     expect(testRoot.renderer.findByTestId("action-popup")).toBeDefined()
@@ -1222,9 +1234,9 @@ describeNative("Tooltip Base UI parity tree", () => {
       <Tooltip.Provider delay={100}>
         <Tooltip.Root>
           <Tooltip.Trigger data-testid="early-click-trigger" style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-          <Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner>
             <Tooltip.Popup>Early click content</Tooltip.Popup>
-          </Tooltip.Positioner>
+          </Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
       </Tooltip.Provider>
     )
@@ -1243,7 +1255,7 @@ describeNative("Tooltip Base UI parity tree", () => {
         <div style={{ width: 600, height: 400 }}>
           <Tooltip.Root onOpenChange={(open, details) => changes.push({ open, reason: details.reason })}>
             <Tooltip.Trigger data-testid="click-close-trigger" delay={0} style={{ position: "absolute", left: 220, top: 180, width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-            <Tooltip.Positioner side="top"><Tooltip.Popup style={{ width: 100, height: 24 }}>Click close content</Tooltip.Popup></Tooltip.Positioner>
+            <Tooltip.Portal><Tooltip.Positioner side="top"><Tooltip.Popup style={{ width: 100, height: 24 }}>Click close content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
           </Tooltip.Root>
         </div>
       </Tooltip.Provider>
@@ -1277,9 +1289,9 @@ describeNative("Tooltip Base UI parity tree", () => {
       <div style={{ width: 600, height: 400 }}>
         <Tooltip.Root>
           <Tooltip.Trigger data-testid="hoverable-trigger" delay={0} style={{ position: "absolute", left: 220, top: 180, width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-          <Tooltip.Positioner side="top">
+          <Tooltip.Portal><Tooltip.Positioner side="top">
             <Tooltip.Popup data-testid="hoverable-popup" style={{ width: 120, height: 32 }}>Popup</Tooltip.Popup>
-          </Tooltip.Positioner>
+          </Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
       </div>
     )
@@ -1298,9 +1310,9 @@ describeNative("Tooltip Base UI parity tree", () => {
       <div style={{ width: 600, height: 400 }}>
         <Tooltip.Root disableHoverablePopup>
           <Tooltip.Trigger data-testid="non-hoverable-trigger" delay={0} style={{ position: "absolute", left: 220, top: 180, width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-          <Tooltip.Positioner side="top">
+          <Tooltip.Portal><Tooltip.Positioner side="top">
             <Tooltip.Popup data-testid="non-hoverable-popup" style={{ width: 120, height: 32 }}>Popup</Tooltip.Popup>
-          </Tooltip.Positioner>
+          </Tooltip.Positioner></Tooltip.Portal>
         </Tooltip.Root>
       </div>
     )
@@ -1521,9 +1533,9 @@ describeNative("Tooltip Base UI parity tree", () => {
           disabled={disabled}
           onOpenChange={(open, details) => changes.push({ open, reason: details.reason })}
         >
-          <Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner>
             <Tooltip.Popup data-testid="disabled-popup">Tip</Tooltip.Popup>
-          </Tooltip.Positioner>
+          </Tooltip.Positioner></Tooltip.Portal>
           <Tooltip.Trigger id="disabled-trigger" data-testid="disabled-trigger" disabled>
             Action
           </Tooltip.Trigger>
@@ -1550,9 +1562,9 @@ describeNative("Tooltip Base UI parity tree", () => {
     testRoot.render(
       <div style={{ width: 420, height: 300 }}>
         <Tooltip.Root onOpenChange={(_open, details) => { lastChangeTrigger = details.trigger }}>
-          <Tooltip.Positioner side="top" sideOffset={4}>
+          <Tooltip.Portal><Tooltip.Positioner side="top" sideOffset={4}>
             <Tooltip.Popup data-testid="multiple-trigger-popup">Tip</Tooltip.Popup>
-          </Tooltip.Positioner>
+          </Tooltip.Positioner></Tooltip.Portal>
           <Tooltip.Trigger
             id="first-trigger"
             ref={(instance) => { first = instance }}
@@ -1592,9 +1604,9 @@ describeNative("Tooltip Base UI parity tree", () => {
       <div style={{ width: 420, height: 300, padding: 16 }}>
         <Tooltip.Provider closeDelay={0}>
           <Tooltip.Root handle={detached ? tooltipHandle : undefined}>
-            <Tooltip.Positioner side="top">
+            <Tooltip.Portal><Tooltip.Positioner side="top">
               <Tooltip.Popup data-testid="focus-delay-popup" style={{ width: 150, height: 28 }}>Tip</Tooltip.Popup>
-            </Tooltip.Positioner>
+            </Tooltip.Positioner></Tooltip.Portal>
             {!detached && (
               <Tooltip.Trigger id="focus-trigger" ref={(instance) => { trigger = instance }} closeDelay={60}>
                 Focus trigger
@@ -1628,7 +1640,7 @@ describeNative("Tooltip Base UI parity tree", () => {
     testRoot.render(
       <div style={{ width: 320, height: 200 }}>
         <Tooltip.Root open triggerId="root-press-trigger" onOpenChange={(open, details) => rootChanges.push({ open, reason: details.reason })}>
-          <Tooltip.Positioner><Tooltip.Popup>Root tooltip</Tooltip.Popup></Tooltip.Positioner>
+          <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Root tooltip</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
           <Tooltip.Trigger id="root-press-trigger" data-testid="root-press-trigger">Root trigger</Tooltip.Trigger>
         </Tooltip.Root>
       </div>
@@ -1645,7 +1657,7 @@ describeNative("Tooltip Base UI parity tree", () => {
       <div style={{ width: 320, height: 200 }}>
         <Tooltip.Provider>
           <Tooltip.Root open handle={tooltipHandle} onOpenChange={(open, details) => handleChanges.push({ open, reason: details.reason })}>
-            <Tooltip.Positioner><Tooltip.Popup>Handle tooltip</Tooltip.Popup></Tooltip.Positioner>
+            <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Handle tooltip</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
           </Tooltip.Root>
           <Tooltip.Trigger id="handle-press-trigger" handle={tooltipHandle} data-testid="handle-press-trigger">Handle trigger</Tooltip.Trigger>
         </Tooltip.Provider>
@@ -1665,7 +1677,7 @@ describeNative("Tooltip Base UI parity tree", () => {
     const completed: boolean[] = []
     function App() {
       const [open, setOpen] = useState(true)
-      return <><button data-testid="complete-close" onClick={() => setOpen(false)}>Close</button><Tooltip.Root open={open} onOpenChangeComplete={(value) => completed.push(value)}><Tooltip.Positioner><Tooltip.Popup data-testid="complete-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Root></>
+      return <><button data-testid="complete-close" onClick={() => setOpen(false)}>Close</button><Tooltip.Root open={open} onOpenChangeComplete={(value) => completed.push(value)}><Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="complete-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal></Tooltip.Root></>
     }
     testRoot.render(<App />)
     await testRoot.userEvent.click(testRoot.renderer.findByTestId("complete-close")!)
@@ -1679,7 +1691,7 @@ describeNative("Tooltip Base UI parity tree", () => {
     const completed: boolean[] = []
     function App() {
       const [open, setOpen] = useState(false)
-      return <><button data-testid="complete-open" onClick={() => setOpen(true)}>Open</button><Tooltip.Root open={open} onOpenChangeComplete={(value) => completed.push(value)}><Tooltip.Positioner><Tooltip.Popup data-testid="complete-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Root></>
+      return <><button data-testid="complete-open" onClick={() => setOpen(true)}>Open</button><Tooltip.Root open={open} onOpenChangeComplete={(value) => completed.push(value)}><Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="complete-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal></Tooltip.Root></>
     }
     testRoot.render(<App />)
     await testRoot.userEvent.click(testRoot.renderer.findByTestId("complete-open")!)
@@ -1691,7 +1703,7 @@ describeNative("Tooltip Base UI parity tree", () => {
   it("does not call onOpenChangeComplete on mount when not open", () => {
     const testRoot = createTestRoot()
     const completed: boolean[] = []
-    testRoot.render(<Tooltip.Root onOpenChangeComplete={(value) => completed.push(value)}><Tooltip.Positioner><Tooltip.Popup data-testid="complete-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Root>)
+    testRoot.render(<Tooltip.Root onOpenChangeComplete={(value) => completed.push(value)}><Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="complete-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal></Tooltip.Root>)
     expect(completed).toEqual([])
     testRoot.unmount()
   })
@@ -1708,8 +1720,8 @@ describeNative("Tooltip Base UI parity tree", () => {
     function App({ phase }: { phase: "outgoing" | "overlap" | "incoming" }) {
       return <>
         <Tooltip.Trigger handle={handle} id="transient-trigger" data-testid="transient-trigger">Trigger</Tooltip.Trigger>
-        {(phase === "outgoing" || phase === "overlap") && <Tooltip.Root key="outgoing" handle={handle}><Tooltip.Positioner><Tooltip.Popup>Outgoing</Tooltip.Popup></Tooltip.Positioner></Tooltip.Root>}
-        {(phase === "overlap" || phase === "incoming") && <><Tooltip.Root key="incoming" handle={handle}><Tooltip.Positioner><Tooltip.Popup>Incoming</Tooltip.Popup></Tooltip.Positioner></Tooltip.Root><OpenOnMount /></>}
+        {(phase === "outgoing" || phase === "overlap") && <Tooltip.Root key="outgoing" handle={handle}><Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Outgoing</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal></Tooltip.Root>}
+        {(phase === "overlap" || phase === "incoming") && <><Tooltip.Root key="incoming" handle={handle}><Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Incoming</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal></Tooltip.Root><OpenOnMount /></>}
       </>
     }
     const testRoot = createTestRoot()
@@ -1740,7 +1752,7 @@ describeNative("Tooltip Base UI parity tree", () => {
           {({ payload }: { payload: number | undefined }) => <>
             {showFirstTrigger && <Tooltip.Trigger id="cancel-trigger-1" payload={1} data-testid="cancel-trigger-1">Trigger 1</Tooltip.Trigger>}
             <Tooltip.Trigger id="cancel-trigger-2" payload={2} data-testid="cancel-trigger-2">Trigger 2</Tooltip.Trigger>
-            <Tooltip.Positioner><Tooltip.Popup data-testid="cancel-popup">{payload}</Tooltip.Popup></Tooltip.Positioner>
+            <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="cancel-popup">{payload}</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
           </>}
         </Tooltip.Root>
       </>
@@ -1796,7 +1808,7 @@ describeNative("Tooltip Base UI parity tree", () => {
         <Tooltip.Trigger handle={handle} id="spaced-one" data-testid="spaced-one" delay={0} style={{ width: 80, height: 30 }}>One</Tooltip.Trigger>
         <Tooltip.Trigger handle={handle} id="spaced-two" data-testid="spaced-two" delay={0} style={{ width: 80, height: 30 }}>Two</Tooltip.Trigger>
       </div>
-      <Tooltip.Root handle={handle}><Tooltip.Positioner><Tooltip.Popup data-testid="spaced-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Root>
+      <Tooltip.Root handle={handle}><Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="spaced-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal></Tooltip.Root>
     </Tooltip.Provider>)
     const first = testRoot.renderer.findByTestId("spaced-one")!
     const second = testRoot.renderer.findByTestId("spaced-two")!
