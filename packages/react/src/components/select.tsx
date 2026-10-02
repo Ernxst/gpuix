@@ -737,7 +737,10 @@ export const SelectValue = forwardRef<PublicInstance, SelectValueProps>(
       typeof children === "function"
         ? children(context.multiple ? values : context.value)
         : children
-    const state = { value: context.value, placeholder: !hasValue }
+    const state = {
+      value: context.value,
+      placeholder: context.multiple ? values.length === 0 : context.value === null,
+    }
     return renderPart({ tag: "span", render, props: { ...props, "data-placeholder": state.placeholder ? "" : undefined, className: resolveClassName(className, state), style: resolvePartStyle(style, state) }, children: content ?? valueContent ?? placeholder, state, ref }) as ReactElement
   }
 )

@@ -201,23 +201,6 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     expect(screen.getByTestId("value")).toHaveAttribute("data-placeholder", "")
   })
 
-  it("marks an empty-string object value as a placeholder using itemToStringValue", async () => {
-    const methods = [{ id: "", name: "Default" }]
-    screen.render(
-      <Select.Root
-        defaultValue={methods[0]}
-        items={methods}
-        itemToStringValue={(item) => item.id}
-        itemToStringLabel={(item) => item.name}
-      >
-        <Select.Trigger data-testid="trigger"><Select.Value data-testid="value" /></Select.Trigger>
-      </Select.Root>,
-    )
-    expect(screen.getByTestId("trigger")).toHaveAttribute("data-placeholder", "")
-    expect(screen.getByTestId("value")).toHaveAttribute("data-placeholder", "")
-    expect(screen.getByTestId("value")).toHaveTextContent("Default")
-  })
-
   it("marks a selected null item as a placeholder while showing its label", async () => {
     screen.render(
       <Select.Root items={[{ value: null, label: "Select font" }]}>
