@@ -3961,7 +3961,8 @@ provide `cancel()` and `allowPropagation()` alongside `preventUnmountOnClose()`.
 `Tooltip.Arrow` defaults to `aria-hidden=\"true\"`. Tooltip handles keep their
 active trigger and payload when switching triggers or overlapping Roots; an
 active detached trigger closing on unmount can be cancelled from `onOpenChange`.
-Custom-rendered triggers keep their children, including nested tooltip triggers.
+Custom render functions control their returned content; nested Tooltip triggers
+inside a custom-rendered Trigger are not supported yet.
 `Tooltip.Portal keepMounted` retains a closed popup and hides it. `Tooltip.Viewport`
 wraps content in a current container and remounts it when the active trigger or
 payload changes; it does not retain previous content for animated transitions.
