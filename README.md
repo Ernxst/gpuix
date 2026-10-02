@@ -104,16 +104,16 @@ bun add -d @types/react typescript
 
 Release versions follow semver with a fixed `-fork` suffix, and all three packages share the same
 exact version. Pin the React and plugins tarballs from one release and override `@gpuix/native` to
-that release's tarball. For example, `0.26.1-fork` uses this tag and these package URLs:
+that release's tarball. For example, `0.26.2-fork` uses this tag and these package URLs:
 
 ```json
 {
   "dependencies": {
-    "@gpuix/react": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.1-fork/gpuix-react-0.26.1-fork.tgz",
-    "@gpuix/plugins": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.1-fork/gpuix-plugins-0.26.1-fork.tgz"
+    "@gpuix/react": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.2-fork/gpuix-react-0.26.2-fork.tgz",
+    "@gpuix/plugins": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.2-fork/gpuix-plugins-0.26.2-fork.tgz"
   },
   "overrides": {
-    "@gpuix/native": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.1-fork/gpuix-native-0.26.1-fork.tgz"
+    "@gpuix/native": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.2-fork/gpuix-native-0.26.2-fork.tgz"
   }
 }
 ```
@@ -756,7 +756,7 @@ prevented Tab or Shift+Tab keydown likewise keeps focus on the current element.
 
 Pin `@gpuix/native`, `@gpuix/react`, and `@gpuix/plugins` to the **same exact
 release version**. Versions follow semver with a fixed `-fork` suffix, such as
-`0.26.1-fork`; React pins native and plugins pins React. GPUIX is still pre-1.0.
+`0.26.2-fork`; React pins native and plugins pins React. GPUIX is still pre-1.0.
 Breaking changes can land before v1, so upgrade all three together.
 
 ## Building

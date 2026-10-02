@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.26.2-fork
+
+Select, Tooltip and Combobox popups now keep their collision padding from the window edge, including after switching anchors. This patch also fixes keyboard-focused Tooltip behaviour, aligns Select and component-part types with Base UI, and refreshes Windows shader builds when the compiler path changes.
+
+1. **Floating popups respect `collisionPadding` when switching anchors.** Select, Tooltip and Combobox stay inside the padded window boundary after flipping; the default padding is 5 px on each edge ([#836](https://github.com/galaxiajs/gpuix/issues/836), [PR #838](https://github.com/galaxiajs/gpuix/pull/838)).
+2. **Keyboard-focused Tooltips close and follow their rendered triggers.** Moving focus to another trigger closes the previous Tooltip, and the new popup is positioned from its own trigger ([#834](https://github.com/galaxiajs/gpuix/issues/834), [#835](https://github.com/galaxiajs/gpuix/issues/835), [PR #837](https://github.com/galaxiajs/gpuix/pull/837)).
+3. **Select, Tooltip, Dialog and AlertDialog parts expose Base UI type members.** Their `Props` and `State` namespaces now resolve in shared wrappers ([#831](https://github.com/galaxiajs/gpuix/issues/831), [PR #833](https://github.com/galaxiajs/gpuix/pull/833)).
+4. **Select item and value children match Base UI's callback types.** `Select.ItemText` can render a function child with highlighted and selected state, `Select.Value` accepts Base UI's callback shape, and the neutral item label remains available for the trigger and typeahead ([#832](https://github.com/galaxiajs/gpuix/issues/832), [PR #833](https://github.com/galaxiajs/gpuix/pull/833)).
+5. **Windows shader builds rerun when the compiler path changes.** Cargo now rebuilds the Windows shaders when `GPUI_FXC_PATH` changes ([#817](https://github.com/galaxiajs/gpuix/issues/817), [PR #830](https://github.com/galaxiajs/gpuix/pull/830)).
+
 ## 0.26.1-fork
 
 GPU-IX no longer crashes when a z-index overlay reaches the native hit-order sort, and opacity-only elements stay visible above clipped row backgrounds. Desktop text can opt into balanced wrapping with `textWrap: 'balance'`.
@@ -13,10 +23,11 @@ GPU-IX no longer crashes when a z-index overlay reaches the native hit-order sor
 - The named `Select` import now exposes the compound parts as `Select.Root`, `Select.Trigger` and related members ([#801](https://github.com/galaxiajs/gpuix/issues/801), [PR #803](https://github.com/galaxiajs/gpuix/pull/803)).
 - `render` elements keep their classes while styles, handlers and refs compose with component-part props ([#811](https://github.com/galaxiajs/gpuix/issues/811), [PR #814](https://github.com/galaxiajs/gpuix/pull/814)).
 - TanStack Router's `HeadContent` works with the document facade's empty `querySelector()` and `querySelectorAll()` results ([#798](https://github.com/galaxiajs/gpuix/issues/798), [PR #799](https://github.com/galaxiajs/gpuix/pull/799)).
+- Corrected rounded-container border painting so child content overlaps borders as in Chromium, updating the edge antialiasing ([PR #816](https://github.com/galaxiajs/gpuix/pull/816)).
 
 ## Install
 
-The repository moved to `galaxiajs/gpuix`; GitHub redirects install URLs under `Ernxst/gpuix`. Pin the `@gpuix/native`, `@gpuix/react`, and `@gpuix/plugins` tarballs from the same release. For this release, use the tag `@gpuix/react@0.26.1-fork` (URL-encoded as `%40gpuix/react%400.26.1-fork`) and update all three versioned tarball URLs together.
+The repository moved to `galaxiajs/gpuix`; GitHub redirects install URLs under `Ernxst/gpuix`. Pin the `@gpuix/native`, `@gpuix/react`, and `@gpuix/plugins` tarballs from the same release. For this release, use the tag `@gpuix/react@0.26.2-fork` (URL-encoded as `%40gpuix/react%400.26.2-fork`) and update all three versioned tarball URLs together.
 
 ## 0.25.0-fork.12
 
