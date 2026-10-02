@@ -248,18 +248,32 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     expect(screen.queryByRole("option", { name: "a" })).toBeNull()
   })
 
-  it("keeps navigating distinct items without explicit values after the list changes", async () => {
+  it("highlights only the active item when navigating items without explicit values", async () => {
+    screen.render(
+      <Select.Root open>
+        <Select.Trigger>Toggle</Select.Trigger>
+        <Select.Popup>
+          <Select.Item data-testid="favorite">Favorite</Select.Item>
+          <Select.Item data-testid="share">Share</Select.Item>
+          <Select.Item data-testid="copy">Copy</Select.Item>
+        </Select.Popup>
+      </Select.Root>,
+    )
+    screen.renderer.simulateKeystrokes("down")
+    await screen.waitFor(() => expect(screen.getByTestId("favorite")).toHaveAttribute("data-highlighted", ""))
+    screen.renderer.simulateKeystrokes("down")
+    await screen.waitFor(() => expect(screen.getByTestId("share")).toHaveAttribute("data-highlighted", ""))
+    expect(screen.getByTestId("favorite")).not.toHaveAttribute("data-highlighted")
+    expect(screen.getByTestId("share")).toHaveFocus()
+  })
+
+  it("keeps keyboard navigation on a remaining item after earlier items are removed", async () => {
     function DynamicMenu() {
       const [itemsFiltered, setItemsFiltered] = useState(false)
       return (
-        <Select.Root
-          onOpenChange={(open) => {
-            if (open) setItemsFiltered(true)
-          }}
-          onOpenChangeComplete={(open) => {
-            if (!open) setItemsFiltered(false)
-          }}
-        >
+        <Select.Root onOpenChange={(open) => {
+          if (open) setTimeout(() => setItemsFiltered(true), 0)
+        }}>
           <Select.Trigger data-testid="trigger">Toggle</Select.Trigger>
           <Select.Popup>
             <Select.Item>Add to Library</Select.Item>
@@ -278,11 +292,11 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     screen.renderer.focusElement(screen.getByTestId("trigger").id)
     screen.renderer.simulateKeystrokes("down")
     await screen.waitFor(() => expect(screen.getByRole("listbox")).toBeInTheDocument())
+    await screen.waitFor(() => expect(screen.queryByText("Add to Playlist")).toBeNull())
     screen.renderer.simulateKeystrokes("down")
     screen.renderer.simulateKeystrokes("down")
     screen.renderer.simulateKeystrokes("down")
-    await screen.waitFor(() => expect(screen.getByTestId("share")).toHaveAttribute("data-highlighted", ""))
-    expect(screen.getByTestId("favorite")).not.toHaveAttribute("data-highlighted")
+    await screen.waitFor(() => expect(screen.getByTestId("share")).toHaveFocus())
   })
 
 
