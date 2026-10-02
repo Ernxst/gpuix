@@ -44,8 +44,8 @@ diagnostic instead. Browser event callbacks in the wasm build are not wired up y
 the web example notes below.
 
 **Platform status:** macOS is this fork's primary platform. Windows builds and runs the same CI
-test suite as macOS on dispatch runs. Linux builds, but nothing tests it — the test renderer is
-waiting on GPUI's headless wgpu backend.
+test suite as macOS. Linux builds and runs the tests that need no test renderer; the test renderer
+there is waiting on GPUI's headless wgpu backend.
 
 **How this differs from upstream**
 
