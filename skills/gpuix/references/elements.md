@@ -206,7 +206,7 @@ Their text is selectable and searchable, but test text queries cannot see it; us
 
 A host element, not a component; each immediate child is one row. It needs a bounded height. A populated list that lays out at zero height diagnoses the missing parent height: it throws under `strictStyles` and warns once otherwise. Empty or hidden lists stay quiet.
 
-- Props: `alignment` (`top`/`bottom`), `followTail`, `overdraw` (px, default 512), `estimatedItemHeight` (default 48; `null` opts out), `itemCount` (ignored without a positive estimate), `windowStart` (logical index of the first child; ignored without `itemCount`), `onVisibleRange` (`startIndex`, `endIndex` exclusive), `tabIndex`, `className`, `data-*`, ARIA props.
+- Props: `alignment` (`top`/`bottom`), `followTail`, `overdraw` (px, default 512), `estimatedItemHeight` (default 48; `null` opts out), `itemCount` (ignored without a positive estimate), `windowStart` (logical index of the first child; ignored without `itemCount`), `onVisibleRange` (`startIndex`, `endIndex` exclusive; fires when the visible range changes after scrolling or a list or layout update, and is suppressed when the range is unchanged), `tabIndex`, `className`, `data-*`, ARIA props.
 - Not accepted: mouse/keyboard handlers, `hover`/`active` styles, `transition`. Wrap the list in a `div` for those.
 - Set `tabIndex={0}` to add the list to the Tab order. Its `focus` and `focusVisible` styles work when the list has focus.
 - A single child without `itemCount={1}` throws `VirtualListRowContractError` in strict mode and warns otherwise.

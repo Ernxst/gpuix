@@ -3191,6 +3191,24 @@ impl TestGpuixRenderer {
         events.drain(..).collect()
     }
 
+    /// Return and clear events of one type while leaving other queued events
+    /// available to the test renderer's next full drain.
+    #[napi]
+    pub fn drain_events_of_type(&self, event_type: String) -> Vec<EventPayload> {
+        let mut events = self.events.lock().unwrap();
+        let mut matching = Vec::new();
+        let mut remaining = Vec::with_capacity(events.len());
+        for event in events.drain(..) {
+            if event.event_type == event_type {
+                matching.push(event);
+            } else {
+                remaining.push(event);
+            }
+        }
+        *events = remaining;
+        matching
+    }
+
     /// Return and clear native frame timestamps since the last drain.
     /// Timestamps are collected synchronously — no event loop queuing.
     #[napi]
