@@ -29,7 +29,7 @@ describeNative("Select popup collision padding", () => {
           <Select.Value placeholder="Pick a fruit" />
         </Select.Trigger>
         <Select.Portal>
-          <Select.Positioner data-testid="positioner" side={sideOverride ?? scenario.side} align="center" sideOffset={4} collisionPadding={collisionPadding} collisionAvoidance={collisionAvoidance} className={(state) => { resolvedSides?.push(state.side); return undefined }}>
+          <Select.Positioner side={sideOverride ?? scenario.side} align="center" sideOffset={4} collisionPadding={collisionPadding} collisionAvoidance={collisionAvoidance} className={(state) => { resolvedSides?.push(state.side); return undefined }}>
             <Select.Popup data-testid="popup" style={{ width: 144, height: popupHeight }}>
               <Select.List>
                 <Select.Item value="apple">Apple</Select.Item>
@@ -69,9 +69,13 @@ describeNative("Select popup collision padding", () => {
 
   it("keeps the side flip and shifts the flipped popup inside the padded edge", () => {
     const resolvedSides: string[] = []
+    renderSelect("top", 0, undefined, "top", 112, resolvedSides)
+    const zeroPaddingSide = resolvedSides.at(-1)
+    resolvedSides.length = 0
     renderSelect("top", undefined, undefined, "top", 112, resolvedSides)
 
-    expect(resolvedSides.at(-1)).toBe("bottom")
+    expect(zeroPaddingSide).toBe("bottom")
+    expect(resolvedSides.at(-1)).toBe(zeroPaddingSide)
     expect(screen.getByTestId("popup").getBoundingClientRect().bottom).toBe(155)
   })
 
