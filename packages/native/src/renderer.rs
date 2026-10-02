@@ -38,7 +38,6 @@ use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash as _, Hasher as _};
 use std::path::PathBuf;
-#[cfg(any(target_os = "macos", target_family = "wasm"))]
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -14462,10 +14461,6 @@ fn build_virtual_list(
             },
         );
     let config = VirtualListConfig::from_element(element);
-    let previous_logical_count = ctx
-        .virtual_lists
-        .get(&element.id)
-        .map(|entry| entry.config.logical_count(entry.child_ids.len()));
     let window_start = if config.item_count.is_some() {
         window_start_from_element(element)
     } else {
@@ -14519,36 +14514,6 @@ fn build_virtual_list(
             entry.state.clone()
         }
     };
-
-    let logical_count = ctx
-        .virtual_lists
-        .get(&element.id)
-        .map(|entry| entry.config.logical_count(entry.child_ids.len()))
-        .unwrap_or_default();
-    if previous_logical_count.is_some_and(|previous| previous != logical_count) {
-        if let Some(entry) = ctx.virtual_lists.get(&element.id) {
-            if entry.reported_visible_range.borrow().is_some() {
-                let viewport_height = entry
-                    .last_visible_range_check
-                    .map(|(_, viewport, _, _)| viewport.height)
-                    .filter(|height| f32::from(*height) > 0.0)
-                    .unwrap_or_else(|| entry.state.viewport_bounds().size.height);
-                if let Some(range) = estimated_virtual_list_visible_range_for_height(
-                    &entry.state,
-                    logical_count,
-                    entry.config.estimated_item_height,
-                    viewport_height,
-                ) {
-                    emit_virtual_visible_range(
-                        ctx.event_callback,
-                        element.id,
-                        range,
-                        &entry.reported_visible_range,
-                    );
-                }
-            }
-        }
-    }
 
     if let Some(entry) = ctx.virtual_lists.get_mut(&element.id) {
         entry.accessibility_ancestor_path = ctx

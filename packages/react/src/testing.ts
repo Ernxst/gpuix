@@ -198,6 +198,7 @@ interface NativeTestRendererApi extends Omit<NativeRenderer, "requestFrame"> {
   getIntrinsicProbeLayoutCount(): number
   getStyleTransitionFrameRequestCount(): number
   drainEvents(): EventPayload[]
+  drainEventsOfType(eventType: string): EventPayload[]
   drainFrameTimestamps(): number[]
   setMenus(menus: MenuSpec[]): void
   simulateMenuAction(id: string): void
@@ -1222,22 +1223,36 @@ export class TestRenderer implements NativeRenderer {
    *  surface a further frame's worth of events — in a loop until nothing is
    *  left. */
   dispatchNativeEvents(): boolean {
+    return this.dispatchNativeEventsMatching()
+  }
+
+  /** Deliver visible-range updates produced by a committed render without
+   *  advancing unrelated native events queued for the test's next interaction. */
+  dispatchVisibleRangeEvents(): boolean {
+    return this.dispatchNativeEventsMatching("visibleRange")
+  }
+
+  private dispatchNativeEventsMatching(eventType?: EventPayload["eventType"]): boolean {
     const endResizeObserverDeliveryTurn = beginResizeObserverDeliveryTurn()
     try {
     const report = (error: unknown): void => reportUncaughtErrorToRenderer(this, error)
     let delivered = false
-    let hadPendingResizeObservations = false
-    actSync(report, () => {
-      hadPendingResizeObservations = flushPendingResizeObservations(this)
-    })
-    if (hadPendingResizeObservations) {
-      delivered = true
+    if (eventType === undefined) {
+      let hadPendingResizeObservations = false
+      actSync(report, () => {
+        hadPendingResizeObservations = flushPendingResizeObservations(this)
+      })
+      if (hadPendingResizeObservations) {
+        delivered = true
+      }
     }
     for (;;) {
-      const events = this.native.drainEvents()
-      if (events.length === 0) break
+      const matchingEvents = eventType === undefined
+        ? this.native.drainEvents()
+        : this.native.drainEventsOfType(eventType)
+      if (matchingEvents.length === 0) break
       delivered = true
-      const resizeEvents = events.filter(
+      const resizeEvents = matchingEvents.filter(
         (event): event is EventPayload & { entries: NonNullable<EventPayload["entries"]> } =>
           event.eventType === "resizeObservation" && Array.isArray(event.entries)
       )
@@ -1246,7 +1261,7 @@ export class TestRenderer implements NativeRenderer {
         for (const entry of event.entries) resizeEntries.set(entry.elementId, entry)
       }
       let resizeBatchDelivered = false
-      for (const event of events) {
+      for (const event of matchingEvents) {
         if (event.eventType === "resizeObservation") {
           if (!resizeBatchDelivered && resizeEvents[0]) {
             resizeBatchDelivered = true
@@ -3409,10 +3424,13 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
     actSync(reportRootError, () => root.render(node))
     // Trigger GPUI rendering pipeline after the React commit and its effects.
     renderer.flush()
+    // Deliver the next-frame range check after list layout and scroll
+    // anchoring have settled.
+    renderer.drawPendingFrame()
     // Native events produced by that render (for example, a virtual list's
     // visible range after its item count changes) are part of the committed
     // update. Deliver them before render returns, as the live renderer does.
-    renderer.dispatchNativeEvents()
+    renderer.dispatchVisibleRangeEvents()
   }
 
   const unmount = (): void => {

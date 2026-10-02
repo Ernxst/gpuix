@@ -290,16 +290,17 @@ describe("<virtual-list>", () => {
       expect(ranges.at(-1)?.endIndex).toBeGreaterThan(ranges.at(-1)!.startIndex!)
     }, { timeout: 5_000 })
     const previousRange = ranges.at(-1)
-    const previousRangeCount = ranges.length
     const previousScrollTop = screen.renderer.getListScrollTop(listElement.id)?.[0]
     expect(previousScrollTop).toBeGreaterThan(0)
     expect(previousScrollTop).toBeLessThan(90)
+    const shortenedCount = previousRange!.endIndex! - 1
+    expect(shortenedCount).toBeGreaterThan(previousScrollTop)
 
-    screen.render(list(90))
+    screen.render(list(shortenedCount))
     await screen.waitFor(() => {
       screen.renderer.dispatchNativeEvents()
       expect(screen.renderer.getListScrollTop(listElement.id)?.[0]).toBe(previousScrollTop)
-      expect(ranges.length).toBeGreaterThan(previousRangeCount)
+      expect(ranges.at(-1)?.endIndex).toBe(shortenedCount)
     }, { timeout: 5_000 })
     expect(ranges.at(-1)).not.toStrictEqual(previousRange)
     expect(ranges.at(-1)?.startIndex).toBe(previousScrollTop)
