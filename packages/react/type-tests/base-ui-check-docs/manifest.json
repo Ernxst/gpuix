@@ -1,0 +1,230 @@
+[
+  {
+    "component": "select",
+    "example": "Anatomy",
+    "file": "docs/src/app/(docs)/react/components/select/page.mdx#Anatomy",
+    "fixture": "select-01.tsx"
+  },
+  {
+    "component": "select",
+    "example": "Specifying generic type parameters",
+    "file": "docs/src/app/(docs)/react/components/select/page.mdx#Specifying generic type parameters",
+    "fixture": "select-02.tsx"
+  },
+  {
+    "component": "select",
+    "example": "items prop",
+    "file": "docs/src/app/(docs)/react/components/select/page.mdx#items prop",
+    "fixture": "select-03.tsx"
+  },
+  {
+    "component": "select",
+    "example": "Lookup map",
+    "file": "docs/src/app/(docs)/react/components/select/page.mdx#Lookup map",
+    "fixture": "select-04.tsx"
+  },
+  {
+    "component": "select",
+    "example": "Using Select.Label to label a select",
+    "file": "docs/src/app/(docs)/react/components/select/page.mdx#Using Select.Label to label a select",
+    "fixture": "select-05.tsx"
+  },
+  {
+    "component": "select",
+    "example": "Placeholder item",
+    "file": "docs/src/app/(docs)/react/components/select/page.mdx#Placeholder item",
+    "fixture": "select-06.tsx"
+  },
+  {
+    "component": "select",
+    "example": "Clearable item",
+    "file": "docs/src/app/(docs)/react/components/select/page.mdx#Clearable item",
+    "fixture": "select-07.tsx"
+  },
+  {
+    "component": "select",
+    "example": "Example",
+    "file": "docs/src/app/(docs)/react/components/select/page.mdx#Example",
+    "fixture": "select-08.tsx"
+  },
+  {
+    "component": "tooltip",
+    "example": "Anatomy",
+    "file": "docs/src/app/(docs)/react/components/tooltip/page.mdx#Anatomy",
+    "fixture": "tooltip-01.tsx"
+  },
+  {
+    "component": "tooltip",
+    "example": "Detached triggers",
+    "file": "docs/src/app/(docs)/react/components/tooltip/page.mdx#Detached triggers",
+    "fixture": "tooltip-02.tsx"
+  },
+  {
+    "component": "tooltip",
+    "example": "Multiple triggers within the Root part",
+    "file": "docs/src/app/(docs)/react/components/tooltip/page.mdx#Multiple triggers within the Root part",
+    "fixture": "tooltip-03.tsx"
+  },
+  {
+    "component": "tooltip",
+    "example": "Multiple detached triggers",
+    "file": "docs/src/app/(docs)/react/components/tooltip/page.mdx#Multiple detached triggers",
+    "fixture": "tooltip-04.tsx"
+  },
+  {
+    "component": "tooltip",
+    "example": "Detached triggers with payload",
+    "file": "docs/src/app/(docs)/react/components/tooltip/page.mdx#Detached triggers with payload",
+    "fixture": "tooltip-05.tsx"
+  },
+  {
+    "component": "combobox",
+    "example": "Anatomy",
+    "file": "docs/src/app/(docs)/react/components/combobox/page.mdx#Anatomy",
+    "fixture": "combobox-01.tsx"
+  },
+  {
+    "component": "combobox",
+    "example": "Using item objects as values",
+    "file": "docs/src/app/(docs)/react/components/combobox/page.mdx#Using item objects as values",
+    "fixture": "combobox-02.tsx"
+  },
+  {
+    "component": "combobox",
+    "example": "Specifying generic type parameters",
+    "file": "docs/src/app/(docs)/react/components/combobox/page.mdx#Specifying generic type parameters",
+    "fixture": "combobox-03.tsx"
+  },
+  {
+    "component": "combobox",
+    "example": "Using item IDs as values",
+    "file": "docs/src/app/(docs)/react/components/combobox/page.mdx#Using item IDs as values",
+    "fixture": "combobox-04.tsx"
+  },
+  {
+    "component": "combobox",
+    "example": "Creating a collection from dynamic data",
+    "file": "docs/src/app/(docs)/react/components/combobox/page.mdx#Creating a collection from dynamic data",
+    "fixture": "combobox-05.tsx"
+  },
+  {
+    "component": "combobox",
+    "example": "Displaying a window of async results",
+    "file": "docs/src/app/(docs)/react/components/combobox/page.mdx#Displaying a window of async results",
+    "fixture": "combobox-06.tsx"
+  },
+  {
+    "component": "combobox",
+    "example": "Limiting visible chips",
+    "file": "docs/src/app/(docs)/react/components/combobox/page.mdx#Limiting visible chips",
+    "fixture": "combobox-07.tsx"
+  },
+  {
+    "component": "combobox",
+    "example": "Input outside the popup",
+    "file": "docs/src/app/(docs)/react/components/combobox/page.mdx#Input outside the popup",
+    "fixture": "combobox-08.tsx"
+  },
+  {
+    "component": "combobox",
+    "example": "Input inside the popup",
+    "file": "docs/src/app/(docs)/react/components/combobox/page.mdx#Input inside the popup",
+    "fixture": "combobox-09.tsx"
+  },
+  {
+    "component": "combobox",
+    "example": "Using Combobox.Label to label a combobox",
+    "file": "docs/src/app/(docs)/react/components/combobox/page.mdx#Using Combobox.Label to label a combobox",
+    "fixture": "combobox-10.tsx"
+  },
+  {
+    "component": "combobox",
+    "example": "Example",
+    "file": "docs/src/app/(docs)/react/components/combobox/page.mdx#Example",
+    "fixture": "combobox-11.tsx"
+  },
+  {
+    "component": "combobox",
+    "example": "Memoizing list items",
+    "file": "docs/src/app/(docs)/react/components/combobox/page.mdx#Memoizing list items",
+    "fixture": "combobox-12.tsx"
+  },
+  {
+    "component": "dialog",
+    "example": "Anatomy",
+    "file": "docs/src/app/(docs)/react/components/dialog/page.mdx#Anatomy",
+    "fixture": "dialog-01.tsx"
+  },
+  {
+    "component": "dialog",
+    "example": "Uncontrolled dialog",
+    "file": "docs/src/app/(docs)/react/components/dialog/page.mdx#Uncontrolled dialog",
+    "fixture": "dialog-02.tsx"
+  },
+  {
+    "component": "dialog",
+    "example": "Controlled dialog",
+    "file": "docs/src/app/(docs)/react/components/dialog/page.mdx#Controlled dialog",
+    "fixture": "dialog-03.tsx"
+  },
+  {
+    "component": "dialog",
+    "example": "Running code when dialog state changes",
+    "file": "docs/src/app/(docs)/react/components/dialog/page.mdx#Running code when dialog state changes",
+    "fixture": "dialog-04.tsx"
+  },
+  {
+    "component": "dialog",
+    "example": "Detached triggers",
+    "file": "docs/src/app/(docs)/react/components/dialog/page.mdx#Detached triggers",
+    "fixture": "dialog-05.tsx"
+  },
+  {
+    "component": "dialog",
+    "example": "Multiple triggers within the Root part",
+    "file": "docs/src/app/(docs)/react/components/dialog/page.mdx#Multiple triggers within the Root part",
+    "fixture": "dialog-06.tsx"
+  },
+  {
+    "component": "dialog",
+    "example": "Multiple detached triggers",
+    "file": "docs/src/app/(docs)/react/components/dialog/page.mdx#Multiple detached triggers",
+    "fixture": "dialog-07.tsx"
+  },
+  {
+    "component": "dialog",
+    "example": "Detached triggers with payload",
+    "file": "docs/src/app/(docs)/react/components/dialog/page.mdx#Detached triggers with payload",
+    "fixture": "dialog-08.tsx"
+  },
+  {
+    "component": "alert-dialog",
+    "example": "Anatomy",
+    "file": "docs/src/app/(docs)/react/components/alert-dialog/page.mdx#Anatomy",
+    "fixture": "alert-dialog-01.tsx"
+  },
+  {
+    "component": "alert-dialog",
+    "example": "Detached triggers",
+    "file": "docs/src/app/(docs)/react/components/alert-dialog/page.mdx#Detached triggers",
+    "fixture": "alert-dialog-02.tsx"
+  },
+  {
+    "component": "alert-dialog",
+    "example": "Multiple triggers within the Root part",
+    "file": "docs/src/app/(docs)/react/components/alert-dialog/page.mdx#Multiple triggers within the Root part",
+    "fixture": "alert-dialog-03.tsx"
+  },
+  {
+    "component": "alert-dialog",
+    "example": "Multiple detached triggers",
+    "file": "docs/src/app/(docs)/react/components/alert-dialog/page.mdx#Multiple detached triggers",
+    "fixture": "alert-dialog-04.tsx"
+  },
+  {
+    "component": "alert-dialog",
+    "example": "Detached triggers with payload",
+    "file": "docs/src/app/(docs)/react/components/alert-dialog/page.mdx#Detached triggers with payload",
+    "fixture": "alert-dialog-05.tsx"
+  }
+]

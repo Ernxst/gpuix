@@ -1,0 +1,106 @@
+{
+  "extends": "../../tsconfig.exact-optional.json",
+  "compilerOptions": {
+    "baseUrl": "../..",
+    "paths": {
+      "@base-ui/react/select": [
+        "dist/components/select.d.ts"
+      ],
+      "@base-ui/react/tooltip": [
+        "dist/components/tooltip.d.ts"
+      ],
+      "@base-ui/react/combobox": [
+        "dist/components/combobox.d.ts"
+      ],
+      "@base-ui/react/dialog": [
+        "dist/components/dialog.d.ts"
+      ],
+      "@base-ui/react/alert-dialog": [
+        "dist/components/alert-dialog.d.ts"
+      ],
+      "@base-ui/react/jsx-runtime": [
+        "jsx-runtime.d.ts"
+      ]
+    }
+  },
+  "files": [
+    "alert-dialog-01.tsx",
+    "alert-dialog-02.tsx",
+    "alert-dialog-03.tsx",
+    "alert-dialog-04.tsx",
+    "alert-dialog-05.tsx",
+    "combobox-01.tsx",
+    "combobox-02.tsx",
+    "combobox-03.tsx",
+    "combobox-04.tsx",
+    "combobox-05.tsx",
+    "combobox-06.tsx",
+    "combobox-07.tsx",
+    "combobox-08.tsx",
+    "combobox-09.tsx",
+    "combobox-10.tsx",
+    "combobox-11.tsx",
+    "combobox-12.tsx",
+    "dialog-01.tsx",
+    "dialog-02.tsx",
+    "dialog-03.tsx",
+    "dialog-04.tsx",
+    "dialog-05.tsx",
+    "dialog-06.tsx",
+    "dialog-07.tsx",
+    "dialog-08.tsx",
+    "select-01.tsx",
+    "select-02.tsx",
+    "select-03.tsx",
+    "select-04.tsx",
+    "select-05.tsx",
+    "select-06.tsx",
+    "select-07.tsx",
+    "select-08.tsx",
+    "tooltip-01.tsx",
+    "tooltip-02.tsx",
+    "tooltip-03.tsx",
+    "tooltip-04.tsx",
+    "tooltip-05.tsx"
+  ],
+  "include": [
+    "alert-dialog-01.tsx",
+    "alert-dialog-02.tsx",
+    "alert-dialog-03.tsx",
+    "alert-dialog-04.tsx",
+    "alert-dialog-05.tsx",
+    "combobox-01.tsx",
+    "combobox-02.tsx",
+    "combobox-03.tsx",
+    "combobox-04.tsx",
+    "combobox-05.tsx",
+    "combobox-06.tsx",
+    "combobox-07.tsx",
+    "combobox-08.tsx",
+    "combobox-09.tsx",
+    "combobox-10.tsx",
+    "combobox-11.tsx",
+    "combobox-12.tsx",
+    "dialog-01.tsx",
+    "dialog-02.tsx",
+    "dialog-03.tsx",
+    "dialog-04.tsx",
+    "dialog-05.tsx",
+    "dialog-06.tsx",
+    "dialog-07.tsx",
+    "dialog-08.tsx",
+    "select-01.tsx",
+    "select-02.tsx",
+    "select-03.tsx",
+    "select-04.tsx",
+    "select-05.tsx",
+    "select-06.tsx",
+    "select-07.tsx",
+    "select-08.tsx",
+    "tooltip-01.tsx",
+    "tooltip-02.tsx",
+    "tooltip-03.tsx",
+    "tooltip-04.tsx",
+    "tooltip-05.tsx"
+  ]
+}
