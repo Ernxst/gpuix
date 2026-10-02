@@ -138,6 +138,15 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     expect(screen.queryByRole("listbox")).toBeNull()
   })
 
+  it("moves focus with keyboard navigation between valued items", async () => {
+    screen.render(<Menu root={{ defaultValue: "Almond" }} />)
+    clickTrigger()
+    await screen.waitFor(() => expect(screen.getByTestId("Almond")).toHaveFocus())
+    screen.renderer.simulateKeystrokes("down")
+    await screen.waitFor(() => expect(screen.getByTestId("Birch")).toHaveAttribute("data-highlighted", ""))
+    expect(screen.getByTestId("Birch")).toHaveFocus()
+  })
+
   it("moves to the first and last items with Home and End", async () => {
     screen.render(<Menu root={{ open: true }} />)
     screen.renderer.simulateKeystrokes("end")
