@@ -148,6 +148,21 @@ path = "examples/bench_webgpu_draw.rs"
 [profile.release]
 lto = true
 
+# An edit to this crate otherwise recompiles all of it, which takes most of a
+# minute at full optimisation. Compiled incrementally, it reuses the code
+# generated for what did not change. `.mbx.toml` hands incremental compilation
+# to Cargo, and these profiles keep it to this crate, so the dependencies still
+# come from mbx's shared cache. CI sets CARGO_INCREMENTAL=0, which overrides
+# this, so the addons it builds are not compiled incrementally.
+[profile.dev]
+incremental = false
+
+[profile.dev.package.gpuix-native]
+incremental = true
+
+[profile.release.package.gpuix-native]
+incremental = true
+
 # capture_screenshot encodes a png on every visual test. The encoder is
 # too slow at opt-level 0 and vitest kills the worker, so build the
 # image crates with opt-level 3 in debug builds too.
