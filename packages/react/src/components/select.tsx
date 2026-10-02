@@ -69,6 +69,7 @@ interface SelectContextValue {
   activeValue: unknown | null
   revealActiveValue: unknown | null
   listId: string
+  rootId: string
   fieldLabelId: string
   listMounted: boolean
   popupPosition: { x: number; y: number } | undefined
@@ -243,6 +244,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
   disabled = false,
   readOnly = false,
   highlightItemOnHover = true,
+  id: rootIdProp,
   isItemEqualToValue = Object.is,
 }: SelectProps<Value, Multiple>): ReactElement {
   const compareValues = (item: unknown, value: unknown) => compareSelectItemEquality(item, value, isItemEqualToValue as (item: unknown, value: unknown) => boolean)
@@ -261,8 +263,9 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
   const [activeValue, setActiveValueState] = useState<unknown | null>(null)
   const [revealActiveValue, setRevealActiveValue] = useState<unknown | null>(null)
   const generatedListId = useId()
+  const rootId = rootIdProp ?? generatedListId
   const [listId, setListId] = useState(generatedListId)
-  const fieldLabelId = `${generatedListId}-label`
+  const fieldLabelId = `${rootId}-label`
   const [listMounted, setListMounted] = useState(false)
   const [popupPosition, setPopupPosition] = useState<{ x: number; y: number }>()
   const [scrollability, setScrollability] = useState({ up: false, down: false })
@@ -486,6 +489,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
       activeValue,
       revealActiveValue,
       listId,
+      rootId,
       fieldLabelId,
       listMounted,
       popupPosition,
@@ -519,7 +523,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
       unregisterItem,
       isItemEqualToValue: compareValues,
     }),
-    [open, value, multiple, disabled, readOnly, highlightItemOnHover, focused, items, labels, itemToStringLabel, activeValue, revealActiveValue, listId, listMounted, popupPosition, scrollability, compareValues, renderer]
+    [open, value, multiple, disabled, readOnly, highlightItemOnHover, focused, items, labels, itemToStringLabel, activeValue, revealActiveValue, listId, rootId, listMounted, popupPosition, scrollability, compareValues, renderer]
   )
 
   return (
@@ -618,6 +622,7 @@ export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
     const triggerProps: Props = {
       ...props,
       role: props.role ?? "combobox",
+      id: props.id ?? context.rootId,
       ariaLabelledBy: props.ariaLabelledBy ?? props["aria-labelledby"] ?? context.fieldLabelId,
       ariaExpanded: context.open,
       ariaHasPopup: "listbox",
@@ -1169,10 +1174,21 @@ export const SelectGroupLabel = forwardRef<PublicInstance, SelectPartProps<Selec
   return <div {...resolved}>{children}</div>
 })
 
-export const SelectLabel = forwardRef<PublicInstance, SelectPartProps<SelectLabelState>>(function SelectLabel({ render, className, style, children, id, ...props }, ref) {
+export const SelectLabel = forwardRef<PublicInstance, SelectPartProps<SelectLabelState>>(function SelectLabel({ render, className, style, children, id, onClick, ...props }, ref) {
   const context = useSelectContext("SelectLabel")
+  const { renderer } = useGpuix()
   const state = { disabled: context.disabled, touched: false, dirty: context.value !== null, valid: null, filled: context.value !== null, focused: context.focused }
-  const resolved: Props = { ...props, id: id ?? context.fieldLabelId, ref, className: resolveClassName(className, state), style: resolvePartStyle(style, state) }
+  const resolved: Props = {
+    ...props,
+    id: id ?? context.fieldLabelId,
+    ref,
+    className: resolveClassName(className, state),
+    style: resolvePartStyle(style, state),
+    onClick: (event) => {
+      onClick?.(event)
+      if (!event.defaultPrevented && context.triggerRef.current) renderer?.focusElement?.(context.triggerRef.current.id)
+    },
+  }
   if (typeof render === "function") return <>{render(resolved, state)}</>
   if (isValidElement<Props>(render)) return renderSlot({ asChild: true, children: render, props: resolved, ref })
   return <div {...resolved}>{children}</div>

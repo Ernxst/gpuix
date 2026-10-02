@@ -195,6 +195,52 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     expect(screen.getByTestId("trigger")).toHaveAttribute("data-pressed", "")
   })
 
+  it("marks a null single value as a placeholder on the trigger", async () => {
+    screen.render(<Menu root={{ value: null }} />)
+    expect(screen.getByTestId("trigger")).toHaveAttribute("data-placeholder", "")
+    expect(screen.getByTestId("value")).toHaveAttribute("data-placeholder", "")
+  })
+
+  it("marks an empty-string object value as a placeholder using itemToStringValue", async () => {
+    const methods = [{ id: "", name: "Default" }]
+    screen.render(
+      <Select.Root
+        defaultValue={methods[0]}
+        items={methods}
+        itemToStringValue={(item) => item.id}
+        itemToStringLabel={(item) => item.name}
+      >
+        <Select.Trigger data-testid="trigger"><Select.Value data-testid="value" /></Select.Trigger>
+      </Select.Root>,
+    )
+    expect(screen.getByTestId("trigger")).toHaveAttribute("data-placeholder", "")
+    expect(screen.getByTestId("value")).toHaveAttribute("data-placeholder", "")
+    expect(screen.getByTestId("value")).toHaveTextContent("Default")
+  })
+
+  it("marks a selected null item as a placeholder while showing its label", async () => {
+    screen.render(
+      <Select.Root items={[{ value: null, label: "Select font" }]}>
+        <Select.Trigger data-testid="trigger"><Select.Value data-testid="value" /></Select.Trigger>
+      </Select.Root>,
+    )
+    expect(screen.getByTestId("trigger")).toHaveAttribute("data-placeholder", "")
+    expect(screen.getByTestId("value")).toHaveAttribute("data-placeholder", "")
+    expect(screen.getByTestId("value")).toHaveTextContent("Select font")
+  })
+
+  it("does not mark a selected single value as a placeholder", async () => {
+    screen.render(<Menu root={{ defaultValue: "Birch" }} />)
+    expect(screen.getByTestId("trigger")).not.toHaveAttribute("data-placeholder")
+    expect(screen.getByTestId("value")).not.toHaveAttribute("data-placeholder")
+  })
+
+  it("does not mark a nonempty multiple selection as a placeholder", async () => {
+    screen.render(<Select.Root multiple defaultValue={["Birch"]}><Select.Trigger data-testid="trigger"><Select.Value data-testid="value" /></Select.Trigger></Select.Root>)
+    expect(screen.getByTestId("trigger")).not.toHaveAttribute("data-placeholder")
+    expect(screen.getByTestId("value")).not.toHaveAttribute("data-placeholder")
+  })
+
   it("allows browsing in read-only mode but does not commit a selection", async () => {
     const onValueChange = vi.fn()
     screen.render(<Menu root={{ readOnly: true, onValueChange }} />)
@@ -707,17 +753,29 @@ describeNative("Select Base UI 1.8.0 parity", () => {
   })
 
   it("updates trigger and label IDs when the root ID changes", async () => {
-    screen.render(
-      <Select.Root id="field-root">
-        <Select.Label data-testid="label">Tree</Select.Label>
-        <Select.Trigger data-testid="trigger" ariaLabel="Tree"><Select.Value /></Select.Trigger>
-        <Select.Popup><Select.List>{items.map((name) => <Select.Item key={name} value={name}>{name}</Select.Item>)}</Select.List></Select.Popup>
-      </Select.Root>
-    )
+    function App() {
+      const [id, setId] = useState("field-root")
+      return <>
+        <button data-testid="change-id" onClick={() => setId("field-next")}>Change ID</button>
+        <Select.Root id={id}>
+          <Select.Label data-testid="label">Tree</Select.Label>
+          <Select.Trigger data-testid="trigger" ariaLabel="Tree"><Select.Value /></Select.Trigger>
+          <Select.Popup><Select.List>{items.map((name) => <Select.Item key={name} value={name}>{name}</Select.Item>)}</Select.List></Select.Popup>
+        </Select.Root>
+      </>
+    }
+    screen.render(<App />)
     await screen.waitFor(() => {
       expect(screen.getByTestId("trigger")).toHaveAttribute("id", "field-root")
       expect(screen.getByTestId("trigger")).toHaveAttribute("aria-labelledby", "field-root-label")
       expect(screen.getByTestId("label")).toHaveAttribute("id", "field-root-label")
+    })
+    const change = screen.getByTestId("change-id").getBoundingClientRect()
+    screen.renderer.nativeSimulateClick(change.left + 4, change.top + 4)
+    await screen.waitFor(() => {
+      expect(screen.getByTestId("trigger")).toHaveAttribute("id", "field-next")
+      expect(screen.getByTestId("trigger")).toHaveAttribute("aria-labelledby", "field-next-label")
+      expect(screen.getByTestId("label")).toHaveAttribute("id", "field-next-label")
     })
   })
 
