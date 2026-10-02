@@ -8,6 +8,8 @@ license: Apache-2.0
 
 GPU-IX renders a React tree with GPUI, Zed's GPU UI framework, on Metal, DirectX or Vulkan, and in a browser through WebGPU. There is no DOM and no CSS engine. Host elements are native nodes, `style` is a typed object the native parser checks field by field, and `className` accepts only CSS modules compiled at build time. The public API imitates React DOM, so browser assumptions compile and then fail at runtime, often only with a console warning.
 
+Tooltip composition and timing are part of its contract: put `Tooltip.Popup` inside `Tooltip.Positioner`, keep custom-rendered Trigger children in the returned element, and use `onOpenChange` details `cancel()`/`allowPropagation()` when changing state or Escape propagation. Focus-opened tooltips close immediately when focus leaves their triggers; hover closure still follows `closeDelay`. See [the component reference](references/components.md#tooltip-gpuixreacttooltip) for handle handoffs and limitations.
+
 Before writing code that relies on a browser behaviour, check it in the reference file for that area. Each file lists its traps first. The skill describes the fork's `main` branch. If the installed release disagrees, the installed package's types (`node_modules/@gpuix/react/dist/types/host.d.ts`) and README are the authority for that version.
 
 For built-in compound controls, use the documented named namespace imports and their parts (for example, `import { Select } from "@gpuix/react/select"` and `<Select.Root>`); the component reference lists each control's available parts and differences from Base UI.

@@ -3955,6 +3955,12 @@ between triggers owned by the same Root keeps its tooltip open; focusing a
 trigger owned by another Root in the same Provider closes the previous tooltip.
 `closeDelay` continues to apply to hover closure. The Positioner follows the
 active rendered Trigger and places the popup on its requested side.
+`Tooltip.Popup` must be inside `Tooltip.Positioner`. `onOpenChange` details
+provide `cancel()` and `allowPropagation()` alongside `preventUnmountOnClose()`.
+`Tooltip.Arrow` defaults to `aria-hidden=\"true\"`. Tooltip handles keep their
+active trigger and payload when switching triggers or overlapping Roots; an
+active detached trigger closing on unmount can be cancelled from `onOpenChange`.
+Custom-rendered triggers keep their children, including nested tooltip triggers.
 `Tooltip.Viewport` is optional unless animated
 content switches between triggers. The native Portal keeps children
 in the retained tree; its `container` prop does not select a destination. The
