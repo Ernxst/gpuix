@@ -212,6 +212,71 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     expect(screen.getByTestId("value")).toHaveTextContent("Select font")
   })
 
+  it("does not expose the restored item while the popup remains closed", async () => {
+    function DynamicMenu() {
+      const [menuItems, setMenuItems] = useState(["a", "b", "c"])
+      const [value, setValue] = useState<string | null>("a")
+      return (
+        <>
+          <button data-testid="remove" onClick={() => setMenuItems((previous) => previous.filter((item) => item !== "a"))}>Remove</button>
+          <button data-testid="restore" onClick={() => setMenuItems(["a", "b", "c"])}>Restore</button>
+          <Select.Root value={value} onValueChange={setValue}>
+            <Select.Trigger data-testid="trigger"><Select.Value data-testid="value" /></Select.Trigger>
+            <Select.Popup><Select.List>{menuItems.map((item) => <Select.Item key={item} value={item}>{item}</Select.Item>)}</Select.List></Select.Popup>
+          </Select.Root>
+        </>
+      )
+    }
+    screen.render(<DynamicMenu />)
+    screen.renderer.focusElement(screen.getByTestId("trigger").id)
+    screen.renderer.simulateKeystrokes("down")
+    await screen.waitFor(() => expect(screen.getByRole("option", { name: "a" })).toHaveAttribute("data-selected", ""))
+    const remove = screen.getByTestId("remove").getBoundingClientRect()
+    screen.renderer.nativeSimulateClick(remove.left + remove.width / 2, remove.top + remove.height / 2)
+    await screen.waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    const restore = screen.getByTestId("restore").getBoundingClientRect()
+    screen.renderer.nativeSimulateClick(restore.left + restore.width / 2, restore.top + restore.height / 2)
+    expect(screen.queryByRole("option", { name: "a" })).toBeNull()
+  })
+
+  it("keeps navigating distinct items without explicit values after the list changes", async () => {
+    function DynamicMenu() {
+      const [itemsFiltered, setItemsFiltered] = useState(false)
+      return (
+        <Select.Root
+          onOpenChange={(open) => {
+            if (open) setItemsFiltered(true)
+          }}
+          onOpenChangeComplete={(open) => {
+            if (!open) setItemsFiltered(false)
+          }}
+        >
+          <Select.Trigger data-testid="trigger">Toggle</Select.Trigger>
+          <Select.Popup>
+            <Select.Item>Add to Library</Select.Item>
+            {!itemsFiltered && <>
+              <Select.Item>Add to Playlist</Select.Item>
+              <Select.Item>Play Next</Select.Item>
+              <Select.Item>Play Last</Select.Item>
+            </>}
+            <Select.Item data-testid="favorite">Favorite</Select.Item>
+            <Select.Item data-testid="share">Share</Select.Item>
+          </Select.Popup>
+        </Select.Root>
+      )
+    }
+    screen.render(<DynamicMenu />)
+    screen.renderer.focusElement(screen.getByTestId("trigger").id)
+    screen.renderer.simulateKeystrokes("down")
+    await screen.waitFor(() => expect(screen.getByRole("listbox")).toBeInTheDocument())
+    screen.renderer.simulateKeystrokes("down")
+    screen.renderer.simulateKeystrokes("down")
+    screen.renderer.simulateKeystrokes("down")
+    await screen.waitFor(() => expect(screen.getByTestId("share")).toHaveAttribute("data-highlighted", ""))
+    expect(screen.getByTestId("favorite")).not.toHaveAttribute("data-highlighted")
+  })
+
+
   it("does not mark a selected single value as a placeholder", async () => {
     screen.render(<Menu root={{ defaultValue: "Birch" }} />)
     expect(screen.getByTestId("trigger")).not.toHaveAttribute("data-placeholder")

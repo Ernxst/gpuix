@@ -71,6 +71,8 @@ interface SelectContextValue {
   listId: string
   rootId: string
   fieldLabelId: string
+  labelId: string | undefined
+  registerLabelId: (id: string) => () => void
   listMounted: boolean
   popupPosition: { x: number; y: number } | undefined
   canScrollUp: boolean
@@ -266,6 +268,11 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
   const rootId = rootIdProp ?? generatedListId
   const [listId, setListId] = useState(generatedListId)
   const fieldLabelId = `${rootId}-label`
+  const [labelId, setLabelId] = useState<string>()
+  const registerLabelId = useCallback((id: string) => {
+    setLabelId(id)
+    return () => setLabelId((currentId) => currentId === id ? undefined : currentId)
+  }, [])
   const [listMounted, setListMounted] = useState(false)
   const [popupPosition, setPopupPosition] = useState<{ x: number; y: number }>()
   const [scrollability, setScrollability] = useState({ up: false, down: false })
@@ -491,6 +498,8 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
       listId,
       rootId,
       fieldLabelId,
+      labelId,
+      registerLabelId,
       listMounted,
       popupPosition,
       canScrollUp: scrollability.up,
@@ -523,7 +532,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
       unregisterItem,
       isItemEqualToValue: compareValues,
     }),
-    [open, value, multiple, disabled, readOnly, highlightItemOnHover, focused, items, labels, itemToStringLabel, activeValue, revealActiveValue, listId, rootId, listMounted, popupPosition, scrollability, compareValues, renderer]
+    [open, value, multiple, disabled, readOnly, highlightItemOnHover, focused, items, labels, itemToStringLabel, activeValue, revealActiveValue, listId, rootId, fieldLabelId, labelId, registerLabelId, listMounted, popupPosition, scrollability, compareValues, renderer]
   )
 
   return (
@@ -623,7 +632,7 @@ export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
       ...props,
       role: props.role ?? "combobox",
       id: props.id ?? context.rootId,
-      ariaLabelledBy: props.ariaLabelledBy ?? props["aria-labelledby"] ?? context.fieldLabelId,
+      ariaLabelledBy: props.ariaLabelledBy ?? props["aria-labelledby"] ?? context.labelId,
       ariaExpanded: context.open,
       ariaHasPopup: "listbox",
       ariaControls: context.open && !context.listMounted ? context.listId : undefined,
@@ -1192,6 +1201,7 @@ export const SelectLabel = forwardRef<PublicInstance, SelectPartProps<SelectLabe
       if (!event.defaultPrevented && context.triggerRef.current) renderer?.focusElement?.(context.triggerRef.current.id)
     },
   }
+  useLayoutEffect(() => context.registerLabelId(resolved.id as string), [context.registerLabelId, resolved.id])
   if (typeof render === "function") return <>{render(resolved, state)}</>
   if (isValidElement<Props>(render)) return renderSlot({ asChild: true, children: render, props: resolved, ref })
   return <div {...resolved}>{children}</div>
