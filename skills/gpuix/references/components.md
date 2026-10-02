@@ -170,9 +170,9 @@ import { Tooltip } from "@gpuix/react/tooltip"
 |---|---|---|
 | `Provider` | `delay` (600), `closeDelay` (0), `timeout` (400) | Within `timeout` of a close, the next tooltip opens without delay. |
 | `Root` | `open`/`defaultOpen`, `onOpenChange(open, details)`, `onOpenChangeComplete`, `disabled`, `disableHoverablePopup`, `trackCursorAxis`, `actionsRef`, `handle`, `triggerId`, `defaultTriggerId` | Renders no host element. `details` carries the reason, originating GPU-IX event, trigger, and `preventUnmountOnClose()`. |
-| `Trigger` | `delay`, `closeDelay`, `closeOnClick`, `disabled`, `handle`, `payload`, `render` | Hover schedules open; focus opens immediately; Escape closes; state styling receives `{ open }`. `disabled` suppresses tooltip interaction without disabling the rendered control. Multiple triggers retain their own anchors and payloads. |
+| `Trigger` | `delay`, `closeDelay`, `closeOnClick`, `disabled`, `handle`, `payload`, `render` | Hover schedules open; focus opens immediately; leaving focus closes after `closeDelay`; Escape closes. Focusing another trigger in the same Provider replaces the tooltip opened by the previous trigger. `disabled` suppresses tooltip interaction without disabling the rendered control. Multiple triggers retain their own anchors and payloads. |
 | `Portal` | `container`, `keepMounted`, `render` | Keeps children in the retained tree; native positioning happens in Positioner. |
-| `Positioner` | Shared `PositionerProps` from `/floating`; default `side="top"` | Uses `FloatingPositioner` for anchor measurement and collision handling. |
+| `Positioner` | Shared `PositionerProps` from `/floating`; default `side="top"` | Uses `FloatingPositioner` to follow the active rendered trigger and place the popup on the requested side with collision handling. |
 | `Popup` | `render`, state-based `className` and `style` | Unmounts while closed unless `preventUnmountOnClose()` was called; exposes open/closed, side, align, instant and transition state. |
 | `Arrow` | `render`, state-based `className` and `style` | Exposes open/closed, side, align, instant and `uncentered` state. |
 | `Viewport` | `render`, state-based `className` and `style` | Provides the Base UI state shape for optional content transitions. |

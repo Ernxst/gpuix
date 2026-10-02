@@ -1,12 +1,108 @@
 import React, { useState } from "react"
 import { describe, expect, it } from "vitest"
 import * as Tooltip from "../components/tooltip.js"
+import type { TooltipChangeEventDetails } from "../components/tooltip.js"
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 import type { PublicInstance } from "../types/host.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 describeNative("Tooltip Base UI parity tree", () => {
+  it.each([false, true])(
+    "closes the previous focus-opened tooltip when focus moves to another trigger with an absolute z-index ancestor=%s",
+    async (positionedAncestor) => {
+      const testRoot = createTestRoot({ width: 600, height: 400 })
+      const labels = ["First tip", "Second tip", "Third tip"]
+      const observedOpenTooltips: number[][] = []
+      const blurredTriggers: number[] = []
+      const siblingCloseDetails: Array<{ index: number; details: TooltipChangeEventDetails }> = []
+
+      testRoot.render(
+        <div style={{ width: 600, height: 400 }}>
+          {positionedAncestor ? (
+            <div style={{ position: "absolute", zIndex: 1, left: 40, top: 60 }}>
+              <TooltipSequence
+                labels={labels}
+                onTriggerBlur={(index) => blurredTriggers.push(index)}
+                onOpenChange={(index, open, details) => {
+                  if (!open) siblingCloseDetails.push({ index, details })
+                }}
+              />
+            </div>
+          ) : (
+            <TooltipSequence
+              labels={labels}
+              onTriggerBlur={(index) => blurredTriggers.push(index)}
+              onOpenChange={(index, open, details) => {
+                if (!open) siblingCloseDetails.push({ index, details })
+              }}
+            />
+          )}
+          <button data-testid="after-tooltip-triggers">After tooltips</button>
+        </div>
+      )
+
+      for (let index = 0; index < labels.length; index += 1) {
+        await testRoot.userEvent.tab()
+        const openTooltips = labels.flatMap((_, tooltipIndex) =>
+          testRoot.renderer.findByTestId(`focus-tooltip-${tooltipIndex}`) ? [tooltipIndex] : []
+        )
+        observedOpenTooltips.push(openTooltips)
+      }
+
+      await testRoot.userEvent.tab()
+      await testRoot.waitFor(
+        () => expect(labels.map((_, index) => testRoot.renderer.findByTestId(`focus-tooltip-${index}`))).toEqual([undefined, undefined, undefined]),
+        { timeout: 5_000 }
+      )
+      expect(blurredTriggers).toEqual([0, 1, 2])
+      expect(observedOpenTooltips, "only the focused trigger's tooltip should be open after each Tab").toEqual([[0], [1], [2]])
+      expect(siblingCloseDetails.map(({ index, details }) => [index, details.reason, details.event])).toEqual([
+        [0, "none", undefined],
+        [1, "none", undefined],
+        [2, "trigger-focus", expect.anything()],
+      ])
+      testRoot.unmount()
+    },
+    15_000
+  )
+
+  it.each([false, true])(
+    "positions each focus-opened tooltip above its rendered trigger with an absolute z-index ancestor=%s",
+    async (positionedAncestor) => {
+      const testRoot = createTestRoot({ width: 600, height: 400 })
+      const labels = ["First tip", "Second tip", "Third tip"]
+
+      testRoot.render(
+        <div style={{ width: 600, height: 400 }}>
+          {positionedAncestor ? (
+            <div style={{ position: "absolute", zIndex: 1, left: 40, top: 60 }}>
+              <TooltipSequence labels={labels} />
+            </div>
+          ) : (
+            <TooltipSequence labels={labels} />
+          )}
+        </div>
+      )
+
+      for (let index = 0; index < labels.length; index += 1) {
+        await testRoot.userEvent.tab()
+        const popup = testRoot.renderer.findByTestId(`focus-tooltip-${index}`)
+        expect(popup, `tooltip ${index} should open on focus`).toBeDefined()
+        const trigger = testRoot.renderer.findByTestId(`focus-trigger-${index}`)!
+        await testRoot.waitFor(() => {
+          const triggerBounds = trigger.getBoundingClientRect()
+          const popupBounds = popup!.getBoundingClientRect()
+          expect(popupBounds.left + popupBounds.width / 2, `tooltip ${index} should align with its trigger`).toBeCloseTo(triggerBounds.left + triggerBounds.width / 2, 0)
+          expect(popupBounds.bottom, `tooltip ${index} should be above its trigger`).toBeLessThanOrEqual(triggerBounds.top)
+        }, { timeout: 5_000 })
+      }
+
+      testRoot.render(null)
+    },
+    15_000
+  )
+
   it("applies provider delays, reports controlled changes, and positions the full popup tree", async () => {
     const testRoot = createTestRoot()
     const tooltipHandle = Tooltip.createTooltipHandle()
@@ -231,3 +327,37 @@ describeNative("Tooltip Base UI parity tree", () => {
     testRoot.render(null)
   })
 })
+
+function TooltipSequence({ labels, onTriggerBlur, onOpenChange }: {
+  labels: readonly string[]
+  onTriggerBlur?: (index: number) => void
+  onOpenChange?: (index: number, open: boolean, details: TooltipChangeEventDetails) => void
+}) {
+  return (
+    <Tooltip.Provider delay={0} closeDelay={0}>
+      {labels.map((label, index) => (
+        <Tooltip.Root key={label} onOpenChange={(open, details) => onOpenChange?.(index, open, details)}>
+          <Tooltip.Portal>
+            <Tooltip.Positioner side="top" sideOffset={8}>
+              <Tooltip.Popup data-testid={`focus-tooltip-${index}`} style={{ width: 100, height: 24 }}>
+                {label}
+              </Tooltip.Popup>
+            </Tooltip.Positioner>
+          </Tooltip.Portal>
+          <Tooltip.Trigger
+            onBlur={() => onTriggerBlur?.(index)}
+            render={
+              <a
+                href={`#trigger-${index}`}
+                data-testid={`focus-trigger-${index}`}
+                style={{ position: "absolute", left: 40 + index * 140, top: 200, width: 80, height: 32 }}
+              >
+                Trigger {index + 1}
+              </a>
+            }
+          />
+        </Tooltip.Root>
+      ))}
+    </Tooltip.Provider>
+  )
+}
