@@ -1,5 +1,5 @@
-name: Setup toolchain
-description: Install the pinned Bun version and restore locked dependencies.
+name: Setup Linux
+description: Install the system libraries GPUI needs to build on Linux.
 
 runs:
   using: composite

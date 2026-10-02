@@ -1,5 +1,5 @@
-name: Setup toolchain
-description: Install the pinned Bun version and restore locked dependencies.
+name: Setup Rust
+description: Install the Rust toolchain pinned in rust-toolchain.toml.
 
 runs:
   using: composite

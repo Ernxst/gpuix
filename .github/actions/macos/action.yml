@@ -1,5 +1,5 @@
-name: Setup toolchain
-description: Install the pinned Bun version and restore locked dependencies.
+name: Setup macOS
+description: Install the Metal toolchain that GPUI uses to compile shaders.
 
 runs:
   using: composite

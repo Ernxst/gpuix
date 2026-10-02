@@ -1,5 +1,5 @@
-name: Setup toolchain
-description: Install the pinned Bun version and restore locked dependencies.
+name: Setup Bun
+description: Install the Bun version pinned in package.json and the locked dependencies.
 
 runs:
   using: composite
