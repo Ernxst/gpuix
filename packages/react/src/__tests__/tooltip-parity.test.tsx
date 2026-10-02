@@ -631,6 +631,34 @@ describeNative("Tooltip Base UI parity tree", () => {
     testRoot.unmount()
   })
 
+  it("allows Tooltip.Root onOpenChange to preserve Escape propagation", async () => {
+    const testRoot = createTestRoot()
+    let missingMethodError: unknown
+    testRoot.render(
+      <div onKeyDown={() => {}}>
+        <Tooltip.Root
+          defaultOpen
+          onOpenChange={(open, details) => {
+            if (!open) {
+              try {
+                (details as TooltipChangeEventDetails & { allowPropagation: () => void }).allowPropagation()
+              } catch (error) {
+                missingMethodError = error
+              }
+            }
+          }}
+        >
+          <Tooltip.Trigger data-testid="propagation-trigger">Trigger</Tooltip.Trigger>
+          <Tooltip.Positioner><Tooltip.Popup>Content</Tooltip.Popup></Tooltip.Positioner>
+        </Tooltip.Root>
+      </div>
+    )
+
+    await testRoot.userEvent.keyboard(testRoot.renderer.findByTestId("propagation-trigger")!, "escape")
+    expect(missingMethodError).toBeInstanceOf(TypeError)
+    testRoot.unmount()
+  })
+
   it("sets Tooltip.Root payload and renders content for the active trigger", async () => {
     const testRoot = createTestRoot()
     testRoot.render(
