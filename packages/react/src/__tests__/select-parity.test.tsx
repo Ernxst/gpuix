@@ -154,6 +154,22 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("Dogwood"))
   })
 
+  it("commits the next enabled typeahead match from the closed trigger", async () => {
+    screen.render(
+      <Select.Root>
+        <Select.Trigger data-testid="trigger"><Select.Value data-testid="value" /></Select.Trigger>
+        <Select.Popup>
+          <Select.Item value="apricot" disabled>Apricot</Select.Item>
+          <Select.Item value="avocado">Avocado</Select.Item>
+        </Select.Popup>
+      </Select.Root>,
+    )
+    screen.renderer.focusElement(screen.getByTestId("trigger").id)
+    screen.renderer.simulateKeystrokes("a")
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("Avocado"))
+    expect(screen.queryByRole("listbox")).toBeNull()
+  })
+
   it("closes on Escape without changing the value", async () => {
     screen.render(<Menu root={{ defaultValue: "Almond" }} />)
     clickTrigger()
@@ -503,5 +519,412 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     clickTrigger()
     await screen.waitFor(() => expect(screen.getByRole("listbox")).toBeInTheDocument())
     expect(completed).toHaveBeenCalledWith(true)
+  })
+
+  it("calls onOpenChangeComplete after the popup reflects the completed state", async () => {
+    const popupStatesAtCompletion: boolean[] = []
+    screen.render(<Menu root={{ onOpenChangeComplete: (open) => {
+      const popup = screen.getByTestId("popup")
+      if (open) expect(popup).toHaveAttribute("data-open", "")
+      else expect(popup).not.toHaveAttribute("data-open")
+      popupStatesAtCompletion.push(open)
+    } }} />)
+    clickTrigger()
+    await screen.waitFor(() => expect(screen.getByRole("listbox")).toBeInTheDocument())
+    await screen.waitFor(() => expect(popupStatesAtCompletion).toHaveLength(1))
+    expect(popupStatesAtCompletion).toEqual([true])
+    screen.renderer.simulateKeystrokes("escape")
+    await screen.waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+    await screen.waitFor(() => expect(popupStatesAtCompletion).toHaveLength(2))
+    expect(popupStatesAtCompletion).toEqual([true, false])
+  })
+
+  it("looks up a null value from an items object", async () => {
+    screen.render(
+      <Select.Root value={null} items={{ null: "No selection" }}>
+        <Select.Trigger><Select.Value data-testid="value" placeholder="Choose" /></Select.Trigger>
+        <Select.Popup><Select.List><Select.Item value={null}>No selection</Select.Item></Select.List></Select.Popup>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("No selection"))
+  })
+
+  it("uses a null item label before the placeholder", async () => {
+    screen.render(
+      <Select.Root value={null} items={[{ value: null, label: "No selection" }]}>
+        <Select.Trigger><Select.Value data-testid="value" placeholder="Choose" /></Select.Trigger>
+        <Select.Popup><Select.List><Select.Item value={null}>No selection</Select.Item></Select.List></Select.Popup>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("No selection"))
+  })
+
+  it("uses the placeholder when a null item has no label", async () => {
+    screen.render(
+      <Select.Root items={[{ value: null, label: null }, { value: "one", label: "One" }]}>
+        <Select.Trigger><Select.Value data-testid="value" placeholder="Choose" /></Select.Trigger>
+        <Select.Popup><Select.List><Select.Item value={null}>No selection</Select.Item><Select.Item value="one">One</Select.Item></Select.List></Select.Popup>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("Choose"))
+  })
+
+  it("uses the null object key label before the placeholder", async () => {
+    screen.render(
+      <Select.Root items={{ null: "No selection", one: "One" }}>
+        <Select.Trigger><Select.Value data-testid="value" placeholder="Choose" /></Select.Trigger>
+        <Select.Popup><Select.List><Select.Item value={null}>No selection</Select.Item><Select.Item value="one">One</Select.Item></Select.List></Select.Popup>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("No selection"))
+  })
+
+  it("reflects a root disabled state on every option", async () => {
+    screen.render(<Menu root={{ disabled: true, open: true }} />)
+    await screen.waitFor(() => expect(screen.getByRole("option", { name: "Almond" })).toHaveAttribute("aria-disabled", "true"))
+    expect(screen.getByTestId("Almond")).toHaveAttribute("data-disabled", "")
+    clickItem("Almond")
+    expect(screen.getByTestId("value")).toHaveTextContent("Choose a tree")
+  })
+
+  it("marks a read-only popup and ignores pointer selection", async () => {
+    const onValueChange = vi.fn()
+    screen.render(<Menu root={{ readOnly: true, open: true, onValueChange }} />)
+    await screen.waitFor(() => expect(screen.getByRole("listbox")).toHaveAttribute("aria-readonly", "true"))
+    clickItem("Cedar")
+    expect(onValueChange).not.toHaveBeenCalled()
+    expect(screen.getByTestId("value")).toHaveTextContent("Choose a tree")
+  })
+
+  it("opens a read-only Select with ArrowDown", async () => {
+    screen.render(<Menu root={{ readOnly: true }} />)
+    screen.renderer.nativeSimulateKeyDown(screen.getByTestId("trigger").id, "down")
+    await screen.waitFor(() => expect(screen.getByRole("listbox")).toBeInTheDocument())
+  })
+
+  it("opens a read-only Select with Enter", async () => {
+    screen.render(<Menu root={{ readOnly: true }} />)
+    screen.renderer.nativeSimulateKeyDown(screen.getByTestId("trigger").id, "enter")
+    await screen.waitFor(() => expect(screen.getByRole("listbox")).toBeInTheDocument())
+  })
+
+  it("opens a read-only Select with Space", async () => {
+    screen.render(<Menu root={{ readOnly: true }} />)
+    screen.renderer.nativeSimulateKeyDown(screen.getByTestId("trigger").id, "space")
+    await screen.waitFor(() => expect(screen.getByRole("listbox")).toBeInTheDocument())
+  })
+
+  it("opens on trigger mousedown and selects the item released over", async () => {
+    const onClick = vi.fn()
+    screen.render(<Menu item={{ onClick }} />)
+    const trigger = screen.getByTestId("trigger").getBoundingClientRect()
+    screen.renderer.nativeSimulateMouseDown(trigger.left + 4, trigger.top + 4)
+    await screen.waitFor(() => expect(screen.getByRole("listbox")).toBeInTheDocument())
+    const cedar = screen.getByTestId("Cedar").getBoundingClientRect()
+    screen.renderer.nativeSimulateMouseMove(cedar.left + cedar.width / 2, cedar.top + cedar.height / 2, 0)
+    screen.renderer.nativeSimulateMouseUp(cedar.left + cedar.width / 2, cedar.top + cedar.height / 2)
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("Cedar"))
+    expect(onClick).toHaveBeenCalledTimes(1)
+  })
+
+  it("skips disabled options during keyboard navigation and wraps at the end", async () => {
+    screen.render(
+      <Select.Root open>
+        <Select.Trigger><Select.Value /></Select.Trigger>
+        <Select.Popup><Select.List>
+          <Select.Item value="a">Almond</Select.Item>
+          <Select.Item value="b" disabled>Birch</Select.Item>
+          <Select.Item value="c">Cedar</Select.Item>
+        </Select.List></Select.Popup>
+      </Select.Root>,
+    )
+    screen.renderer.simulateKeystrokes("down")
+    await screen.waitFor(() => expect(screen.getByRole("option", { name: "Almond" })).toHaveAttribute("data-highlighted", ""))
+    screen.renderer.simulateKeystrokes("down")
+    await screen.waitFor(() => expect(screen.getByRole("option", { name: "Cedar" })).toHaveAttribute("data-highlighted", ""))
+    screen.renderer.simulateKeystrokes("down")
+    await screen.waitFor(() => expect(screen.getByRole("option", { name: "Almond" })).toHaveAttribute("data-highlighted", ""))
+    expect(screen.getByRole("option", { name: "Birch" })).not.toHaveAttribute("data-highlighted")
+  })
+
+  it("focuses a disabled item when it receives programmatic focus", async () => {
+    screen.render(
+      <Select.Root open>
+        <Select.Trigger><Select.Value /></Select.Trigger>
+        <Select.Popup><Select.Item value="disabled" disabled>Disabled</Select.Item></Select.Popup>
+      </Select.Root>,
+    )
+    const item = screen.getByRole("option", { name: "Disabled" })
+    screen.renderer.focusElement(item.id)
+    await screen.waitFor(() => expect(item).toHaveFocus())
+  })
+
+  it("focuses the selected item when reopening the popup", async () => {
+    screen.render(<Menu root={{ defaultValue: "Cedar" }} />)
+    clickTrigger()
+    await screen.waitFor(() => expect(screen.getByTestId("Cedar")).toBeInTheDocument())
+    clickItem("Cedar")
+    await screen.waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument())
+    clickTrigger()
+    await screen.waitFor(() => expect(screen.getByTestId("Cedar")).toHaveFocus())
+  })
+
+  it("scrolls the highlighted item into view at the end of a long list", async () => {
+    const longItems = Array.from({ length: 14 }, (_, index) => `Option ${index + 1}`)
+    screen.render(
+      <Select.Root open>
+        <Select.Trigger data-testid="trigger"><Select.Value /></Select.Trigger>
+        <Select.Popup data-testid="popup" style={{ maxHeight: 120, overflowY: "auto" }}>
+          <Select.List>
+            {longItems.map((name) => <Select.Item key={name} value={name}>{name}</Select.Item>)}
+          </Select.List>
+        </Select.Popup>
+      </Select.Root>,
+    )
+    screen.renderer.simulateKeystrokes("end")
+    const lastItem = screen.getByRole("option", { name: "Option 14" })
+    await screen.waitFor(() => expect(lastItem).toHaveAttribute("data-highlighted", ""))
+    const popup = screen.getByTestId("popup").getBoundingClientRect()
+    const option = lastItem.getBoundingClientRect()
+    expect(option.bottom).toBeLessThanOrEqual(popup.bottom)
+    expect(screen.renderer.getScrollOffset(screen.getByTestId("popup").id)?.[1]).toBeLessThan(0)
+  })
+
+  it("highlights a hovered item and selects it when clicked", async () => {
+    screen.render(<Menu root={{ open: true }} />)
+    const rect = screen.getByTestId("Cedar").getBoundingClientRect()
+    screen.renderer.nativeSimulateMouseMove(rect.left + rect.width / 2, rect.top + rect.height / 2)
+    await screen.waitFor(() => expect(screen.getByTestId("Cedar")).toHaveAttribute("data-highlighted", ""))
+    clickItem("Cedar")
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("Cedar"))
+  })
+
+  it("does not change the highlight on pointer movement when hover highlighting is disabled", async () => {
+    screen.render(<Menu root={{ open: true, highlightItemOnHover: false }} />)
+    const rect = screen.getByTestId("Cedar").getBoundingClientRect()
+    screen.renderer.nativeSimulateMouseMove(rect.left + rect.width / 2, rect.top + rect.height / 2)
+    await screen.waitFor(() => expect(screen.getByTestId("Cedar")).not.toHaveAttribute("data-highlighted"))
+  })
+
+  it("updates trigger and label IDs when the root ID changes", async () => {
+    screen.render(
+      <Select.Root id="field-root">
+        <Select.Label data-testid="label">Tree</Select.Label>
+        <Select.Trigger data-testid="trigger" ariaLabel="Tree"><Select.Value /></Select.Trigger>
+        <Select.Popup><Select.List>{items.map((name) => <Select.Item key={name} value={name}>{name}</Select.Item>)}</Select.List></Select.Popup>
+      </Select.Root>
+    )
+    await screen.waitFor(() => {
+      expect(screen.getByTestId("trigger")).toHaveAttribute("id", "field-root")
+      expect(screen.getByTestId("trigger")).toHaveAttribute("aria-labelledby", "field-root-label")
+      expect(screen.getByTestId("label")).toHaveAttribute("id", "field-root-label")
+    })
+  })
+
+  it("focuses the trigger without opening when the label is clicked", async () => {
+    screen.render(
+      <Select.Root>
+        <Select.Label data-testid="label">Tree</Select.Label>
+        <Select.Trigger data-testid="trigger" ariaLabel="Tree"><Select.Value /></Select.Trigger>
+        <Select.Popup><Select.List>{items.map((name) => <Select.Item key={name} value={name}>{name}</Select.Item>)}</Select.List></Select.Popup>
+      </Select.Root>
+    )
+    const label = screen.getByTestId("label")
+    const rect = label.getBoundingClientRect()
+    screen.renderer.nativeSimulateClick(rect.left + rect.width / 2, rect.top + rect.height / 2)
+    await screen.waitFor(() => expect(screen.getByTestId("trigger")).toHaveFocus())
+    expect(screen.queryByRole("listbox")).toBeNull()
+  })
+
+  it("provides listbox semantics on Popup when Select.List is omitted", async () => {
+    screen.render(
+      <Select.Root open multiple>
+        <Select.Trigger data-testid="trigger"><Select.Value /></Select.Trigger>
+        <Select.Popup data-testid="popup"><Select.Item value="one">One</Select.Item></Select.Popup>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("popup")).toHaveAttribute("role", "listbox"))
+    expect(screen.getByTestId("popup")).toHaveAttribute("aria-multiselectable", "true")
+    expect(screen.getByTestId("trigger")).toHaveAttribute("aria-controls")
+    expect(screen.getByTestId("popup")).toHaveAttribute("id")
+    expect(screen.getByRole("option", { name: "One" })).toBeInTheDocument()
+  })
+
+  it("places listbox semantics on List when it is present", async () => {
+    screen.render(
+      <Select.Root open multiple>
+        <Select.Trigger data-testid="trigger"><Select.Value /></Select.Trigger>
+        <Select.Popup data-testid="popup"><Select.List data-testid="list"><Select.Item value="one">One</Select.Item></Select.List></Select.Popup>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("popup")).toHaveAttribute("role", "presentation"))
+    expect(screen.getByTestId("list")).toHaveAttribute("role", "listbox")
+    expect(screen.getByTestId("list")).toHaveAttribute("aria-multiselectable", "true")
+    expect(screen.getByTestId("popup")).not.toHaveAttribute("aria-multiselectable")
+    expect(screen.getByTestId("trigger")).not.toHaveAttribute("aria-controls")
+  })
+
+  it("does not move focus on close when Popup finalFocus is false", async () => {
+    screen.render(
+      <Select.Root defaultOpen>
+        <Select.Trigger data-testid="trigger"><Select.Value /></Select.Trigger>
+        <Select.Popup finalFocus={false}>
+          <Select.Item value="a" data-testid="option">Option A</Select.Item>
+        </Select.Popup>
+      </Select.Root>,
+    )
+    clickItem("option")
+    await screen.waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument())
+    expect(screen.getByTestId("trigger")).not.toHaveFocus()
+  })
+
+  it("focuses the element returned by Popup finalFocus", async () => {
+    screen.render(
+      <>
+        <Select.Root defaultOpen>
+          <Select.Trigger data-testid="trigger"><Select.Value /></Select.Trigger>
+          <Select.Popup finalFocus={() => screen.getByTestId("final-focus") as unknown as HTMLElement}>
+            <Select.Item value="a" data-testid="option">Option A</Select.Item>
+          </Select.Popup>
+        </Select.Root>
+        <button data-testid="final-focus">Return focus here</button>
+      </>,
+    )
+    clickItem("option")
+    await screen.waitFor(() => expect(screen.getByTestId("final-focus")).toHaveFocus())
+  })
+
+  it("returns focus to the trigger when Popup finalFocus returns null", async () => {
+    screen.render(
+      <Select.Root defaultOpen>
+        <Select.Trigger data-testid="trigger"><Select.Value /></Select.Trigger>
+        <Select.Popup finalFocus={() => null}>
+          <Select.Item value="a" data-testid="option">Option A</Select.Item>
+        </Select.Popup>
+      </Select.Root>,
+    )
+    clickItem("option")
+    await screen.waitFor(() => expect(screen.getByTestId("trigger")).toHaveFocus())
+  })
+
+  it("renders a React element from an items object label", async () => {
+    screen.render(
+      <Select.Root value="one" items={{ one: <span data-testid="object-label">One</span> }}>
+        <Select.Trigger><Select.Value /></Select.Trigger>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("object-label")).toHaveTextContent("One"))
+  })
+
+  it("renders a React element from an items array label", async () => {
+    screen.render(
+      <Select.Root value="one" items={[{ value: "one", label: <span data-testid="array-label">One</span> }]}>
+        <Select.Trigger><Select.Value /></Select.Trigger>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("array-label")).toHaveTextContent("One"))
+  })
+
+  it("updates the items label when the selected value changes", async () => {
+    function App() {
+      const [value, setValue] = useState("one")
+      return <><button onClick={() => setValue("two")}>Change</button><Select.Root value={value} items={{ one: "One", two: "Two" }}><Select.Trigger><Select.Value data-testid="value" /></Select.Trigger></Select.Root></>
+    }
+    screen.render(<App />)
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("One"))
+    screen.renderer.nativeSimulateClick(12, 12)
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("Two"))
+  })
+
+  it("uses the placeholder when the null value is absent from the items lookup", async () => {
+    screen.render(
+      <Select.Root value={null} items={{ one: "One" }}>
+        <Select.Trigger><Select.Value data-testid="value" placeholder="Choose" /></Select.Trigger>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("Choose"))
+  })
+
+  it("passes the selected value to SelectValue children in single mode", async () => {
+    screen.render(
+      <Select.Root value="one">
+        <Select.Trigger><Select.Value data-testid="value">{(value) => `Selected ${value}`}</Select.Value></Select.Trigger>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("Selected one"))
+  })
+
+  it("renders one label for a single value in multiple mode", async () => {
+    screen.render(
+      <Select.Root multiple value={["one"]} items={{ one: "One" }}>
+        <Select.Trigger><Select.Value data-testid="value" placeholder="Choose" /></Select.Trigger>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("One"))
+  })
+
+  it("renders the placeholder for an empty multiple selection", async () => {
+    screen.render(
+      <Select.Root multiple value={[]}>
+        <Select.Trigger><Select.Value data-testid="value" placeholder="Choose" /></Select.Trigger>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("Choose"))
+  })
+
+  it("renders a React element placeholder", async () => {
+    screen.render(
+      <Select.Root>
+        <Select.Trigger><Select.Value placeholder={<span data-testid="placeholder">Choose</span>} /></Select.Trigger>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("placeholder")).toHaveTextContent("Choose"))
+  })
+
+  it("uses itemToStringLabel for object values", async () => {
+    const canada = { country: "Canada", code: "CA" }
+    screen.render(
+      <Select.Root value={canada} itemToStringLabel={(item) => item.country}>
+        <Select.Trigger><Select.Value data-testid="value" /></Select.Trigger>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("Canada"))
+  })
+
+  it("uses label and value fields for object values without conversion functions", async () => {
+    const canada = { label: "Canada", value: "CA" }
+    screen.render(
+      <Select.Root value={canada}>
+        <Select.Trigger><Select.Value data-testid="value" /></Select.Trigger>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("Canada"))
+  })
+
+  it("uses a SelectValue child function over items in multiple mode", async () => {
+    screen.render(
+      <Select.Root multiple value={["sans", "serif"]} items={{ sans: "Sans-serif", serif: "Serif" }}>
+        <Select.Trigger><Select.Value data-testid="value">{(values) => values.join("+")}</Select.Value></Select.Trigger>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("sans+serif"))
+  })
+
+  it("uses raw values for multiple selections without an items lookup", async () => {
+    screen.render(
+      <Select.Root multiple value={["serif", "mono"]}>
+        <Select.Trigger><Select.Value data-testid="value" /></Select.Trigger>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("serif, mono"))
+  })
+
+  it("uses an empty array as the default multiple value", async () => {
+    screen.render(
+      <Select.Root multiple>
+        <Select.Trigger><Select.Value data-testid="value">{(values) => JSON.stringify(values)}</Select.Value></Select.Trigger>
+      </Select.Root>,
+    )
+    await screen.waitFor(() => expect(screen.getByTestId("value")).toHaveTextContent("[]"))
   })
 })

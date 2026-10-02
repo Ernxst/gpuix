@@ -3666,6 +3666,13 @@ so item content can reflect its current state. `Select.ItemText` accepts the
 same function child; it renders with the current item state while the label
 used by the trigger and typeahead comes from the unhighlighted, unselected
 call. Item `label` and `textValue` props override that function-derived label.
+`Select.Root`'s `itemToStringLabel` resolves object values for the closed
+trigger; without it, values with `label` or `value` fields use those fields.
+`Select.Popup` supplies the listbox role when no `Select.List` is rendered;
+with a `List`, the role belongs to the list and the trigger does not set
+`aria-controls`.
+Opening the popup focuses the selected item, and closing it returns focus to
+the trigger.
 Arrow Up/Down, Home/End and typeahead keep the highlighted item in view. Pointer
 hover updates the highlight without changing the popup's scroll position.
 
@@ -3792,6 +3799,8 @@ its content. Typing highlights a matching item; `Up`, `Down`, `Ctrl+P`,
 the trigger. Disabled items are skipped. The highlighted item scrolls into
 view, and scroll arrows appear only while the list can scroll further in that
 direction. Home/End and PageUp/PageDown are not handled.
+
+`onOpenChangeComplete` runs after the requested open state has rendered.
 
 Select parts accept `className` and `style` functions with state matching the
 corresponding Base UI part. `Root` renders no element and takes neither prop.

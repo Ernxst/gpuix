@@ -22,6 +22,7 @@ import type {
   GpuixSyntheticEvent,
   GpuixKeyboardEvent,
   GpuixMouseEvent,
+  GpuixPointerEvent,
   GpuixScrollEvent,
 } from "../reconciler/synthetic-event.js"
 import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
@@ -64,6 +65,7 @@ interface SelectContextValue {
   highlightItemOnHover: boolean
   focused: boolean
   labels: Map<unknown, ReactNode>
+  itemToStringLabel: ((value: unknown) => string) | undefined
   activeValue: unknown | null
   revealActiveValue: unknown | null
   listId: string
@@ -73,6 +75,16 @@ interface SelectContextValue {
   canScrollUp: boolean
   canScrollDown: boolean
   triggerPressedWhileOpen: React.MutableRefObject<boolean>
+  triggerOpenedOnMouseDown: React.MutableRefObject<boolean>
+  mouseDownOnTrigger: React.MutableRefObject<boolean>
+  triggerMouseDownAt: React.MutableRefObject<number>
+  triggerMouseDownY: React.MutableRefObject<number>
+  triggerLastMouseY: React.MutableRefObject<number>
+  triggerDragY: React.MutableRefObject<number>
+  dragPointerType: React.MutableRefObject<string>
+  focusSelectedItemOnOpen: React.MutableRefObject<boolean>
+  focusItem: (id: string) => void
+  closeInteraction: React.MutableRefObject<string>
   dismissedByOutsidePress: React.MutableRefObject<boolean>
   triggerRef: React.MutableRefObject<PublicInstance | null>
   setOpen: (open: boolean, reason?: SelectChangeEventDetails["reason"], event?: GpuixSyntheticEvent) => void
@@ -222,6 +234,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
   value: valueProp,
   defaultValue,
   onValueChange,
+  itemToStringLabel,
   open: openProp,
   defaultOpen = false,
   onOpenChange,
@@ -242,6 +255,9 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     value: openProp,
     defaultValue: defaultOpen,
   })
+  const previousOpen = useRef(open)
+  const onCompleteRef = useRef(onOpenChangeComplete)
+  onCompleteRef.current = onOpenChangeComplete
   const [activeValue, setActiveValueState] = useState<unknown | null>(null)
   const [revealActiveValue, setRevealActiveValue] = useState<unknown | null>(null)
   const generatedListId = useId()
@@ -256,6 +272,15 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
   const typeaheadStartIndex = useRef(-1)
   const typeaheadMatchIndex = useRef(-1)
   const triggerPressedWhileOpen = useRef(false)
+  const triggerOpenedOnMouseDown = useRef(false)
+  const mouseDownOnTrigger = useRef(false)
+  const triggerMouseDownAt = useRef(0)
+  const triggerMouseDownY = useRef(0)
+  const triggerLastMouseY = useRef(0)
+  const triggerDragY = useRef(0)
+  const dragPointerType = useRef("mouse")
+  const focusSelectedItemOnOpen = useRef(false)
+  const closeInteraction = useRef("programmatic")
   const dismissedByOutsidePress = useRef(false)
   const triggerRef = useRef<PublicInstance | null>(null)
   // SelectItem registers itself here (instead of Select walking the element
@@ -326,9 +351,13 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
   const labels = useMemo(() => {
     const next = new Map<unknown, ReactNode>()
     if (Array.isArray(itemsProp)) {
-      for (const item of itemsProp) next.set(item.value, item.label ?? item.textValue ?? String(item.value))
+      for (const item of itemsProp) {
+        next.set(item.value, item.value === null && item.label == null && item.textValue == null
+          ? null
+          : item.label ?? item.textValue ?? String(item.value))
+      }
     } else if (itemsProp) {
-      for (const [itemValue, label] of Object.entries(itemsProp)) next.set(itemValue, label)
+      for (const [itemValue, label] of Object.entries(itemsProp)) next.set(itemValue === "null" ? null : itemValue, label)
     }
     return next
   }, [itemsProp])
@@ -338,19 +367,24 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     const details = createSelectChangeDetails(reason, triggerRef.current as unknown as Element | undefined, event)
     onOpenChange?.(nextOpen, details)
     if (details.isCanceled) return
+    if (!nextOpen) closeInteraction.current = event?.type?.toLowerCase().includes("key") ? "keyboard" : event ? "mouse" : "programmatic"
     setOpenState(nextOpen)
-    onOpenChangeComplete?.(nextOpen)
     if (nextOpen) {
+      focusSelectedItemOnOpen.current = true
       const rect = triggerRef.current?.getBoundingClientRect()
       if (rect) setPopupPosition({ x: rect.x, y: rect.y + rect.height })
       const selected = items.find(
         (item) => isValueSelected(value, multiple === true, item.value, compareValues) && !item.disabled
       )
       setActiveValue(selected?.value ?? null)
-    } else if (triggerRef.current) {
-      renderer?.focusElement?.(triggerRef.current.id)
     }
   }
+
+  useLayoutEffect(() => {
+    if (previousOpen.current === open) return
+    previousOpen.current = open
+    onCompleteRef.current?.(open)
+  }, [open])
 
   const typeahead = (character: string, event?: GpuixSyntheticEvent) => {
     if (disabled || (!open && (readOnly || multiple)) || !character || character.length !== 1) return
@@ -448,6 +482,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
       focused,
       items,
       labels,
+      itemToStringLabel,
       activeValue,
       revealActiveValue,
       listId,
@@ -457,6 +492,16 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
       canScrollUp: scrollability.up,
       canScrollDown: scrollability.down,
       triggerPressedWhileOpen,
+      triggerOpenedOnMouseDown,
+      mouseDownOnTrigger,
+      triggerMouseDownAt,
+      triggerMouseDownY,
+      triggerLastMouseY,
+      triggerDragY,
+      dragPointerType,
+      focusSelectedItemOnOpen,
+      focusItem: (id) => renderer?.focusElement?.(id),
+      closeInteraction,
       dismissedByOutsidePress,
       triggerRef,
       setOpen,
@@ -474,7 +519,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
       unregisterItem,
       isItemEqualToValue: compareValues,
     }),
-    [open, value, multiple, disabled, readOnly, highlightItemOnHover, focused, items, labels, activeValue, revealActiveValue, listId, listMounted, popupPosition, scrollability, compareValues]
+    [open, value, multiple, disabled, readOnly, highlightItemOnHover, focused, items, labels, itemToStringLabel, activeValue, revealActiveValue, listId, listMounted, popupPosition, scrollability, compareValues, renderer]
   )
 
   return (
@@ -546,7 +591,7 @@ export interface SelectTriggerProps extends SelectPartProps<SelectTriggerState> 
 
 export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
   function SelectTrigger(
-    { asChild, render, disabled: disabledProp, style, className, children, onMouseDown, onClick, onKeyDown, onFocus, onBlur, ...props },
+    { asChild, render, disabled: disabledProp, style, className, children, onMouseDown, onMouseUp, onClick, onKeyDown, onFocus, onBlur, ...props },
     forwardedRef
   ) {
     const context = useSelectContext("SelectTrigger")
@@ -576,7 +621,7 @@ export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
       ariaLabelledBy: props.ariaLabelledBy ?? props["aria-labelledby"] ?? context.fieldLabelId,
       ariaExpanded: context.open,
       ariaHasPopup: "listbox",
-      ariaControls: context.open && context.listMounted ? context.listId : undefined,
+      ariaControls: context.open && !context.listMounted ? context.listId : undefined,
       "data-open": context.open ? "" : undefined,
       "data-popup-open": context.open ? "" : undefined,
       "data-pressed": context.open ? "" : undefined,
@@ -591,10 +636,26 @@ export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
       onMouseDown: (event) => {
         onMouseDown?.(event)
         context.triggerPressedWhileOpen.current = context.open
+        context.triggerOpenedOnMouseDown.current = !context.open
+        context.mouseDownOnTrigger.current = !context.open && !disabled
+        context.triggerMouseDownAt.current = Date.now()
+        context.triggerMouseDownY.current = event.clientY
+        context.triggerLastMouseY.current = event.clientY
+        context.triggerDragY.current = 0
+        context.dragPointerType.current = "mouse"
+        if (!context.open && !disabled) context.setOpen(true, "trigger-press", event)
+      },
+      onMouseUp: (event) => {
+        onMouseUp?.(event)
+        if (event.elementId === context.triggerRef.current?.id) context.mouseDownOnTrigger.current = false
       },
       onClick: (event) => {
         onClick?.(event)
         if (disabled) return
+        if (context.triggerOpenedOnMouseDown.current) {
+          context.triggerOpenedOnMouseDown.current = false
+          return
+        }
         if (context.dismissedByOutsidePress.current) {
           context.dismissedByOutsidePress.current = false
           return
@@ -644,16 +705,24 @@ export interface SelectValueProps extends SelectPartProps<SelectValueState, "chi
 export const SelectValue = forwardRef<PublicInstance, SelectValueProps>(
   function SelectValue({ placeholder, children, render, className, style, ...props }, ref) {
     const context = useSelectContext("SelectValue")
+    const nullLabel = context.labels.has(null)
+      ? context.labels.get(null)
+      : context.items.find((item) => item.value === null)?.label
+    const hasNullItemLabel = nullLabel != null
     const values = Array.isArray(context.value)
       ? context.value
       : context.value === null
-        ? []
+        ? hasNullItemLabel ? [null] : []
         : [context.value]
-    const labels = values.map(
-      (value) =>
-        context.labels.get(value) ?? context.items.find((item) => item.value === value)?.label ?? value
-    )
-    const hasValue = context.multiple ? values.length > 0 : context.value !== null
+    const labels = values.map((value) => {
+      if (context.itemToStringLabel && value !== null) return context.itemToStringLabel(value)
+      if (typeof value === "object" && value !== null) {
+        if ("label" in value && value.label != null) return value.label as ReactNode
+        if ("value" in value) return value.value as ReactNode
+      }
+      return context.labels.get(value) ?? context.items.find((item) => item.value === value)?.label ?? value
+    })
+    const hasValue = context.multiple ? values.length > 0 : context.value !== null || hasNullItemLabel
     const valueContent = hasValue
       ? context.multiple
         ? labels.flatMap((label, index) => (index === 0 ? [label] : [", ", label]))
@@ -685,10 +754,35 @@ export interface SelectPopupState {
 
 export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
   function SelectPopup(
-    { children, onMouseDownOutside, onKeyDown, onEscapeKeyDown, tabIndex = 0, className, style, side = "bottom", align = "start", render, finalFocus: _finalFocus, ...props },
+    { children, onMouseDownOutside, onKeyDown, onEscapeKeyDown, tabIndex = 0, className, style, side = "bottom", align = "start", render, finalFocus, ...props },
     forwardedRef
   ) {
     const context = useSelectContext("SelectPopup")
+    const { renderer } = useGpuix()
+    const wasOpen = useRef(context.open)
+    const finalFocusRef = useRef(finalFocus)
+    finalFocusRef.current = finalFocus
+    useLayoutEffect(() => {
+      if (wasOpen.current && !context.open) {
+        const target = finalFocusRef.current
+        let targetId: number | null = null
+        if (target === false) {
+          targetId = null
+        } else if (target === undefined || target === true) {
+          targetId = context.triggerRef.current?.id ?? null
+        } else {
+          const resolved = typeof target === "function"
+            ? target(context.closeInteraction.current)
+            : "current" in target
+              ? target.current
+              : null
+          if (resolved === true || resolved == null) targetId = context.triggerRef.current?.id ?? null
+          else if (resolved !== false && typeof resolved === "object" && "id" in resolved && typeof resolved.id === "number") targetId = resolved.id
+        }
+        if (targetId !== null) renderer?.focusElement?.(targetId)
+      }
+      wasOpen.current = context.open
+    }, [context.open, context.triggerRef, context.closeInteraction, renderer])
     const positioned = useContext(SelectPositionedContext)
     const positionerState = usePositionerState()
     const dismissLayer = useDismissLayer(context.open)
@@ -706,6 +800,10 @@ export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
       "data-open": context.open ? "" : undefined,
       "data-side": resolvedSide,
       "data-align": resolvedAlign,
+      role: context.listMounted ? "presentation" : "listbox",
+      id: context.listMounted ? undefined : context.listId,
+      ariaMultiSelectable: !context.listMounted && context.multiple || undefined,
+      ariaReadOnly: !context.listMounted && context.readOnly || undefined,
     }
     // Children stay mounted while closed - like Radix's detached collection -
     // so SelectItem registers at mount time regardless of open state. Both
@@ -787,17 +885,18 @@ export interface SelectItemProps extends SelectPartProps<SelectItemState, "child
 
 export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
   function SelectItem(
-    { value, disabled = false, label, textValue, children, render, style, className, onClick, onMouseEnter, ...props },
+    { value, disabled = false, label, textValue, children, render, style, className, onClick, onMouseDown, onMouseEnter, onMouseMove, onMouseUp, ...props },
     ref
   ) {
     const context = useSelectContext("SelectItem")
+    const itemDisabled = disabled || context.disabled
     const instanceRef = useRef<PublicInstance | null>(null)
     const [itemText, setItemText] = useState<{ label: string; textValue: string } | null>(null)
     const itemValue = value ?? null
     const state = {
       selected: isValueSelected(context.value, context.multiple, itemValue, context.isItemEqualToValue),
       highlighted: compareSelectItemEquality(context.activeValue, itemValue, context.isItemEqualToValue),
-      disabled,
+      disabled: itemDisabled,
     }
     const stateRef = useRef(state)
     stateRef.current = state
@@ -827,14 +926,19 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
         value: itemValue,
         label: label ?? itemText?.label ?? fallbackTextValue,
         textValue: textValue ?? label ?? itemText?.textValue ?? fallbackTextValue,
-        disabled,
+        disabled: itemDisabled,
         instance: instanceRef.current,
       })
       return () => context.unregisterItem(itemValue)
-    }, [itemValue, itemText, fallbackTextValue, disabled])
+    }, [itemValue, itemText, fallbackTextValue, itemDisabled])
     useLayoutEffect(() => {
       if (context.open && compareSelectItemEquality(context.revealActiveValue, itemValue, context.isItemEqualToValue)) instanceRef.current?.scrollIntoView({ block: "nearest" })
     }, [context.open, context.revealActiveValue, itemValue])
+    useLayoutEffect(() => {
+      if (!context.open || !context.focusSelectedItemOnOpen.current || !state.highlighted || !instanceRef.current) return
+      context.focusSelectedItemOnOpen.current = false
+      context.focusItem(instanceRef.current.id)
+    }, [context.open, state.highlighted])
 
     // Closed content stays mounted (see registerItem's comment above), so
     // this marker keeps the item's document position current even while
@@ -850,19 +954,48 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
       ref: setInstanceRef,
       role: "option",
       ariaSelected: state.selected,
-      ariaDisabled: disabled || undefined,
+      ariaDisabled: itemDisabled || undefined,
+      tabIndex: state.highlighted ? 0 : -1,
       "data-selected": state.selected ? "" : undefined,
       "data-highlighted": state.highlighted ? "" : undefined,
-      "data-disabled": disabled ? "" : undefined,
+      "data-disabled": itemDisabled ? "" : undefined,
       style: resolvePartStyle(style, state),
       className: resolveClassName(className, state),
+      onMouseDown: (event: GpuixMouseEvent) => {
+        onMouseDown?.(event)
+        context.mouseDownOnTrigger.current = false
+      },
       onMouseEnter: (event: GpuixMouseEvent) => {
         onMouseEnter?.(event)
-        if (!disabled && !context.disabled && context.highlightItemOnHover) context.setActiveValue(itemValue)
+        if (!itemDisabled && context.highlightItemOnHover) context.setActiveValue(itemValue)
+      },
+      onPointerEnter: (event: GpuixPointerEvent) => {
+        context.dragPointerType.current = event.pointerType
+      },
+      onMouseMove: (event: GpuixMouseEvent) => {
+        onMouseMove?.(event)
+        if (context.mouseDownOnTrigger.current && event.pressedButton === 0) {
+          context.triggerDragY.current += event.clientY - context.triggerLastMouseY.current
+          context.triggerLastMouseY.current = event.clientY
+        }
+      },
+      onMouseUp: (event: GpuixMouseEvent) => {
+        onMouseUp?.(event)
+        if (!context.mouseDownOnTrigger.current) return
+        context.mouseDownOnTrigger.current = false
+        const selected = isValueSelected(context.value, context.multiple, itemValue, context.isItemEqualToValue)
+        const elapsed = Date.now() - context.triggerMouseDownAt.current
+        const dragDistance = Math.max(context.triggerDragY.current, Math.abs(event.clientY - context.triggerMouseDownY.current))
+        const dragMoved = dragDistance ** 2 >= 64
+        context.triggerDragY.current = 0
+        if (itemDisabled || context.dragPointerType.current === "touch") return
+        if (elapsed < 400 && (selected || !dragMoved)) return
+        onClick?.(event)
+        context.selectValue(itemValue, "item-press", event)
       },
       onClick: (event: GpuixMouseEvent) => {
         onClick?.(event)
-        if (!disabled && !context.disabled) context.selectValue(itemValue, "item-press", event)
+        if (!itemDisabled) context.selectValue(itemValue, "item-press", event)
       },
     }
     return (
@@ -921,6 +1054,7 @@ export const SelectList = forwardRef<PublicInstance, SelectListProps>(function S
       style: resolvePartStyle(style, state),
       role: "listbox",
       ariaMultiSelectable: context.multiple || undefined,
+      ariaReadOnly: context.readOnly || undefined,
       "data-multiple": context.multiple ? "" : undefined,
       onScroll: (event: GpuixScrollEvent) => {
         onScroll?.(event)
