@@ -212,6 +212,30 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     expect(screen.getByTestId("value")).toHaveTextContent("Select font")
   })
 
+  it("does not reselect an item after it is removed and reinserted", async () => {
+    function DynamicMenu() {
+      const [menuItems, setMenuItems] = useState(["a", "b", "c"])
+      const [value, setValue] = useState<string | null>("a")
+      return (
+        <>
+          <button data-testid="remove" onClick={() => setMenuItems((previous) => previous.filter((item) => item !== "a"))}>Remove</button>
+          <button data-testid="restore" onClick={() => setMenuItems(["a", "b", "c"])}>Restore</button>
+          <Select.Root value={value} open onValueChange={setValue}>
+            <Select.Trigger data-testid="trigger"><Select.Value data-testid="value" /></Select.Trigger>
+            <Select.Popup><Select.List>{menuItems.map((item) => <Select.Item key={item} value={item} data-testid={item}>{item}</Select.Item>)}</Select.List></Select.Popup>
+          </Select.Root>
+        </>
+      )
+    }
+    screen.render(<DynamicMenu />)
+    await screen.waitFor(() => expect(screen.getByTestId("a")).toHaveAttribute("data-selected", ""))
+    const remove = screen.getByTestId("remove").getBoundingClientRect()
+    screen.renderer.nativeSimulateClick(remove.left + remove.width / 2, remove.top + remove.height / 2)
+    const restore = screen.getByTestId("restore").getBoundingClientRect()
+    screen.renderer.nativeSimulateClick(restore.left + restore.width / 2, restore.top + restore.height / 2)
+    await screen.waitFor(() => expect(screen.getByTestId("a")).not.toHaveAttribute("data-selected"))
+  })
+
   it("does not mark a selected single value as a placeholder", async () => {
     screen.render(<Menu root={{ defaultValue: "Birch" }} />)
     expect(screen.getByTestId("trigger")).not.toHaveAttribute("data-placeholder")
