@@ -100,8 +100,11 @@ jobs:
       # Restores Cargo's compiled dependencies from the last build on this pull
       # request, or else on the default branch. Runs after the toolchain is
       # installed, because the cache key includes the compiler.
+      #
+      # Pinned to a commit on the action's main branch: v1.5.0, the latest
+      # release, has no `save-on-pull-request`.
       - name: Setup mbx
-        uses: jdx/mr-boxington-action@v1
+        uses: jdx/mr-boxington-action@81ec44711945b482d44718f5f1543d2df54c6b19
         with:
           working-directory: packages/native
           save-on-workflow-dispatch: true
