@@ -15,7 +15,7 @@
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "--------------------------------------------------------------------------------": "",
-    "lint:monorepo": "sherif",
+    "lint:monorepo": "sherif -i typescript@5.9.3",
     "lint:dependencies": "syncpack lint",
     "---------------------------------------------------------------------------------": "",
     "test": "turbo run test --concurrency=1",
