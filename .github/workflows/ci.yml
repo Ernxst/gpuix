@@ -105,6 +105,9 @@ jobs:
           persist-credentials: false
           submodules: recursive
 
+      - name: Setup node
+        uses: ./.github/actions/node
+
       - name: Setup bun
         uses: ./.github/actions/bun
 
@@ -190,6 +193,9 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+
+      - name: Setup node
+        uses: ./.github/actions/node
 
       - name: Setup bun
         uses: ./.github/actions/bun

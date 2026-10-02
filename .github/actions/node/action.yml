@@ -1,0 +1,13 @@
+name: Setup Node
+description: Install the Node version that package scripts run on.
+
+runs:
+  using: composite
+  steps:
+    # `bun run` starts tools such as tsdown and vitest on the runner's Node.
+    # The Blacksmith Linux image ships one older than 22, which they do not
+    # support.
+    - name: Setup Node
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 24
