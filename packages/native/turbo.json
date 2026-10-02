@@ -5,7 +5,9 @@
   ],
   "tasks": {
     // Inputs name what Cargo compiles. An edit to the README, the Rust examples
-    // or the browser files leaves the addon's hash alone.
+    // or the browser files leaves the addon's hash alone. The submodule's `.git`
+    // file holds a path that differs in every worktree, so it stays out, or no
+    // two worktrees would share a build.
     "build": {
       "inputs": [
         "src/**",
@@ -14,7 +16,10 @@
         "Cargo.lock",
         ".cargo/**",
         "$TURBO_ROOT$/rust-toolchain.toml",
-        "$TURBO_ROOT$/zed/**"
+        "$TURBO_ROOT$/zed/**",
+        "!$TURBO_ROOT$/zed/.git",
+        "!$TURBO_ROOT$/zed/**/.DS_Store",
+        "!**/.DS_Store"
       ],
       "outputs": [
         "dist/*"
@@ -79,7 +84,10 @@
         "Cargo.lock",
         ".cargo/**",
         "$TURBO_ROOT$/rust-toolchain.toml",
-        "$TURBO_ROOT$/zed/**"
+        "$TURBO_ROOT$/zed/**",
+        "!$TURBO_ROOT$/zed/.git",
+        "!$TURBO_ROOT$/zed/**/.DS_Store",
+        "!**/.DS_Store"
       ],
       "outputs": [
         "dist/*"
@@ -132,6 +140,18 @@
     },
     "build:debug": {
       "cache": false,
+      "inputs": [
+        "src/**",
+        "build.rs",
+        "Cargo.toml",
+        "Cargo.lock",
+        ".cargo/**",
+        "$TURBO_ROOT$/rust-toolchain.toml",
+        "$TURBO_ROOT$/zed/**",
+        "!$TURBO_ROOT$/zed/.git",
+        "!$TURBO_ROOT$/zed/**/.DS_Store",
+        "!**/.DS_Store"
+      ],
       "passThroughEnv": [
         "*"
       ],
