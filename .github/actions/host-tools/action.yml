@@ -10,18 +10,22 @@ runs:
   using: composite
   steps:
     # The native tasks hash GPUIX_HOST_TOOLS. It names what the image supplies
-    # and no file in the repository pins: Xcode, which brings clang, the linker
-    # and the Metal shader compiler; the Windows SDK, which brings `fxc`, and
-    # MSVC; the Linux release, which fixes the packages apt installs. A job
-    # that restores what another job built takes the value from that job's
-    # output instead, because its own image may differ.
+    # and no file in the repository pins: Xcode, which brings clang and the
+    # linker, and the Metal toolchain; the Windows SDK, which brings `fxc`, and
+    # MSVC; the Linux release, which fixes the packages apt installs. The
+    # Metal toolchain is a separate download whose version is known only once
+    # it is installed, which takes a few seconds, so it is installed here. A
+    # job that restores what another job built takes the value from that
+    # job's output instead, because its own image may differ.
     - name: Identify the host tools
       id: identify
       shell: bash
       run: |
         case "$RUNNER_OS" in
           macOS)
-            tools=$(xcodebuild -version | tr '\n' ' ')
+            xcodebuild -downloadComponent MetalToolchain
+            metal=$(xcodebuild -showComponent MetalToolchain | sed -n 's/^Build Version: //p')
+            tools="$(xcodebuild -version | tr '\n' ' ') Metal Toolchain $metal"
             ;;
           Windows)
             sdk=$(ls "/c/Program Files (x86)/Windows Kits/10/bin" | grep '^10\.' | sort -V | tail -1 || true)
