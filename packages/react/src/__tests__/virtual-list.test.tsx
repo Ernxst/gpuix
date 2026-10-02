@@ -76,6 +76,235 @@ function DynamicFocusableRows({ enabled }: { enabled: boolean }) {
 }
 
 describe("<virtual-list>", () => {
+  it("reports only changed visible ranges when list data and layout change", async () => {
+    const ranges: { startIndex: number | undefined; endIndex: number | undefined }[] = []
+    const onVisibleRange = (event: { startIndex?: number; endIndex?: number }) => {
+      ranges.push({ startIndex: event.startIndex, endIndex: event.endIndex })
+    }
+    const list = (
+      count: number,
+      options: {
+        windowStart?: number
+        windowSize?: number
+        height?: number
+        estimatedItemHeight?: number
+      } = {},
+    ) => {
+      const windowStart = options.windowStart ?? 0
+      const height = options.height ?? 720
+      const estimatedItemHeight = options.estimatedItemHeight ?? 48
+      const childCount = Math.min(
+        Math.max(0, count - windowStart),
+        options.windowSize ?? count,
+      )
+      return (
+        <virtual-list
+          ariaLabel="Bare list"
+          tabIndex={0}
+          style={{ height }}
+          itemCount={count}
+          windowStart={windowStart}
+          estimatedItemHeight={estimatedItemHeight}
+          onVisibleRange={onVisibleRange}
+        >
+          {Array.from({ length: childCount }, (_, offset) => {
+            const index = windowStart + offset
+            return (
+              <div key={index} style={{ height: 48 }}>
+                <text>{`Part ${index + 1}`}</text>
+              </div>
+            )
+          })}
+        </virtual-list>
+      )
+    }
+
+    const screen = createTestRoot()
+    screen.render(list(106))
+    await screen.userEvent.tab()
+    await screen.userEvent.keyboard(screen.getByLabelText("Bare list"), "end")
+
+    expect(ranges.at(-1)).toStrictEqual({ startIndex: 91, endIndex: 106 })
+    const countBeforeShrink = ranges.length
+
+    screen.render(list(12))
+    await screen.waitFor(() => {
+      screen.renderer.dispatchNativeEvents()
+      expect(ranges.at(-1)).toStrictEqual({ startIndex: 0, endIndex: 12 })
+    }, { timeout: 5_000 })
+    expect(screen.getByText("Part 1")).toBeTruthy()
+    expect(ranges).toHaveLength(countBeforeShrink + 1)
+    const listElement = screen.renderer.findByType("virtual-list")[0]
+    expect(screen.renderer.getListScrollTop(listElement!.id)).toEqual([0, 0, 720])
+    expect(screen.renderer.getScrollMetrics(listElement!.id)?.slice(1, 2)).toEqual([0])
+    expect(screen.renderer.getScrollMetrics(listElement!.id)?.[3]).toBe(720)
+    expect(screen.renderer.getScrollMetrics(listElement!.id)?.[5]).toBe(720)
+    screen.render(list(12))
+    await screen.waitFor(() => {
+      screen.renderer.dispatchNativeEvents()
+      expect(screen.renderer.getListScrollTop(listElement!.id)).toEqual([0, 0, 720])
+    }, { timeout: 5_000 })
+    expect(ranges).toHaveLength(countBeforeShrink + 1)
+
+    screen.render(list(96))
+    await screen.waitFor(() => {
+      screen.renderer.dispatchNativeEvents()
+      expect(ranges.at(-1)).toStrictEqual({ startIndex: 0, endIndex: 16 })
+    }, { timeout: 5_000 })
+    screen.render(list(0))
+    await screen.waitFor(() => {
+      screen.renderer.dispatchNativeEvents()
+      expect(ranges.at(-1)).toStrictEqual({ startIndex: 0, endIndex: 0 })
+    }, { timeout: 5_000 })
+    screen.render(list(12))
+    await screen.waitFor(() => {
+      screen.renderer.dispatchNativeEvents()
+      expect(ranges.at(-1)).toStrictEqual({ startIndex: 0, endIndex: 12 })
+    }, { timeout: 5_000 })
+
+    const countAfterReturn = ranges.length
+    screen.render(list(12, { windowStart: 1 }))
+    await screen.waitFor(() => {
+      screen.renderer.dispatchNativeEvents()
+      expect(screen.renderer.getListScrollTop(listElement!.id)).toEqual([0, 0, 720])
+    }, { timeout: 5_000 })
+    expect(ranges).toHaveLength(countAfterReturn)
+
+    screen.render(list(106))
+    await screen.waitFor(() => {
+      screen.renderer.dispatchNativeEvents()
+      expect(ranges.at(-1)).toStrictEqual({ startIndex: 0, endIndex: 16 })
+    }, { timeout: 5_000 })
+    screen.render(list(106, { estimatedItemHeight: 60, windowSize: 5 }))
+    await screen.waitFor(() => {
+      screen.renderer.dispatchNativeEvents()
+      expect(ranges.at(-1)).toStrictEqual({ startIndex: 0, endIndex: 14 })
+    }, { timeout: 5_000 })
+    screen.render(list(106, { estimatedItemHeight: 60, height: 480, windowSize: 5 }))
+    await screen.waitFor(() => {
+      screen.renderer.dispatchNativeEvents()
+      expect(ranges.at(-1)).toStrictEqual({ startIndex: 0, endIndex: 10 })
+    }, { timeout: 5_000 })
+
+    screen.render(list(106))
+    await screen.waitFor(() => {
+      screen.renderer.dispatchNativeEvents()
+      expect(ranges.at(-1)).toStrictEqual({ startIndex: 0, endIndex: 16 })
+    }, { timeout: 5_000 })
+    await screen.userEvent.keyboard(screen.getByLabelText("Bare list"), "end")
+    expect(ranges.at(-1)).toStrictEqual({ startIndex: 91, endIndex: 106 })
+    screen.render(list(96))
+    await screen.waitFor(() => {
+      screen.renderer.dispatchNativeEvents()
+      expect(ranges.at(-1)).toStrictEqual({ startIndex: 81, endIndex: 96 })
+    }, { timeout: 5_000 })
+    expect(screen.renderer.getListScrollTop(listElement!.id)).toEqual([81, 0, 720])
+    expect(screen.renderer.getScrollMetrics(listElement!.id)).toMatchObject([
+      0,
+      3888,
+      expect.any(Number),
+      4608,
+      expect.any(Number),
+      720,
+    ])
+    screen.render(list(96))
+    await screen.waitFor(() => {
+      screen.renderer.dispatchNativeEvents()
+      expect(screen.renderer.getScrollMetrics(listElement!.id)?.[1]).toBe(3888)
+    }, { timeout: 5_000 })
+  }, 30_000)
+
+  it("returns a windowed consumer to the first row when its data shrinks", async () => {
+    function WindowedList({ count }: { count: number }) {
+      const [range, setRange] = React.useState({ startIndex: 0, endIndex: 20 })
+      const startIndex = Math.max(0, Math.min(range.startIndex - 1, count - 1))
+      const endIndex = Math.max(range.endIndex + 1, startIndex + 1)
+
+      return (
+        <virtual-list
+          ariaLabel="Windowed list"
+          tabIndex={0}
+          style={{ height: 720 }}
+          itemCount={count + 1}
+          windowStart={startIndex}
+          estimatedItemHeight={48}
+          onVisibleRange={(event) =>
+            setRange({
+              startIndex: event.startIndex ?? range.startIndex,
+              endIndex: event.endIndex ?? range.endIndex,
+            })
+          }
+        >
+          {Array.from({ length: Math.max(0, Math.min(count, endIndex) - startIndex) }, (_, offset) => (
+            <div key={startIndex + offset} style={{ height: 48 }}>
+              <text>{`Part ${startIndex + offset + 1}`}</text>
+            </div>
+          ))}
+          {count > 0 && endIndex > count ? <div aria-hidden={true} style={{ height: 48 }} /> : null}
+        </virtual-list>
+      )
+    }
+
+    const screen = createTestRoot()
+    screen.render(<WindowedList count={106} />)
+    await screen.userEvent.tab()
+    const list = screen.getByLabelText("Windowed list")
+    await screen.userEvent.keyboard(list, "end")
+    expect(screen.getByText("Part 106")).toBeTruthy()
+
+    screen.render(<WindowedList count={12} />)
+    await screen.waitFor(() => {
+      screen.renderer.dispatchNativeEvents()
+      expect(screen.getByText("Part 1")).toBeTruthy()
+    }, { timeout: 5_000 })
+  }, 15_000)
+
+  it("reports the changed range when a shorter count still contains the viewport", async () => {
+    const ranges: { startIndex: number | undefined; endIndex: number | undefined }[] = []
+    const screen = createTestRoot()
+    const list = (count: number) => (
+      <virtual-list
+        ariaLabel="Positioned list"
+        style={{ height: 720 }}
+        itemCount={count}
+        estimatedItemHeight={48}
+        onVisibleRange={(event) =>
+          ranges.push({ startIndex: event.startIndex, endIndex: event.endIndex })
+        }
+      >
+        {Array.from({ length: count }, (_, index) => (
+          <div key={index} style={{ height: 48 }}>
+            <text>{`Part ${index + 1}`}</text>
+          </div>
+        ))}
+      </virtual-list>
+    )
+
+    screen.render(list(106))
+    const listElement = screen.renderer.findByType("virtual-list")[0]!
+    await screen.userEvent.tab()
+    await screen.userEvent.keyboard(screen.getByLabelText("Positioned list"), "pagedown")
+    await screen.waitFor(() => {
+      screen.renderer.dispatchNativeEvents()
+      expect(ranges.at(-1)?.startIndex).toBeGreaterThan(0)
+      expect(ranges.at(-1)?.endIndex).toBeGreaterThan(ranges.at(-1)!.startIndex!)
+    }, { timeout: 5_000 })
+    const previousRange = ranges.at(-1)
+    const previousRangeCount = ranges.length
+    const previousScrollTop = screen.renderer.getListScrollTop(listElement.id)?.[0]
+    expect(previousScrollTop).toBeGreaterThan(0)
+    expect(previousScrollTop).toBeLessThan(90)
+
+    screen.render(list(90))
+    await screen.waitFor(() => {
+      screen.renderer.dispatchNativeEvents()
+      expect(screen.renderer.getListScrollTop(listElement.id)?.[0]).toBe(previousScrollTop)
+      expect(ranges.length).toBeGreaterThan(previousRangeCount)
+    }, { timeout: 5_000 })
+    expect(ranges.at(-1)).not.toStrictEqual(previousRange)
+    expect(ranges.at(-1)?.startIndex).toBe(previousScrollTop)
+  }, 15_000)
+
   describeNative("accessibility", () => {
     it("projects its declared role and label into the accessibility tree", () => {
       const screen = createTestRoot()

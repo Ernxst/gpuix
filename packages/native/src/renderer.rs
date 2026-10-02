@@ -10368,6 +10368,8 @@ struct VirtualListEntry {
     /// rather than assuming the list has no id-bearing ancestors.
     accessibility_ancestor_path: Option<Vec<gpui::ElementId>>,
     pending_focus: Option<PendingVirtualFocus>,
+    reported_visible_range: Rc<RefCell<Option<std::ops::Range<usize>>>>,
+    last_visible_range_check: Option<(u64, gpui::Size<gpui::Pixels>, usize, gpui::Pixels)>,
 }
 
 impl VirtualListEntry {
@@ -10403,6 +10405,8 @@ impl VirtualListEntry {
             seen_rows: HashSet::new(),
             accessibility_ancestor_path: None,
             pending_focus: None,
+            reported_visible_range: Rc::new(RefCell::new(None)),
+            last_visible_range_check: None,
         }
     }
 
@@ -10478,6 +10482,8 @@ impl VirtualListEntry {
                 .seen_rows
                 .retain(|id| replacement.child_ids.contains(id));
             replacement.pending_focus = self.pending_focus.take();
+            replacement.reported_visible_range = self.reported_visible_range.clone();
+            replacement.last_visible_range_check = self.last_visible_range_check;
             if !should_follow {
                 replacement.state.scroll_to(scroll_top);
             }
@@ -14456,6 +14462,10 @@ fn build_virtual_list(
             },
         );
     let config = VirtualListConfig::from_element(element);
+    let previous_logical_count = ctx
+        .virtual_lists
+        .get(&element.id)
+        .map(|entry| entry.config.logical_count(entry.child_ids.len()));
     let window_start = if config.item_count.is_some() {
         window_start_from_element(element)
     } else {
@@ -14509,6 +14519,36 @@ fn build_virtual_list(
             entry.state.clone()
         }
     };
+
+    let logical_count = ctx
+        .virtual_lists
+        .get(&element.id)
+        .map(|entry| entry.config.logical_count(entry.child_ids.len()))
+        .unwrap_or_default();
+    if previous_logical_count.is_some_and(|previous| previous != logical_count) {
+        if let Some(entry) = ctx.virtual_lists.get(&element.id) {
+            if entry.reported_visible_range.borrow().is_some() {
+                let viewport_height = entry
+                    .last_visible_range_check
+                    .map(|(_, viewport, _, _)| viewport.height)
+                    .filter(|height| f32::from(*height) > 0.0)
+                    .unwrap_or_else(|| entry.state.viewport_bounds().size.height);
+                if let Some(range) = estimated_virtual_list_visible_range_for_height(
+                    &entry.state,
+                    logical_count,
+                    entry.config.estimated_item_height,
+                    viewport_height,
+                ) {
+                    emit_virtual_visible_range(
+                        ctx.event_callback,
+                        element.id,
+                        range,
+                        &entry.reported_visible_range,
+                    );
+                }
+            }
+        }
+    }
 
     if let Some(entry) = ctx.virtual_lists.get_mut(&element.id) {
         entry.accessibility_ancestor_path = ctx
@@ -14648,12 +14688,20 @@ fn build_virtual_list(
     if element.events.contains("visibleRange") {
         let callback = ctx.event_callback.clone();
         let list_id = element.id;
+        let reported_range = ctx
+            .virtual_lists
+            .get(&list_id)
+            .expect("virtual list entry exists")
+            .reported_visible_range
+            .clone();
         list_state.set_scroll_handler(move |event, _window, _cx| {
             bump_virtual_list_scroll_generation(list_id);
-            emit_event_full(&callback, list_id, "visibleRange", |payload| {
-                payload.start_index = Some(event.visible_range.start as f64);
-                payload.end_index = Some(event.visible_range.end as f64);
-            });
+            emit_virtual_visible_range(
+                &callback,
+                list_id,
+                event.visible_range.clone(),
+                &reported_range,
+            );
         });
     }
 
@@ -14683,12 +14731,65 @@ fn build_virtual_list(
             cx,
         )
     });
-    let list = gpui::list(list_state, render_item)
+    let list = gpui::list(list_state.clone(), render_item)
         .with_sizing_behavior(gpui::ListSizingBehavior::Auto)
         .size_full();
     // `List` doesn't run GPUI's interactivity layout and paint hooks. Let a
     // div own the virtual list's bounds, focus identity, and tab stop while
     // the List keeps its scrolling and row hit testing.
+    let needs_visible_range_check = ctx.virtual_lists.get(&element.id).is_some_and(|entry| {
+        let scroll_top = entry.state.logical_scroll_top();
+        entry.last_visible_range_check
+            != Some((
+                element.subtree_revision,
+                entry.state.viewport_bounds().size,
+                scroll_top.item_ix,
+                scroll_top.offset_in_item,
+            ))
+    });
+    if element.events.contains("visibleRange") && needs_visible_range_check {
+        let list_id = element.id;
+        let subtree_revision = element.subtree_revision;
+        let callback = ctx.event_callback.clone();
+        let view = cx.weak_entity();
+        window.on_next_frame(move |_window, app| {
+            let _ = view.update(app, |view, _cx| {
+                let Some(entry) = view.virtual_lists.get_mut(&list_id) else {
+                    return;
+                };
+                let scroll_top = entry.state.logical_scroll_top();
+                entry.last_visible_range_check = Some((
+                    subtree_revision,
+                    entry.state.viewport_bounds().size,
+                    scroll_top.item_ix,
+                    scroll_top.offset_in_item,
+                ));
+                // A cross-window focus request has already reported the estimated
+                // range needed to mount its target. Reporting the still-current
+                // viewport here could replace that request before React mounts it.
+                if entry.pending_focus.is_some() {
+                    return;
+                }
+                let count = entry.config.logical_count(entry.child_ids.len());
+                if let Some(range) = virtual_list_visible_range(
+                    &entry.state,
+                    count,
+                    entry.config.estimated_item_height,
+                ) {
+                    if entry.reported_visible_range.borrow().is_none() {
+                        *entry.reported_visible_range.borrow_mut() = Some(range);
+                    } else {
+                        emit_virtual_visible_range(
+                            &callback,
+                            list_id,
+                            range,
+                            &entry.reported_visible_range,
+                        );
+                    }
+                }
+            });
+        });
+    }
     let mut surface = gpui::div()
         .id(gpui::ElementId::Integer(element.id))
         .child(list);
@@ -18198,10 +18299,124 @@ fn emit_virtual_window_advance(
             (target_index + viewport_rows).min(logical_count),
         ),
     };
-    emit_event_full(callback, list_id, "visibleRange", |payload| {
-        payload.start_index = Some(start_index as f64);
-        payload.end_index = Some(end_index as f64);
-    });
+    emit_virtual_visible_range(
+        callback,
+        list_id,
+        start_index..end_index,
+        &entry.reported_visible_range,
+    );
+}
+
+fn emit_virtual_visible_range(
+    callback: &Option<EventCallback>,
+    list_id: u64,
+    range: std::ops::Range<usize>,
+    reported_range: &Rc<RefCell<Option<std::ops::Range<usize>>>>,
+) {
+    let changed = {
+        let mut previous = reported_range.borrow_mut();
+        if previous.as_ref() == Some(&range) {
+            false
+        } else {
+            *previous = Some(range.clone());
+            true
+        }
+    };
+    if changed {
+        emit_event_full(callback, list_id, "visibleRange", |payload| {
+            payload.start_index = Some(range.start as f64);
+            payload.end_index = Some(range.end as f64);
+        });
+    }
+}
+
+/// Read the range GPUI laid out after a non-scroll update. The anchor starts
+/// at the first potentially visible row, and GPUI has measured each row as it
+/// enters the viewport, so this walks only the visible rows and the first row
+/// below them. An unknown bound means layout has not measured enough yet; a
+/// later paint will try again.
+fn virtual_list_visible_range(
+    state: &gpui::ListState,
+    logical_count: usize,
+    estimated_item_height: Option<f32>,
+) -> Option<std::ops::Range<usize>> {
+    if logical_count == 0 {
+        return Some(0..0);
+    }
+
+    let scroll_top = state.logical_scroll_top();
+    if scroll_top.item_ix >= logical_count {
+        return estimated_virtual_list_visible_range(
+            state,
+            logical_count,
+            estimated_item_height,
+        );
+    }
+
+    let mut start = scroll_top.item_ix;
+    while start > 0 {
+        match state.item_is_above_viewport(start) {
+            Some(true) => start -= 1,
+            Some(false) => break,
+            None => {
+                return estimated_virtual_list_visible_range(
+                    state,
+                    logical_count,
+                    estimated_item_height,
+                );
+            }
+        }
+    }
+
+    let mut end = start;
+    while end < logical_count {
+        let Some(below) = state.item_is_below_viewport(end) else {
+            return estimated_virtual_list_visible_range(
+                state,
+                logical_count,
+                estimated_item_height,
+            );
+        };
+        end += 1;
+        if below {
+            break;
+        }
+    }
+    Some(start..end)
+}
+
+fn estimated_virtual_list_visible_range(
+    state: &gpui::ListState,
+    logical_count: usize,
+    estimated_item_height: Option<f32>,
+) -> Option<std::ops::Range<usize>> {
+    estimated_virtual_list_visible_range_for_height(
+        state,
+        logical_count,
+        estimated_item_height,
+        state.viewport_bounds().size.height,
+    )
+}
+
+fn estimated_virtual_list_visible_range_for_height(
+    state: &gpui::ListState,
+    logical_count: usize,
+    estimated_item_height: Option<f32>,
+    viewport_height: gpui::Pixels,
+) -> Option<std::ops::Range<usize>> {
+    let height = estimated_item_height.filter(|height| *height > 0.0)?;
+    let scroll_top = state.logical_scroll_top();
+    if scroll_top.item_ix >= logical_count {
+        let viewport_height = f32::from(viewport_height).max(0.0);
+        let rows_in_view = (viewport_height / height).ceil() as usize;
+        return Some(logical_count.saturating_sub(rows_in_view)..logical_count);
+    }
+    let viewport_height = f32::from(viewport_height).max(0.0);
+    let rows_in_view = ((f32::from(scroll_top.offset_in_item).max(0.0) + viewport_height) / height)
+        .floor() as usize
+        + 1;
+    let start = scroll_top.item_ix;
+    Some(start..start.saturating_add(rows_in_view).min(logical_count))
 }
 
 fn window_size(window: &gpui::Window) -> WindowSize {

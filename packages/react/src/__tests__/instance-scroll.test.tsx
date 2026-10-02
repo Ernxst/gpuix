@@ -93,6 +93,43 @@ describeNative("host instance scroll properties", () => {
     expect(testRoot.renderer.getScrollOffset(scroller.id)).toEqual([0, -40])
   })
 
+  it("reports scroll when a content update clamps the position", async () => {
+    const scrollPositions: number[] = []
+    const scrollerRef = React.createRef<PublicInstance>()
+    let contentHeight = 400
+
+    function ScrollBox() {
+      return (
+        <div
+          ref={scrollerRef}
+          data-testid="clamped-scroller"
+          style={{ width: 200, height: 100, overflowY: "scroll" }}
+          onScroll={(event) => scrollPositions.push(event.currentTarget.scrollTop)}
+        >
+          <div style={{ height: contentHeight, flexShrink: 0 }}>
+            <text>scrollable</text>
+          </div>
+        </div>
+      )
+    }
+
+    testRoot.render(<ScrollBox />)
+    const scroller = scrollerRef.current!
+    testRoot.renderer.scrollTo(scroller.id, 0, -300)
+    testRoot.renderer.flush()
+    testRoot.renderer.dispatchNativeEvents()
+    expect(scroller.scrollTop).toBe(300)
+    expect(scrollPositions).toContain(300)
+
+    contentHeight = 80
+    testRoot.render(<ScrollBox />)
+    await testRoot.waitFor(() => {
+      testRoot.renderer.dispatchNativeEvents()
+      expect(scroller.scrollTop).toBe(0)
+      expect(scrollPositions.at(-1)).toBe(0)
+    }, { timeout: 5_000 })
+  })
+
   it("reports a viewport for an element that cannot scroll", () => {
     const ref = React.createRef<PublicInstance>()
 

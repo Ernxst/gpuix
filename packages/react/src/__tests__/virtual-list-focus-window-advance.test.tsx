@@ -260,6 +260,7 @@ describeNative("<virtual-list> cross-window focus navigation", () => {
               overflowY: "scroll",
             }}
             onVisibleRange={(event) => {
+              if ((event.endIndex ?? 0) <= end) return
               const next = Math.max(0, Math.floor(event.startIndex ?? 0) - 2)
               release.current = () => setStart((current) => (current === next ? current : next))
             }}
@@ -567,6 +568,7 @@ describeNative("<virtual-list> cross-window focus navigation", () => {
             overflowY: "scroll",
           }}
           onVisibleRange={(event) => {
+            if ((event.endIndex ?? 0) <= end) return
             const next = Math.max(0, (event.endIndex ?? 1) - 1)
             setStart((current) => (current === next ? current : next))
           }}
@@ -783,6 +785,7 @@ describeNative("<virtual-list> cross-window focus navigation", () => {
             overflowY: "scroll",
           }}
           onVisibleRange={(event) => {
+            if ((event.endIndex ?? 0) <= end) return
             const next = Math.max(0, Math.floor(event.startIndex ?? 0) - 2)
             releases.push(() => setStart((current) => (current === next ? current : next)))
           }}
@@ -821,7 +824,9 @@ describeNative("<virtual-list> cross-window focus navigation", () => {
       screen.renderer.focusNext()
       screen.renderer.flush()
       screen.renderer.drawPendingFrame()
-      expect(releases).toHaveLength(1)
+      // A real viewport-range change may also ask the app to widen its
+      // window before the deferred focus request is released.
+      expect(releases.length).toBeGreaterThan(0)
 
       // A real, unrelated wheel scroll happens before the app ever builds
       // Button 20 — this is what supersedes the pending request, regardless

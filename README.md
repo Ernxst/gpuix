@@ -2230,6 +2230,12 @@ function MessageList({ messages }: { messages: Message[] }) {
 }
 ```
 
+`onVisibleRange` runs when the visible logical range changes, including after
+the item count, mounted window, row-height estimate, or viewport size changes.
+It does not run again when an update leaves the range unchanged. For example,
+shrinking a list while scrolled near its end clamps the scroll position and
+reports the new range so a windowed list can mount the rows now in view.
+
 `role` and ARIA props on `<virtual-list>` project an accessibility node exactly
 as they do on a `<div>`. Use `role="list"` on the list and `role="listitem"` on
 its rows to match the react-dom equivalent of `<ul>` and `<li>`.

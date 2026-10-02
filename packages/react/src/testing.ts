@@ -3409,6 +3409,10 @@ export function createTestRoot(options: TestRootOptions = {}): TestRoot {
     actSync(reportRootError, () => root.render(node))
     // Trigger GPUI rendering pipeline after the React commit and its effects.
     renderer.flush()
+    // Native events produced by that render (for example, a virtual list's
+    // visible range after its item count changes) are part of the committed
+    // update. Deliver them before render returns, as the live renderer does.
+    renderer.dispatchNativeEvents()
   }
 
   const unmount = (): void => {
