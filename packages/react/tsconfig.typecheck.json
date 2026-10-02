@@ -13,7 +13,6 @@
     { "path": "./type-tests/select-parity/tsconfig.gpuix.json" },
     { "path": "./type-tests/combobox-parity/tsconfig.base-ui.json" },
     { "path": "./type-tests/combobox-parity/tsconfig.gpuix.json" },
-    { "path": "./type-tests/webgpu/tsconfig.json" },
-    { "path": "./type-tests/webgpu/tsconfig.with-types.json" }
+    { "path": "./type-tests/webgpu/tsconfig.json" }
   ]
 }

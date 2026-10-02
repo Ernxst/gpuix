@@ -2,12 +2,6 @@
   "$schema": "./node_modules/syncpack/schema.json",
   "versionGroups": [
     {
-      "label": "@gpuix/react stays on TypeScript 5: its WebGPU type tests load @webgpu/types, which clashes with the WebGPU declarations in TypeScript 7's DOM library",
-      "dependencies": ["typescript"],
-      "packages": ["@gpuix/react"],
-      "pinVersion": "5.9.3"
-    },
-    {
       "label": "Peer dependencies are ranges that consumers satisfy",
       "dependencyTypes": ["peer"],
       "isIgnored": true
