@@ -90,6 +90,38 @@ describeNative("Tooltip Base UI parity tree", () => {
     testRoot.unmount()
   })
 
+  it("keeps a focus-opened tooltip open while focus moves inside a rendered trigger", async () => {
+    const testRoot = createTestRoot()
+    let first: PublicInstance | null = null
+    let second: PublicInstance | null = null
+    const openChanges: boolean[] = []
+
+    testRoot.render(
+      <Tooltip.Root onOpenChange={(open) => openChanges.push(open)}>
+        <Tooltip.Trigger tabIndex={-1} render={
+          <div style={{ width: 200, height: 60 }}>
+            <button ref={(instance) => { first = instance }} type="button">First control</button>
+            <button ref={(instance) => { second = instance }} type="button">Second control</button>
+          </div>
+        } />
+        <Tooltip.Portal>
+          <Tooltip.Positioner>
+            <Tooltip.Popup>Composite tooltip</Tooltip.Popup>
+          </Tooltip.Positioner>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    )
+
+    await testRoot.userEvent.tab()
+    expect(testRoot.renderer.getActiveElement()).toBe(first!.id)
+    expect(testRoot.renderer.findByText("Composite tooltip")).toBeDefined()
+    await testRoot.userEvent.tab()
+    expect(testRoot.renderer.getActiveElement()).toBe(second!.id)
+    expect(testRoot.renderer.findByText("Composite tooltip")).toBeDefined()
+    expect(openChanges).not.toContain(false)
+    testRoot.unmount()
+  })
+
   it("closes a rendered trigger's focus-opened tooltip on Shift+Tab despite closeDelay", async () => {
     const testRoot = createTestRoot()
 

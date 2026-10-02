@@ -40,6 +40,11 @@ export interface TooltipChangeEventDetails {
   preventUnmountOnClose: () => void
 }
 
+function focusRemainsWithinTrigger(trigger: PublicInstance): boolean {
+  const activeElement = trigger.ownerDocument.activeElement
+  return activeElement !== null && trigger.contains(activeElement as PublicInstance)
+}
+
 export interface TooltipRootActions {
   unmount: () => void
   close: () => void
@@ -614,8 +619,9 @@ const TooltipTriggerInRoot = forwardRef<PublicInstance, TooltipTriggerProps>(fun
     },
     onBlur: (event: GpuixSyntheticEvent) => {
       onBlur?.(event as never)
-      if (context.instant === "focus") context.close("trigger-focus", event)
-      else context.scheduleClose(closeDelay ?? provider.closeDelay, "trigger-focus", event)
+      if (context.instant === "focus") {
+        if (!focusRemainsWithinTrigger(event.currentTarget)) context.close("trigger-focus", event)
+      } else context.scheduleClose(closeDelay ?? provider.closeDelay, "trigger-focus", event)
     },
     onMouseDown: (event: GpuixSyntheticEvent) => {
       onMouseDown?.(event as never)
@@ -710,8 +716,9 @@ const TooltipTriggerWithHandle = forwardRef<PublicInstance, TooltipTriggerProps>
     },
     onBlur: (event: GpuixSyntheticEvent) => {
       onBlur?.(event as never)
-      if (focusOpened.current && isOpen) closeTooltipHandleWithReason(activeHandle, "trigger-focus", event)
-      else scheduleTooltipHandleClose(activeHandle, closeDelay ?? provider.closeDelay, "trigger-focus", event)
+      if (focusOpened.current && isOpen) {
+        if (!focusRemainsWithinTrigger(event.currentTarget)) closeTooltipHandleWithReason(activeHandle, "trigger-focus", event)
+      } else scheduleTooltipHandleClose(activeHandle, closeDelay ?? provider.closeDelay, "trigger-focus", event)
     },
     onMouseDown: (event: GpuixSyntheticEvent) => {
       onMouseDown?.(event as never)
