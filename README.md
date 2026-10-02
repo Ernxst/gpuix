@@ -104,16 +104,16 @@ bun add -d @types/react typescript
 
 Release versions follow semver with a fixed `-fork` suffix, and all three packages share the same
 exact version. Pin the React and plugins tarballs from one release and override `@gpuix/native` to
-that release's tarball. For example, `0.26.2-fork` uses this tag and these package URLs:
+that release's tarball. For example, `0.27.0-fork` uses this tag and these package URLs:
 
 ```json
 {
   "dependencies": {
-    "@gpuix/react": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.2-fork/gpuix-react-0.26.2-fork.tgz",
-    "@gpuix/plugins": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.2-fork/gpuix-plugins-0.26.2-fork.tgz"
+    "@gpuix/react": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.27.0-fork/gpuix-react-0.27.0-fork.tgz",
+    "@gpuix/plugins": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.27.0-fork/gpuix-plugins-0.27.0-fork.tgz"
   },
   "overrides": {
-    "@gpuix/native": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.2-fork/gpuix-native-0.26.2-fork.tgz"
+    "@gpuix/native": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.27.0-fork/gpuix-native-0.27.0-fork.tgz"
   }
 }
 ```
@@ -322,7 +322,7 @@ bun build --compile --production --external '*.node' app-entry.ts --outfile dist
 
 `cargo packager`'s `binaries` config wraps a binary as-is; it does not know
 about the addon. After packing, copy the addon your platform loads (the file
-under `packages/native/*.node`, or `node_modules/@gpuix/native/` in an
+under `packages/native/dist/*.node`, or `node_modules/@gpuix/native/dist/` in an
 installed app) into the bundle yourself. Sign the nested addon first and the
 app second; cargo-packager may already have signed the app before the addon was
 added:
@@ -756,7 +756,7 @@ prevented Tab or Shift+Tab keydown likewise keeps focus on the current element.
 
 Pin `@gpuix/native`, `@gpuix/react`, and `@gpuix/plugins` to the **same exact
 release version**. Versions follow semver with a fixed `-fork` suffix, such as
-`0.26.2-fork`; React pins native and plugins pins React. GPUIX is still pre-1.0.
+`0.27.0-fork`; React pins native and plugins pins React. GPUIX is still pre-1.0.
 Breaking changes can land before v1, so upgrade all three together.
 
 ## Building

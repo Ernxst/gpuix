@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.27.0-fork
+
+**Breaking:** `@gpuix/native` now ships its addon, loader and declarations in `dist/`. Imports from `@gpuix/native` are unchanged. Scripts that copy the addon by path must now read it from `node_modules/@gpuix/native/dist/` ([PR #829](https://github.com/galaxiajs/gpuix/pull/829)).
+
+1. **Rounded Select, Combobox and Tooltip popups no longer show square corners.** The native fallback background is painted on the rounded popup surface ([#858](https://github.com/galaxiajs/gpuix/issues/858), [PR #867](https://github.com/galaxiajs/gpuix/pull/867)).
+2. **Select and Combobox keep keyboard highlights visible in scrolled lists.** Pointer hover no longer moves the Select popup or highlights the wrong row; keyboard navigation scrolls the highlighted row into view ([#863](https://github.com/galaxiajs/gpuix/issues/863), [#864](https://github.com/galaxiajs/gpuix/issues/864), [PR #868](https://github.com/galaxiajs/gpuix/pull/868)).
+3. **Focus-opened Tooltips close when Tab moves focus away.** ([#834](https://github.com/galaxiajs/gpuix/issues/834), [PR #842](https://github.com/galaxiajs/gpuix/pull/842))
+4. **Virtual lists report their visible range after `itemCount` changes.** A list now reports the rows visible after a data update clamps its scroll position ([#882](https://github.com/galaxiajs/gpuix/issues/882), [PR #894](https://github.com/galaxiajs/gpuix/pull/894)).
+
+- Trailing spaces at the end of a line no longer push the next word onto another line ([#860](https://github.com/galaxiajs/gpuix/issues/860), [PR #869](https://github.com/galaxiajs/gpuix/pull/869)).
+- `Combobox.List` and `Combobox.Value` function children accept their item and value types ([#839](https://github.com/galaxiajs/gpuix/issues/839), [#840](https://github.com/galaxiajs/gpuix/issues/840), [PR #861](https://github.com/galaxiajs/gpuix/pull/861)).
+- Tooltips now match Base UI for popup composition, change events, accessibility, detached triggers and positioning ([#845](https://github.com/galaxiajs/gpuix/issues/845), [#846](https://github.com/galaxiajs/gpuix/issues/846), [#847](https://github.com/galaxiajs/gpuix/issues/847), [#848](https://github.com/galaxiajs/gpuix/issues/848), [#849](https://github.com/galaxiajs/gpuix/issues/849), [#851](https://github.com/galaxiajs/gpuix/issues/851), [#852](https://github.com/galaxiajs/gpuix/issues/852), [#853](https://github.com/galaxiajs/gpuix/issues/853), [#856](https://github.com/galaxiajs/gpuix/issues/856), [#857](https://github.com/galaxiajs/gpuix/issues/857), [#862](https://github.com/galaxiajs/gpuix/issues/862), [#885](https://github.com/galaxiajs/gpuix/issues/885), [PR #871](https://github.com/galaxiajs/gpuix/pull/871)).
+
+**Known limitation:** Nested Tooltip triggers inside a custom-rendered `Tooltip.Trigger` remain unsupported ([#859](https://github.com/galaxiajs/gpuix/issues/859)).
+
+## Install
+
+The repository moved to `galaxiajs/gpuix`; GitHub redirects install URLs under `Ernxst/gpuix`. Pin the `@gpuix/native`, `@gpuix/react`, and `@gpuix/plugins` tarballs from the same release. For this release, use the tag `@gpuix/react@0.27.0-fork` (URL-encoded as `%40gpuix/react%400.27.0-fork`) and update all three versioned tarball URLs together.
+
 ## 0.26.2-fork
 
 Select, Tooltip and Combobox popups now keep their collision padding from the window edge, including after switching anchors. This patch also fixes keyboard-focused Tooltip behaviour, aligns Select and component-part types with Base UI, and refreshes Windows shader builds when the compiler path changes.
