@@ -400,6 +400,36 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     await screen.waitFor(() => expect(screen.getByTestId("trigger")).toHaveTextContent(/^$/))
   })
 
+  it("preserves a controlled selection when its removal is cancelled", async () => {
+    function DynamicMenu() {
+      const [visibleItems, setVisibleItems] = useState(items)
+      return (
+        <>
+          <Select.Root
+            value="Dogwood"
+            onValueChange={(_value, details) => details.cancel()}
+          >
+            <Select.Trigger data-testid="trigger"><Select.Value /></Select.Trigger>
+            <Select.Popup><Select.List>
+              {visibleItems.map((item) => <Select.Item key={item} value={item}>{item}</Select.Item>)}
+            </Select.List></Select.Popup>
+          </Select.Root>
+          <button data-testid="remove-dogwood" onClick={() => setVisibleItems((current) => current.filter((item) => item !== "Dogwood"))}>Remove</button>
+          <button data-testid="restore-dogwood" onClick={() => setVisibleItems(items)}>Restore</button>
+        </>
+      )
+    }
+
+    screen.render(<DynamicMenu />)
+    await screen.waitFor(() => expect(screen.getByTestId("trigger")).toHaveTextContent("Dogwood"))
+    const remove = screen.getByTestId("remove-dogwood").getBoundingClientRect()
+    screen.renderer.nativeSimulateClick(remove.left + remove.width / 2, remove.top + remove.height / 2)
+    await screen.waitFor(() => expect(screen.queryByRole("option", { name: "Dogwood" })).toBeNull())
+    const restore = screen.getByTestId("restore-dogwood").getBoundingClientRect()
+    screen.renderer.nativeSimulateClick(restore.left + restore.width / 2, restore.top + restore.height / 2)
+    await screen.waitFor(() => expect(screen.getByTestId("trigger")).toHaveTextContent("Dogwood"))
+  })
+
 
   it("does not mark a selected single value as a placeholder", async () => {
     screen.render(<Menu root={{ defaultValue: "Birch" }} />)
@@ -828,6 +858,9 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     screen.render(<Menu root={{ readOnly: true }} />)
     screen.renderer.nativeSimulateKeyDown(screen.getByTestId("trigger").id, "down")
     await screen.waitFor(() => expect(screen.getByRole("listbox")).toBeInTheDocument())
+    expect(screen.getByRole("option", { name: "Almond" })).not.toHaveAttribute("data-highlighted")
+    screen.renderer.simulateKeystrokes("down")
+    await screen.waitFor(() => expect(screen.getByRole("option", { name: "Almond" })).toHaveAttribute("data-highlighted", ""))
   })
 
   it("opens a read-only Select with Enter", async () => {
@@ -855,7 +888,7 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     expect(onClick).toHaveBeenCalledTimes(1)
   })
 
-  it("skips disabled options during keyboard navigation and wraps at the end", async () => {
+  it("skips disabled options and stops at the last enabled option", async () => {
     screen.render(
       <Select.Root open>
         <Select.Trigger><Select.Value /></Select.Trigger>
@@ -871,7 +904,7 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     screen.renderer.simulateKeystrokes("down")
     await screen.waitFor(() => expect(screen.getByRole("option", { name: "Cedar" })).toHaveAttribute("data-highlighted", ""))
     screen.renderer.simulateKeystrokes("down")
-    await screen.waitFor(() => expect(screen.getByRole("option", { name: "Almond" })).toHaveAttribute("data-highlighted", ""))
+    await screen.waitFor(() => expect(screen.getByRole("option", { name: "Cedar" })).toHaveAttribute("data-highlighted", ""))
     expect(screen.getByRole("option", { name: "Birch" })).not.toHaveAttribute("data-highlighted")
   })
 
@@ -995,7 +1028,7 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     )
     await screen.waitFor(() => expect(screen.getByTestId("popup")).toHaveAttribute("role", "listbox"))
     expect(screen.getByTestId("popup")).toHaveAttribute("aria-multiselectable", "true")
-    expect(screen.getByTestId("trigger")).toHaveAttribute("aria-controls")
+    expect(screen.getByTestId("trigger")).toHaveAttribute("aria-controls", screen.getByTestId("popup").authorId)
     expect(screen.getByTestId("popup")).toHaveAttribute("id")
     expect(screen.getByRole("option", { name: "One" })).toBeInTheDocument()
   })
@@ -1011,7 +1044,7 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     expect(screen.getByTestId("list")).toHaveAttribute("role", "listbox")
     expect(screen.getByTestId("list")).toHaveAttribute("aria-multiselectable", "true")
     expect(screen.getByTestId("popup")).not.toHaveAttribute("aria-multiselectable")
-    expect(screen.getByTestId("trigger")).not.toHaveAttribute("aria-controls")
+    expect(screen.getByTestId("trigger")).toHaveAttribute("aria-controls", screen.getByTestId("list").authorId)
   })
 
   it("does not move focus on close when Popup finalFocus is false", async () => {

@@ -412,12 +412,12 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     if (!nextOpen) closeInteraction.current = event?.type?.toLowerCase().includes("key") ? "keyboard" : event ? "mouse" : "programmatic"
     setOpenState(nextOpen)
     if (nextOpen) {
-      focusSelectedItemOnOpen.current = true
       const rect = triggerRef.current?.getBoundingClientRect()
       if (rect) setPopupPosition({ x: rect.x, y: rect.y + rect.height })
       const selected = items.find(
         (item) => isValueSelected(value, multiple === true, item.value, compareValues) && !item.disabled
       )
+      focusSelectedItemOnOpen.current = selected !== undefined
       if (selected) setActiveItem(selected.id)
       else {
         setActiveItemId(null)
@@ -480,8 +480,8 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     const enabled = items.filter((item) => !item.disabled)
     if (enabled.length === 0) return
     const currentIndex = enabled.findIndex((item) => item.id === activeItemId)
-    const start = currentIndex < 0 ? (delta > 0 ? -1 : 0) : currentIndex
-    const nextIndex = (start + delta + enabled.length) % enabled.length
+    const start = currentIndex < 0 ? (delta > 0 ? -1 : enabled.length) : currentIndex
+    const nextIndex = Math.max(0, Math.min(enabled.length - 1, start + delta))
     setKeyboardActiveItem(enabled[nextIndex])
   }
 
@@ -679,7 +679,7 @@ export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
       ariaLabelledBy: props.ariaLabelledBy ?? props["aria-labelledby"] ?? context.labelId,
       ariaExpanded: context.open,
       ariaHasPopup: "listbox",
-      ariaControls: context.open && !context.listMounted ? context.listId : undefined,
+      ariaControls: context.open ? context.listId : undefined,
       "data-open": context.open ? "" : undefined,
       "data-popup-open": context.open ? "" : undefined,
       "data-pressed": context.open ? "" : undefined,
@@ -731,13 +731,35 @@ export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
         if (event.key === "Escape") {
           if (!event.defaultPrevented) context.setOpen(false, "escape-key", event)
         } else if (event.key === "ArrowDown" || (event.key === "n" && event.modifiers?.ctrl)) {
-          if (!context.open) context.setOpen(true, "trigger-press", event)
-          else context.moveActive(1)
+          if (!context.open) {
+            const selected = context.items.some((item) =>
+              !item.disabled && isValueSelected(context.value, context.multiple, item.value, context.isItemEqualToValue)
+            )
+            context.setOpen(true, "trigger-press", event)
+            if (!context.readOnly && !selected) {
+              const first = context.items.find((item) => !item.disabled)
+              if (first) context.setKeyboardActiveItem(first)
+            }
+          } else context.moveActive(1)
         } else if (event.key === "ArrowUp" || (event.key === "p" && event.modifiers?.ctrl)) {
-          if (!context.open) context.setOpen(true, "trigger-press", event)
-          else context.moveActive(-1)
+          if (!context.open) {
+            const selected = context.items.some((item) =>
+              !item.disabled && isValueSelected(context.value, context.multiple, item.value, context.isItemEqualToValue)
+            )
+            context.setOpen(true, "trigger-press", event)
+            if (!context.readOnly && !selected) {
+              const last = [...context.items].reverse().find((item) => !item.disabled)
+              if (last) context.setKeyboardActiveItem(last)
+            }
+          } else context.moveActive(-1)
         } else if (event.key === "Enter" || event.key === " ") {
-          context.setOpen(!context.open, "trigger-press", event)
+          if (!context.open) {
+            context.setOpen(true, "trigger-press", event)
+          } else {
+            event.preventDefault()
+            const activeItem = context.items.find((item) => item.id === context.activeItemId)
+            if (activeItem) context.selectItem(activeItem, "item-press", event)
+          }
         } else if (event.key.length === 1 && !event.modifiers?.ctrl && !event.modifiers?.alt && !event.modifiers?.cmd) {
           context.typeahead(event.key, event)
         }
@@ -885,6 +907,14 @@ export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
           autoFocus: true,
           onMouseDownOutside: (event: GpuixMouseEvent) => {
             onMouseDownOutside?.(event)
+            const triggerBounds = context.triggerRef.current?.getBoundingClientRect()
+            if (
+              triggerBounds &&
+              event.clientX >= triggerBounds.left &&
+              event.clientX < triggerBounds.right &&
+              event.clientY >= triggerBounds.top &&
+              event.clientY < triggerBounds.bottom
+            ) return
             context.dismissedByOutsidePress.current = true
             queueMicrotask(() => {
               context.dismissedByOutsidePress.current = false
@@ -907,6 +937,7 @@ export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
             } else if (event.key === "End") {
               context.moveActiveTo("last")
             } else if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault()
               const activeItem = context.items.find((item) => item.id === context.activeItemId)
               if (activeItem) context.selectItem(activeItem, "item-press", event)
             } else if (event.key.length === 1 && !event.modifiers?.ctrl && !event.modifiers?.alt && !event.modifiers?.cmd) {
