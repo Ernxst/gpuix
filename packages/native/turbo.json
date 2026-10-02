@@ -75,8 +75,8 @@
         "GPUI_FXC_PATH"
       ]
     },
-    // The same build without `test-support`, which does not compile on Linux.
-    // Keep its inputs and environment in step with `build`.
+    // The same build without `test-support`. Keep its inputs and environment
+    // in step with `build`.
     "build:release": {
       "inputs": [
         "src/**",
@@ -139,6 +139,37 @@
         "VCPKG*",
         "GPUI_FXC_PATH"
       ]
+    },
+    // GPUI's own suite, which the fork's patches to `zed` can break. It takes
+    // minutes, so it is a task of its own and `test` leaves it out. It reruns
+    // when the submodule changes.
+    "test:gpui": {
+      "inputs": [
+        "$TURBO_ROOT$/zed/**",
+        "!$TURBO_ROOT$/zed/.git",
+        "!$TURBO_ROOT$/zed/**/.DS_Store"
+      ],
+      "outputs": [],
+      "env": [
+        "RUNNER_OS",
+        "RUNNER_ARCH",
+        "CARGO*",
+        "!CARGO",
+        "!CARGO_HOME",
+        "!CARGO_TARGET_DIR",
+        "RUST*",
+        "!RUSTUP_HOME",
+        "MACOSX_*"
+      ],
+      "passThroughEnv": [
+        "CARGO",
+        "CARGO_HOME",
+        "CARGO_TARGET_DIR",
+        "RUSTUP_HOME",
+        "SDKROOT",
+        "DEVELOPER_DIR"
+      ],
+      "description": "Run GPUI's own tests in the zed submodule."
     },
     "build:debug": {
       "cache": false,

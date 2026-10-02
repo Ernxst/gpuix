@@ -19,6 +19,7 @@
     "lint:dependencies": "syncpack lint",
     "---------------------------------------------------------------------------------": "",
     "test": "turbo run test --concurrency=1",
+    "test:gpui": "turbo run test:gpui",
     "test:watch": "vitest --project '!*(perf)' --project '!*(wpt)'",
     "test:coverage": "vitest run --coverage --project '!*(perf)' --project '!*(wpt)'",
     "----------------------------------------------------------------------------------": ""

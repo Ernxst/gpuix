@@ -26,6 +26,9 @@ env:
   CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
   CARGO_UNSTABLE_SPARSE_REGISTRY: "true"
   RUST_BACKTRACE: short
+  # Each `turbo run` writes what its tasks cost to .turbo/runs, which the
+  # turbo-summary action reports.
+  TURBO_RUN_SUMMARY: "true"
 
 permissions: {}
 
@@ -53,6 +56,44 @@ jobs:
 
       - name: Lint dependencies
         run: bunx turbo run "//#lint:dependencies"
+
+  affected:
+    name: Affected
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      tasks: ${{ steps.affected.outputs.tasks }}
+    steps:
+      # Two commits deep: a pull request's merge commit and its first parent,
+      # the base. The `zed` submodule stays out, because a change to it shows
+      # as a change to the path `zed` in this repository.
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Setup bun
+        if: github.event_name == 'pull_request'
+        uses: ./.github/actions/bun
+
+      # The tasks whose inputs the pull request changes. When there are none,
+      # the jobs below are skipped. Nothing under .github is a task's input,
+      # yet a change there changes how every task runs here, so it counts as
+      # all of them. So does a run that is not for a pull request.
+      - name: List the affected tasks
+        id: affected
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != pull_request ] || ! git diff --quiet HEAD^1 HEAD -- .github; then
+            tasks=all
+          else
+            tasks=$(bunx turbo query affected --tasks build typecheck test test:gpui --base HEAD^1 --head HEAD | jq -r '[.data.affectedTasks.items[].fullName] | join(" ")')
+          fi
+          echo "Affected: ${tasks:-nothing}"
+          echo "tasks=$tasks" >> "$GITHUB_OUTPUT"
 
   typecheck:
     name: Typecheck
@@ -89,8 +130,16 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
+      - name: Report the turbo runs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/turbo-summary
+        with:
+          name: turbo-runs-typecheck
+
   build:
     name: Build (${{ matrix.os }})
+    needs: affected
+    if: needs.affected.outputs.tasks != ''
     strategy:
       fail-fast: false
       matrix:
@@ -171,6 +220,12 @@ jobs:
       - name: Build
         run: bun run build
 
+      - name: Report the turbo runs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/turbo-summary
+        with:
+          name: turbo-runs-build-${{ matrix.os }}
+
   test:
     name: Test (${{ matrix.os }}, ${{ matrix.part.name }})
     # Waits for the build so the packages come from the cache.
@@ -178,16 +233,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Linux has no test renderer, so packages/react/vitest.config.ts leaves
-        # out the files that need one.
-        #
         # Windows stays on a GitHub-hosted runner. The test renderer opens a
         # real DirectX window, which needs an interactive desktop session, and
         # Blacksmith runs its Windows agent as a service in session 0, where
         # creating the DirectX renderer fails.
         os:
           - macos-latest
-          - blacksmith-4vcpu-ubuntu-2404
           - windows-latest
         # React's suite is most of the test time, so it runs as three shards on
         # separate runners. The other packages share one.
@@ -203,6 +254,14 @@ jobs:
             filter: --filter=@gpuix/react
           - name: others
             filter: --filter=!@gpuix/react
+        # Linux has no test renderer, so packages/react/vitest.config.ts leaves
+        # out the files that need one. What remains takes seconds, so one
+        # runner tests every package.
+        include:
+          - os: blacksmith-4vcpu-ubuntu-2404
+            part:
+              name: all
+              filter: ""
     runs-on: ${{ matrix.os }}
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
@@ -255,13 +314,24 @@ jobs:
         shell: bash
         run: bunx turbo run test ${{ matrix.part.filter }} --concurrency=1 --continue=dependencies-successful
 
+      - name: Report the turbo runs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/turbo-summary
+        with:
+          name: turbo-runs-test-${{ matrix.os }}-${{ strategy.job-index }}
+
   test-gpui:
     name: Test GPUI (macos)
-    # GPUI's own suite takes about eight minutes, so it runs on request.
-    if: github.event_name == 'workflow_dispatch'
+    # GPUI's own suite takes about eight minutes. Its inputs are the `zed`
+    # submodule, so turbo replays the result until the submodule changes.
+    needs: affected
+    if: needs.affected.outputs.tasks == 'all' || contains(needs.affected.outputs.tasks, '@gpuix/native#test:gpui')
     runs-on: macos-latest
     permissions:
       contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
     steps:
       - name: Clone repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -269,9 +339,28 @@ jobs:
           persist-credentials: false
           submodules: recursive
 
+      - name: Setup bun
+        uses: ./.github/actions/bun
+
+      - name: Check the turbo cache
+        id: cache
+        uses: ./.github/actions/turbo-cache
+        with:
+          args: test:gpui
+
       - name: Setup rust
+        if: steps.cache.outputs.misses != ''
         uses: ./.github/actions/rust
 
+      - name: Setup macos
+        if: steps.cache.outputs.misses != ''
+        uses: ./.github/actions/macos
+
       - name: Test GPUI
-        run: cargo test -p gpui
-        working-directory: zed
+        run: bun run test:gpui
+
+      - name: Report the turbo runs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/turbo-summary
+        with:
+          name: turbo-runs-test-gpui
