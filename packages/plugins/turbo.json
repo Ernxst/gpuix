@@ -1,0 +1,24 @@
+{
+  "$schema": "../../node_modules/turbo/schema.json",
+  "extends": [
+    "//"
+  ],
+  "tasks": {
+    "build": {
+      "inputs": [
+        "src/**",
+        "!src/**/*.test.ts",
+        "tsdown.config.ts",
+        "tsconfig.json"
+      ]
+    },
+    // `src/skill.test.ts` checks the lists in the agent skill against the
+    // source, so the skill's files are inputs too.
+    "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/skills/gpuix/**"
+      ]
+    }
+  }
+}

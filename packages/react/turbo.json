@@ -4,6 +4,20 @@
     "//"
   ],
   "tasks": {
+    // What `tsc` compiles, and the JSX runtime files the package ships beside
+    // `dist`. Tests, golden images and type tests stay out, so an edit to one
+    // does not rebuild the packages built on React.
+    "build": {
+      "inputs": [
+        "src/**",
+        "!src/__tests__/**",
+        "tsconfig.json",
+        "jsx-runtime.js",
+        "jsx-runtime.d.ts",
+        "jsx-dev-runtime.js",
+        "jsx-dev-runtime.d.ts"
+      ]
+    },
     // The parity type tests resolve `@gpuix/react/*` to this package's own
     // declarations in `dist`, so the typecheck needs this package built too.
     "typecheck": {
@@ -11,6 +25,15 @@
         "build"
       ],
       "outputs": []
+    },
+    // Some tests compile CSS modules with the plugins package's source, which
+    // React does not depend on.
+    "test": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/packages/plugins/src/**",
+        "!$TURBO_ROOT$/packages/plugins/src/**/*.test.ts"
+      ]
     }
   }
 }

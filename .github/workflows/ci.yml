@@ -1,10 +1,28 @@
 name: CI
 
+# A change that touches only the excluded paths starts no run, because no task
+# reads them. The plugins tests read `skills/`, so its Markdown stays in.
 on:
   push:
     branches:
       - main
+    paths:
+      - "**"
+      - "!**.md"
+      - "!docs/**"
+      - "!.changeset/**"
+      - "!website/**"
+      - "!.agents/**"
+      - "skills/**"
   pull_request:
+    paths:
+      - "**"
+      - "!**.md"
+      - "!docs/**"
+      - "!.changeset/**"
+      - "!website/**"
+      - "!.agents/**"
+      - "skills/**"
   workflow_dispatch:
 
 concurrency:

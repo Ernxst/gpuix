@@ -5,9 +5,11 @@
   ],
   "tasks": {
     // Inputs name what Cargo compiles. An edit to the README, the Rust examples
-    // or the browser files leaves the addon's hash alone. The submodule's `.git`
-    // file holds a path that differs in every worktree, so it stays out, or no
-    // two worktrees would share a build.
+    // or the browser files leaves the addon's hash alone. From the `zed`
+    // submodule Cargo reads the workspace manifest, the crates the addon
+    // depends on by path, which live under `crates` and `tooling`, and the
+    // fonts GPUI embeds from `assets`. A dependency on a crate anywhere else
+    // in `zed` needs its directory added here.
     "build": {
       "inputs": [
         "src/**",
@@ -17,9 +19,10 @@
         ".cargo/**",
         ".mbx.toml",
         "$TURBO_ROOT$/rust-toolchain.toml",
-        "$TURBO_ROOT$/zed/**",
-        "!$TURBO_ROOT$/zed/.git",
-        "!$TURBO_ROOT$/zed/**/.DS_Store",
+        "$TURBO_ROOT$/zed/Cargo.toml",
+        "$TURBO_ROOT$/zed/crates/**",
+        "$TURBO_ROOT$/zed/tooling/**",
+        "$TURBO_ROOT$/zed/assets/**",
         "!**/.DS_Store"
       ],
       "outputs": [
@@ -86,9 +89,10 @@
         ".cargo/**",
         ".mbx.toml",
         "$TURBO_ROOT$/rust-toolchain.toml",
-        "$TURBO_ROOT$/zed/**",
-        "!$TURBO_ROOT$/zed/.git",
-        "!$TURBO_ROOT$/zed/**/.DS_Store",
+        "$TURBO_ROOT$/zed/Cargo.toml",
+        "$TURBO_ROOT$/zed/crates/**",
+        "$TURBO_ROOT$/zed/tooling/**",
+        "$TURBO_ROOT$/zed/assets/**",
         "!**/.DS_Store"
       ],
       "outputs": [
@@ -145,9 +149,14 @@
     // when the submodule changes.
     "test:gpui": {
       "inputs": [
-        "$TURBO_ROOT$/zed/**",
-        "!$TURBO_ROOT$/zed/.git",
-        "!$TURBO_ROOT$/zed/**/.DS_Store"
+        "$TURBO_ROOT$/zed/Cargo.toml",
+        "$TURBO_ROOT$/zed/Cargo.lock",
+        "$TURBO_ROOT$/zed/rust-toolchain.toml",
+        "$TURBO_ROOT$/zed/.cargo/**",
+        "$TURBO_ROOT$/zed/crates/**",
+        "$TURBO_ROOT$/zed/tooling/**",
+        "$TURBO_ROOT$/zed/assets/**",
+        "!**/.DS_Store"
       ],
       "outputs": [],
       "env": [
@@ -181,9 +190,10 @@
         ".cargo/**",
         ".mbx.toml",
         "$TURBO_ROOT$/rust-toolchain.toml",
-        "$TURBO_ROOT$/zed/**",
-        "!$TURBO_ROOT$/zed/.git",
-        "!$TURBO_ROOT$/zed/**/.DS_Store",
+        "$TURBO_ROOT$/zed/Cargo.toml",
+        "$TURBO_ROOT$/zed/crates/**",
+        "$TURBO_ROOT$/zed/tooling/**",
+        "$TURBO_ROOT$/zed/assets/**",
         "!**/.DS_Store"
       ],
       "passThroughEnv": [

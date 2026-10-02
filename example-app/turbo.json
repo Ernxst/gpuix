@@ -4,6 +4,15 @@
     "//"
   ],
   "tasks": {
+    // What `bun build` bundles: the app, the icons it imports and the JSX
+    // settings in `tsconfig.json`.
+    "build": {
+      "inputs": [
+        "app.tsx",
+        "assets/**",
+        "tsconfig.json"
+      ]
+    },
     "dev": {
       // A rebuilt addon cannot be loaded into a running process, so
       // `turbo watch` restarts the app when the native build reruns.
