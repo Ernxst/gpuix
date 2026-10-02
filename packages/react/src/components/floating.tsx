@@ -126,6 +126,7 @@ export function useDismissLayer(open: boolean): (event?: GpuixSyntheticEvent) =>
 
 export interface FloatingPopupProps extends Omit<Props, "children"> {
   children?: ReactNode
+  fallbackBackground?: boolean
   position?: { x: number; y: number }
   side?: FloatingSide
   sideOffset?: number
@@ -173,6 +174,36 @@ export function mergeStyles(
   if (!base) return override
   if (!override) return base
   return { ...base, ...override }
+}
+
+/** Put the default floating fill on the popup surface so its radius clips it. */
+export function floatingPopupStyle(
+  style?: StyleDesc,
+  className?: string
+): StyleDesc | undefined {
+  const classStyle = isCompiledStyle(className) ? className : undefined
+  const stateBackgrounds: Partial<Record<(typeof BACKGROUND_STATES)[number], StyleDesc>> = {}
+  for (const state of BACKGROUND_STATES) {
+    const classState = classStyle?.[state]
+    const inlineState = style?.[state]
+    const background: StyleDesc = {}
+    if (classState?.background !== undefined) background.background = classState.background
+    if (classState?.backgroundColor !== undefined) background.backgroundColor = classState.backgroundColor
+    if (inlineState?.background !== undefined) background.background = inlineState.background
+    if (inlineState?.backgroundColor !== undefined) background.backgroundColor = inlineState.backgroundColor
+    if (Object.keys(background).length > 0) stateBackgrounds[state] = background
+  }
+  const fallback =
+    !hasBackground(style) && !hasBackground(classStyle)
+      ? { backgroundColor: "#1A1A1A" }
+      : undefined
+  const resolved = mergeStyles(fallback, style)
+  if (!resolved) return undefined
+  for (const state of BACKGROUND_STATES) {
+    const background = stateBackgrounds[state]
+    if (background) resolved[state] = mergeStyles(background, resolved[state])
+  }
+  return resolved
 }
 
 export function floatingRootStyle(style?: StyleDesc): StyleDesc {
@@ -397,6 +428,7 @@ export const FloatingLayer = forwardRef<PublicInstance, FloatingPopupProps>(
       align = "start",
       alignOffset = 0,
       collisionPadding = 8,
+      fallbackBackground: useFallbackBackground = true,
       position,
       children,
       ...props
@@ -407,11 +439,10 @@ export const FloatingLayer = forwardRef<PublicInstance, FloatingPopupProps>(
       side === "top" || side === "bottom"
         ? { x: alignOffset, y: 0 }
         : { x: 0, y: alignOffset }
-    const classStyle = isCompiledStyle(props.className) ? props.className : undefined
-    const backgroundFallback =
-      !hasAnyBackground(props.style) && !hasAnyBackground(classStyle)
-        ? { backgroundColor: "#1A1A1A" }
-        : undefined
+    const popupStyle = floatingPopupStyle(props.style, props.className)
+    const contentStyle = useFallbackBackground
+      ? popupStyle
+      : floatingContentStyle(props.style)
 
     return (
       <anchored
@@ -426,11 +457,12 @@ export const FloatingLayer = forwardRef<PublicInstance, FloatingPopupProps>(
         deferred
         priority={1}
         occlude={props.style?.pointerEvents !== "none"}
+        fallbackBackground={false}
       >
         <div
           {...props}
           ref={ref}
-          style={mergeStyles(backgroundFallback, floatingContentStyle(props.style))}
+          style={floatingContentStyle(contentStyle)}
         >
           {children}
         </div>
@@ -737,6 +769,7 @@ export const FloatingPositioner = forwardRef<PublicInstance, PositionerProps>(
         snapMargin={collisionPadding ?? 5}
         deferred
         priority={1}
+        fallbackBackground={false}
       >
         <PositionerStateContext.Provider value={state}>{content}</PositionerStateContext.Provider>
       </anchored>

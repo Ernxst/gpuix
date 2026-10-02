@@ -124,6 +124,7 @@ pub struct AnchoredElement {
     priority: usize,
     occlude: bool,
     fill_window: bool,
+    fallback_background: bool,
 }
 
 impl Default for AnchoredElement {
@@ -141,6 +142,7 @@ impl Default for AnchoredElement {
             priority: 1,
             occlude: true,
             fill_window: false,
+            fallback_background: true,
         }
     }
 }
@@ -333,7 +335,7 @@ impl CustomElement for AnchoredElement {
                     .and_then(|background| crate::style::parse_background(background).ok())
                     .is_some_and(|background| !background.is_transparent())
         });
-        if !has_fill {
+        if !has_fill && self.fallback_background {
             content = content.bg(gpui::rgb(0x1A1A1A));
         }
         if self.occlude {
@@ -450,6 +452,9 @@ impl CustomElement for AnchoredElement {
             }
             "occlude" => self.occlude = value.as_bool().unwrap_or(true),
             "fill" => self.fill_window = value.as_str() == Some("window"),
+            "fallbackBackground" => {
+                self.fallback_background = value.as_bool().unwrap_or(true)
+            }
             _ => {}
         }
     }
@@ -468,6 +473,7 @@ impl CustomElement for AnchoredElement {
             "priority",
             "occlude",
             "fill",
+            "fallbackBackground",
         ]
     }
 

@@ -3985,15 +3985,17 @@ markdown through the menu, and clicks hit the text behind it.
 ```
 
 Give every overlay an **opaque** fill (`#232323`, not `#23232399`).
-`FloatingLayer` defaults to `#1A1A1A` only when neither `style` nor a compiled
-`className` sets a background. A background set by either takes precedence.
+Built-in floating popups default to `#1A1A1A` only when neither `style` nor a
+compiled `className` sets a background. The fallback is painted on the popup
+surface, where its border radius clips it; a background set by either takes
+precedence. A direct `<anchored>` element keeps its own `#1A1A1A` fallback.
 Item rows should use the same solid color, or a solid hover color. A
 `#00000000` child on a blurred window punches through Metal to the desktop.
 
-`FloatingLayer` copies uniform and per-corner border radii to its anchored
-surface, so rounded Select, Combobox, and Tooltip content does not show square
-corners behind it. It also puts `visibility` and `opacity` on that outer surface
-so the fallback fill follows them without multiplying nested opacity.
+`FloatingLayer` puts the fallback on the popup surface, where the popup's own
+radius clips it. It also puts `visibility` and `opacity` on that surface so the
+fallback follows them without multiplying nested opacity. Uniform and
+per-corner radii still propagate to the anchored surface for its hit area.
 `pointerEvents: "none"` disables the anchored occluder. Backgrounds, borders,
 shadows, overflow, and layout remain on the inner content to avoid double paint
 or changed popup geometry.
