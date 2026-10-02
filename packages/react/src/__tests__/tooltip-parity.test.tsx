@@ -89,11 +89,12 @@ describeNative("Tooltip Base UI parity tree", () => {
   it.each(["sideOffset", "alignOffset"] as const)("reads the resolved align inside Tooltip.Positioner %s", async (offsetName) => {
     let resolvedAlign = "none"
     await readPositionerBounds({
+      side: "right",
+      triggerTop: 0,
       align: "start",
-      triggerLeft: 550,
       [offsetName]: (data) => { resolvedAlign = data.align; return 0 },
     })
-    expect(["start", "end"]).toContain(resolvedAlign)
+    expect(resolvedAlign).toBe("end")
   })
 
   it("renders Tooltip.Popup children inside the positioner", () => {

@@ -67,6 +67,10 @@ function isEnabledNestedTrigger(currentTarget: PublicInstance, target: PublicIns
   return false
 }
 
+function hasEnabledNestedTriggerFocused(currentTarget: PublicInstance): boolean {
+  return isEnabledNestedTrigger(currentTarget, currentTarget.ownerDocument.activeElement as PublicInstance | null)
+}
+
 export type TooltipChangeEventReason =
   | "trigger-hover"
   | "trigger-focus"
@@ -865,7 +869,7 @@ const TooltipTriggerInRoot = forwardRef<PublicInstance, TooltipTriggerProps>(fun
     },
     onFocus: (event: GpuixSyntheticEvent) => {
       onFocus?.(event as never)
-      if (!disabled && !pointerPressed.current && !isEnabledNestedTrigger(event.currentTarget, event.target)) {
+      if (!disabled && !pointerPressed.current && !isEnabledNestedTrigger(event.currentTarget, event.target) && !hasEnabledNestedTriggerFocused(event.currentTarget)) {
         context.setCloseDelay(closeDelay ?? provider.closeDelay)
         context.openNow("trigger-focus", event, triggerId, payload)
       }
@@ -1027,7 +1031,7 @@ const TooltipTriggerWithHandle = forwardRef<PublicInstance, TooltipTriggerProps>
     },
     onFocus: (event: GpuixSyntheticEvent) => {
       onFocus?.(event as never)
-      if (!disabled && !pointerPressed.current && !isEnabledNestedTrigger(event.currentTarget, event.target)) {
+      if (!disabled && !pointerPressed.current && !isEnabledNestedTrigger(event.currentTarget, event.target) && !hasEnabledNestedTriggerFocused(event.currentTarget)) {
         focusOpened.current = true
         setTooltipHandleCloseDelay(activeHandle, closeDelay ?? provider.closeDelay)
         activateTooltipHandle(activeHandle, triggerId, payload, "trigger-focus", event)
@@ -1111,7 +1115,7 @@ export interface TooltipPositionerProps extends Omit<PositionerProps, "className
 }
 
 export const TooltipPositioner = forwardRef<PublicInstance, TooltipPositionerProps>(function TooltipPositioner(
-  { children, anchor, side = "top", open: openProp, className, style, render, ...props },
+  { children, anchor, side = "top", open: openProp, className, style, render, collisionAvoidance = { align: "flip", fallbackAxisSide: "end" }, ...props },
   ref
 ) {
   const context = useTooltipContext("Tooltip.Positioner")
@@ -1127,6 +1131,7 @@ export const TooltipPositioner = forwardRef<PublicInstance, TooltipPositionerPro
       ref={ref}
       anchor={anchor ?? context.getTrigger(context.activeTriggerId) as unknown as Element | null}
       side={side}
+      collisionAvoidance={collisionAvoidance}
       open={open && !context.forceUnmount}
       className={typeof className === "function" ? (state) => className(applyState(state)) : className}
       style={style === undefined ? (context.disableHoverablePopup ? { pointerEvents: "none" } : undefined) : applyStyle}

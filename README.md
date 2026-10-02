@@ -3954,7 +3954,8 @@ immediately, including when focus moves outside the Provider. Moving focus
 between triggers owned by the same Root keeps its tooltip open; focusing a
 trigger owned by another Root in the same Provider closes the previous tooltip.
 `closeDelay` continues to apply to hover closure. The Positioner follows the
-active rendered Trigger and places the popup on its requested side.
+active rendered Trigger, flips its alignment when the padded boundary requires
+it, and passes that resolved alignment and side to offset callbacks.
 `Tooltip.Popup` must be inside `Tooltip.Positioner`. `onOpenChange` details
 provide `cancel()` and `allowPropagation()` alongside `preventUnmountOnClose()`.
 `Tooltip.Arrow` defaults to `aria-hidden=\"true\"`. Tooltip handles keep their
