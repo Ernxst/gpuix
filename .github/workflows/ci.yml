@@ -16,6 +16,9 @@ env:
   # Fat LTO re-optimises every crate at link time on every build and no cache
   # can skip it. CI builds only feed tests, so they go without it.
   CARGO_PROFILE_RELEASE_LTO: "false"
+  # The LLD that ships with the Rust toolchain links faster than MSVC's
+  # link.exe. Set for every job because the native build's cache key includes it.
+  CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld
   # What the Rust setup action would export. The native build's cache key
   # includes them, so they are set for every job: jobs that skip the Rust setup
   # then restore the build job's addon instead of missing the cache.
