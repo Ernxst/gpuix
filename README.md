@@ -6942,8 +6942,8 @@ Canvas equivalence uses committed Chromium goldens at a fixed 320×240 logical
 size and 2× device-pixel ratio. The Vitest comparison path uses the native PNG
 decoder and needs no browser.
 
-The equivalence suite is a local-macOS gate. Push CI is Linux-only and GPU
-capture is not treated as reliable in virtual machines.
+The equivalence suite is a local-macOS gate. CI skips it, because GPU capture
+is not treated as reliable in virtual machines.
 
 ## Developing the Rust side
 

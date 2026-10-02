@@ -4,7 +4,10 @@
 /// The default build must construct its test renderer on the virtual display
 /// and carry no fault-injection counters. A binding built with
 /// `display-discovery-fault-injection` exports those counters; point
-/// `NAPI_RS_NATIVE_LIBRARY_PATH` at one to run the failed-initialization case.
+/// `GPUIX_FAULT_INJECTION_BINDING` at one to run the failed-initialization
+/// case, as `bun run test:fault-injection` does. The child process loads it
+/// through `NAPI_RS_NATIVE_LIBRARY_PATH`. Vitest's own process must not see
+/// that variable, because rolldown's napi-rs loader reads it too.
 
 import { spawnSync } from "node:child_process"
 import { createRequire } from "node:module"
@@ -12,19 +15,30 @@ import { describe, expect, it } from "vitest"
 import { isNativeTestRendererAvailable } from "../testing.js"
 
 const nativeEntry = createRequire(import.meta.url).resolve("@gpuix/native")
-const faultBinding = Boolean(process.env.NAPI_RS_NATIVE_LIBRARY_PATH)
+const faultBindingPath = process.env.GPUIX_FAULT_INJECTION_BINDING
+const faultBinding = Boolean(faultBindingPath)
 
 const describeMac =
   process.platform === "darwin" && isNativeTestRendererAvailable() ? describe : describe.skip
 
-function runChild(source: string): { status: number | null; output: string } {
+function runChild(source: string): { status: number | null; stdout: string; output: string } {
   const result = spawnSync("bun", ["-e", source], {
     encoding: "utf8",
-    env: { ...process.env, GPUI_TEST_DISABLE_DISPLAY_DISCOVERY: "1" },
+    env: {
+      ...process.env,
+      GPUI_TEST_DISABLE_DISPLAY_DISCOVERY: "1",
+      ...(faultBindingPath ? { NAPI_RS_NATIVE_LIBRARY_PATH: faultBindingPath } : {}),
+    },
     timeout: 15_000,
   })
-  return { status: result.status, output: `${result.stdout}${result.stderr}` }
+  return { status: result.status, stdout: result.stdout, output: `${result.stdout}${result.stderr}` }
 }
+
+// Most of the suite skips itself when the addon has no test renderer, so an
+// addon built without one would pass. Linux has none.
+it.skipIf(process.platform === "linux")("has a test renderer on this platform", () => {
+  expect(isNativeTestRendererAvailable()).toBe(true)
+})
 
 describeMac("native binding without display discovery", () => {
   it("constructs the test renderer on the virtual display", () => {
@@ -81,7 +95,8 @@ describeMac("native binding without display discovery", () => {
         `)
 
         expect(child.status, `attempt ${attempt}\n${child.output}`).toBe(0)
-        const result = JSON.parse(child.output)
+        // The panic that the renderer catches is reported on stderr.
+        const result = JSON.parse(child.stdout)
         expect(result.message).toContain("GPUI macOS renderer initialization")
         expect(result.message).toContain(
           "display discovery disabled by GPUI_TEST_DISABLE_DISPLAY_DISCOVERY",

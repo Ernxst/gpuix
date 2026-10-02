@@ -34,6 +34,21 @@
         "$TURBO_ROOT$/packages/plugins/src/**",
         "!$TURBO_ROOT$/packages/plugins/src/**/*.test.ts"
       ]
+    },
+    // native-binding.test.ts against the macOS addon built with
+    // `display-discovery-fault-injection`, which makes renderer initialisation
+    // fail. The ordinary build supplies the addon's `index.js`.
+    "test:fault-injection": {
+      "dependsOn": [
+        "^build",
+        "@gpuix/native#build:test-fault-injection"
+      ],
+      "inputs": [
+        "src/**",
+        "vitest.config.ts",
+        "tsconfig.json"
+      ],
+      "outputs": []
     }
   }
 }

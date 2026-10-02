@@ -27,6 +27,15 @@ runs:
         args: test ${{ inputs.filter }}
         shard: ${{ inputs.shard }}
 
+    # This job installs no Rust toolchain. Without the addon in the cache,
+    # turbo would compile it with whatever Cargo the runner has.
+    - name: Require the addon from the build job
+      if: contains(steps.cache.outputs.misses, '@gpuix/native#build')
+      shell: bash
+      run: |
+        echo "::error::The turbo cache does not hold the addon this platform's build job stores. Check that the build job wrote to the remote cache."
+        exit 1
+
     - name: Setup node
       if: steps.cache.outputs.misses != ''
       uses: ./.github/actions/node

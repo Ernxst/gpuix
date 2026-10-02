@@ -144,6 +144,143 @@
         "GPUI_FXC_PATH"
       ]
     },
+    // The macOS addon with the counters that
+    // packages/react/src/__tests__/native-binding.test.ts reads when renderer
+    // initialisation fails. It is written beside `dist`, which keeps the
+    // ordinary addon.
+    "build:test-fault-injection": {
+      // Cargo builds one feature set at a time in a target directory.
+      "dependsOn": [
+        "build"
+      ],
+      "inputs": [
+        "src/**",
+        "build.rs",
+        "Cargo.toml",
+        "Cargo.lock",
+        ".cargo/**",
+        ".mbx.toml",
+        "$TURBO_ROOT$/rust-toolchain.toml",
+        "$TURBO_ROOT$/zed/Cargo.toml",
+        "$TURBO_ROOT$/zed/crates/**",
+        "$TURBO_ROOT$/zed/tooling/**",
+        "$TURBO_ROOT$/zed/assets/**",
+        "!**/.DS_Store"
+      ],
+      "outputs": [
+        "test-fault-binding/*"
+      ],
+      "env": [
+        "RUNNER_OS",
+        "RUNNER_ARCH",
+        "CARGO*",
+        "!CARGO",
+        "!CARGO_HOME",
+        "!CARGO_TARGET_DIR",
+        "RUST*",
+        "!RUSTUP_HOME",
+        "!RUSTC_WRAPPER",
+        "!RUSTC_WORKSPACE_WRAPPER",
+        "CC*",
+        "CXX*",
+        "AR*",
+        "CFLAGS*",
+        "CXXFLAGS*",
+        "CPPFLAGS*",
+        "LDFLAGS*",
+        "MACOSX_*",
+        "IPHONEOS_*",
+        "DEPLOYMENT_TARGET*",
+        "VCToolsVersion",
+        "WindowsSDKVersion",
+        "ZIG*",
+        "NAPI_RS_*"
+      ],
+      "passThroughEnv": [
+        "CARGO",
+        "RUSTC_WRAPPER",
+        "RUSTC_WORKSPACE_WRAPPER",
+        "MBX_*",
+        "CARGO_HOME",
+        "CARGO_TARGET_DIR",
+        "RUSTUP_HOME",
+        "SDKROOT",
+        "DEVELOPER_DIR",
+        "VCTOOLS*",
+        "WINDOWSSDK*",
+        "WindowsSdkDir",
+        "INCLUDE",
+        "LIB",
+        "PKG_CONFIG*",
+        "VCPKG*",
+        "GPUI_FXC_PATH"
+      ]
+    },
+    // Compiles the library and the Rust examples without `test-support`, the
+    // feature set `build:release` ships and no other task compiles.
+    "check:no-default-features": {
+      "inputs": [
+        "src/**",
+        "examples/**",
+        "build.rs",
+        "Cargo.toml",
+        "Cargo.lock",
+        ".cargo/**",
+        ".mbx.toml",
+        "$TURBO_ROOT$/rust-toolchain.toml",
+        "$TURBO_ROOT$/zed/Cargo.toml",
+        "$TURBO_ROOT$/zed/crates/**",
+        "$TURBO_ROOT$/zed/tooling/**",
+        "$TURBO_ROOT$/zed/assets/**",
+        "!**/.DS_Store"
+      ],
+      "outputs": [],
+      "env": [
+        "RUNNER_OS",
+        "RUNNER_ARCH",
+        "CARGO*",
+        "!CARGO",
+        "!CARGO_HOME",
+        "!CARGO_TARGET_DIR",
+        "RUST*",
+        "!RUSTUP_HOME",
+        "!RUSTC_WRAPPER",
+        "!RUSTC_WORKSPACE_WRAPPER",
+        "CC*",
+        "CXX*",
+        "AR*",
+        "CFLAGS*",
+        "CXXFLAGS*",
+        "CPPFLAGS*",
+        "LDFLAGS*",
+        "MACOSX_*",
+        "IPHONEOS_*",
+        "DEPLOYMENT_TARGET*",
+        "VCToolsVersion",
+        "WindowsSDKVersion",
+        "ZIG*",
+        "NAPI_RS_*"
+      ],
+      "passThroughEnv": [
+        "CARGO",
+        "RUSTC_WRAPPER",
+        "RUSTC_WORKSPACE_WRAPPER",
+        "MBX_*",
+        "CARGO_HOME",
+        "CARGO_TARGET_DIR",
+        "RUSTUP_HOME",
+        "SDKROOT",
+        "DEVELOPER_DIR",
+        "VCTOOLS*",
+        "WINDOWSSDK*",
+        "WindowsSdkDir",
+        "INCLUDE",
+        "LIB",
+        "PKG_CONFIG*",
+        "VCPKG*",
+        "GPUI_FXC_PATH"
+      ]
+    },
     // GPUI's own suite, which the fork's patches to `zed` can break. It takes
     // minutes, so it is a task of its own and `test` leaves it out. It reruns
     // when the submodule changes.

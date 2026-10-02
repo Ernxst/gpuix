@@ -1,0 +1,28 @@
+{
+  "$schema": "../node_modules/turbo/schema.json",
+  "extends": [
+    "//"
+  ],
+  "tasks": {
+    // tsconfig.test.json also reads the asset declarations in `example-app`.
+    "typecheck": {
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/example-app/assets.d.ts"
+      ],
+      "outputs": []
+    },
+    // The standalone chat binary. It embeds the addon, so the packages it
+    // depends on are built first. The binary is not cached.
+    "compile": {
+      "dependsOn": [
+        "^build"
+      ],
+      "cache": false,
+      "passThroughEnv": [
+        "COMPILE_*"
+      ],
+      "description": "Compile the chat example into a standalone binary."
+    }
+  }
+}

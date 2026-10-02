@@ -54,7 +54,7 @@ jobs:
   lint:
     name: Lint
     runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 1
+    timeout-minutes: 5
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
@@ -158,6 +158,15 @@ jobs:
         uses: ./.github/actions/turbo-cache
         with:
           args: typecheck
+
+      # This job installs no Rust toolchain. Without the addon in the cache,
+      # turbo would compile it with whatever Cargo the runner has.
+      - name: Require the addon from the build job
+        if: contains(steps.cache.outputs.misses, '@gpuix/native#build')
+        shell: bash
+        run: |
+          echo "::error::The turbo cache does not hold the addon this platform's build job stores. Check that the build job wrote to the remote cache."
+          exit 1
 
       - name: Setup macos
         if: steps.cache.outputs.misses != ''
@@ -328,3 +337,177 @@ jobs:
         uses: ./.github/actions/turbo-summary
         with:
           name: turbo-runs-test-gpui
+
+  check-linux:
+    name: Check without default features (Linux)
+    # `build:release` ships the addon without `test-support`, a feature set no
+    # other job compiles. This checks it, and the Rust examples with it.
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Setup bun
+        uses: ./.github/actions/bun
+
+      - name: Check the turbo cache
+        id: cache
+        uses: ./.github/actions/turbo-cache
+        with:
+          args: check:no-default-features
+
+      - name: Setup rust
+        if: steps.cache.outputs.misses != ''
+        uses: ./.github/actions/rust
+
+      - name: Setup linux
+        if: steps.cache.outputs.misses != ''
+        uses: ./.github/actions/linux
+
+      - name: Setup mbx
+        if: steps.cache.outputs.misses != ''
+        uses: ./.github/actions/mbx
+        with:
+          working-directory: packages/native
+
+      - name: Check without default features
+        run: bunx turbo run check:no-default-features
+
+      - name: Report the turbo runs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/turbo-summary
+        with:
+          name: turbo-runs-check-linux
+
+  test-fault-injection:
+    name: Test fault injection (macOS)
+    # Runs native-binding.test.ts against an addon built to fail renderer
+    # initialisation. The ordinary addon's `index.js` loads it, so this waits
+    # for the macOS build.
+    needs: build-macos
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Setup bun
+        uses: ./.github/actions/bun
+
+      - name: Check the turbo cache
+        id: cache
+        uses: ./.github/actions/turbo-cache
+        with:
+          args: test:fault-injection
+
+      - name: Setup node
+        if: steps.cache.outputs.misses != ''
+        uses: ./.github/actions/node
+
+      - name: Setup macos
+        if: steps.cache.outputs.misses != ''
+        uses: ./.github/actions/macos
+
+      - name: Setup rust
+        if: contains(steps.cache.outputs.misses, '@gpuix/native#')
+        uses: ./.github/actions/rust
+
+      - name: Setup mbx
+        if: contains(steps.cache.outputs.misses, '@gpuix/native#')
+        uses: ./.github/actions/mbx
+        with:
+          working-directory: packages/native
+
+      - name: Test fault injection
+        run: bunx turbo run test:fault-injection
+
+      - name: Report the turbo runs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/turbo-summary
+        with:
+          name: turbo-runs-test-fault-injection
+
+  example-chat:
+    name: Compile chat example (${{ matrix.settings.target }})
+    # The standalone chat binary that a release can carry. Nothing attaches it
+    # to a release, so it is built only on a manual run.
+    if: github.event_name == 'workflow_dispatch'
+    needs: [build-macos, build-linux, build-windows]
+    runs-on: ${{ matrix.settings.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: macos-latest
+            target: aarch64-apple-darwin
+            bunTarget: bun-darwin-arm64
+          - host: blacksmith-2vcpu-ubuntu-2404
+            target: x86_64-unknown-linux-gnu
+            bunTarget: bun-linux-x64
+          - host: windows-latest
+            target: x86_64-pc-windows-msvc
+            bunTarget: bun-windows-x64
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Setup bun
+        uses: ./.github/actions/bun
+
+      - name: Compile chat example
+        shell: bash
+        env:
+          COMPILE_OUT: example-chat-${{ matrix.settings.target }}
+          COMPILE_TARGET: ${{ matrix.settings.bunTarget }}
+          COMPILE_SKIP_ICONS: "1"
+          COMPILE_SKIP_APP: "1"
+        run: bunx turbo run compile
+
+      # A release asset is served as raw bytes, so a download loses the
+      # executable bit and arrives with no extension: macOS and Linux users
+      # got a file the OS refused to open. `.tar.gz` keeps the mode and names
+      # itself. Windows already ships a `.exe`, which needs no unpacking.
+      - name: Package chat example
+        working-directory: examples/dist
+        shell: bash
+        env:
+          NAME: example-chat-${{ matrix.settings.target }}
+        run: |
+          if [ -f "$NAME.exe" ]; then
+            echo "$NAME.exe already carries an extension"
+            exit 0
+          fi
+          chmod +x "$NAME"
+          tar -czf "$NAME.tar.gz" "$NAME"
+          rm "$NAME"
+          ls -l
+
+      - name: Upload example artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: example-chat-${{ matrix.settings.target }}
+          path: examples/dist/example-chat-${{ matrix.settings.target }}.*
+          if-no-files-found: error

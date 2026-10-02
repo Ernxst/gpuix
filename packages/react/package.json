@@ -107,6 +107,7 @@
     "typecheck": "tsc --build tsconfig.typecheck.json --noEmit",
     "dev": "tsc --watch --incremental",
     "test": "vitest run --project react",
+    "test:fault-injection": "GPUIX_FAULT_INJECTION_BINDING=$PWD/../native/test-fault-binding/gpuix-native.darwin-arm64.node vitest run --project react src/__tests__/native-binding.test.ts",
     "canvas:wpt": "vitest run --project wpt",
     "test:watch": "vitest --project react",
     "prepack": "bun run build"

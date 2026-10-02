@@ -27,6 +27,7 @@ docs/agents/
 .claude/settings.local.json
 # `bun pm pack` output. The tarballs are built per consumer, not committed.
 packages/native/*.tgz
+packages/native/test-fault-binding/
 packages/react/*.tgz
 packages/plugins/*.tgz
 

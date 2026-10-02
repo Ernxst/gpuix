@@ -36,8 +36,12 @@
       "dependsOn": [
         "build"
       ],
+      // The shard, and the variables that opt a local run into the tests CI
+      // runs by default.
       "env": [
-        "VITEST_SHARD"
+        "VITEST_SHARD",
+        "GPUIX_WINDOW_ORDER_TEST",
+        "GPUIX_WINDOWS_ACCESSIBILITY_TEST"
       ],
       "description": "Run workspace tests in dependency order."
     },
