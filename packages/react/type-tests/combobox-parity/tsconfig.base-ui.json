@@ -1,10 +1,9 @@
 {
   "extends": "../../tsconfig.exact-optional.json",
   "compilerOptions": {
-    "baseUrl": "../..",
     "paths": {
-      "@base-ui/react/combobox": ["node_modules/@base-ui/react/combobox/index.d.ts"],
-      "@gpuix/react/jsx-runtime": ["jsx-runtime.d.ts"]
+      "@base-ui/react/combobox": ["../../node_modules/@base-ui/react/combobox/index.d.ts"],
+      "@gpuix/react/jsx-runtime": ["../../jsx-runtime.d.ts"]
     }
   },
   "files": ["./combobox-parity.tsx"],
