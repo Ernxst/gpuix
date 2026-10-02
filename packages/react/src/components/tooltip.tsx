@@ -61,7 +61,7 @@ interface ProviderValue {
   closeDelay: number
   timeout: number
   lastClosedAt: React.MutableRefObject<number>
-  focusedTooltip: React.MutableRefObject<{ owner: object; close: (event?: GpuixSyntheticEvent) => void } | null>
+  focusedTooltip: React.MutableRefObject<{ owner: object; close: () => void } | null>
   disableHoverableContent: boolean
 }
 
@@ -413,11 +413,11 @@ const TooltipRootImpl = forwardRef<PublicInstance, TooltipRootProps<unknown>>(fu
       if (reason === "trigger-focus") {
         const focusedTooltip = provider.focusedTooltip.current
         if (focusedTooltip && focusedTooltip.owner !== focusRegistration.current) {
-          focusedTooltip.close(event)
+          focusedTooltip.close()
         }
         provider.focusedTooltip.current = {
           owner: focusRegistration.current,
-          close: (closeEvent) => closeRef.current("trigger-focus", closeEvent),
+          close: () => closeRef.current("none"),
         }
       }
       setPopupMounted(true)

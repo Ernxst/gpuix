@@ -1,6 +1,7 @@
 import React, { useState } from "react"
 import { describe, expect, it } from "vitest"
 import * as Tooltip from "../components/tooltip.js"
+import type { TooltipChangeEventDetails } from "../components/tooltip.js"
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 import type { PublicInstance } from "../types/host.js"
 
@@ -14,15 +15,28 @@ describeNative("Tooltip Base UI parity tree", () => {
       const labels = ["First tip", "Second tip", "Third tip"]
       const observedOpenTooltips: number[][] = []
       const blurredTriggers: number[] = []
+      const siblingCloseDetails: Array<{ index: number; details: TooltipChangeEventDetails }> = []
 
       testRoot.render(
         <div style={{ width: 600, height: 400 }}>
           {positionedAncestor ? (
             <div style={{ position: "absolute", zIndex: 1, left: 40, top: 60 }}>
-              <TooltipSequence labels={labels} onTriggerBlur={(index) => blurredTriggers.push(index)} />
+              <TooltipSequence
+                labels={labels}
+                onTriggerBlur={(index) => blurredTriggers.push(index)}
+                onOpenChange={(index, open, details) => {
+                  if (!open) siblingCloseDetails.push({ index, details })
+                }}
+              />
             </div>
           ) : (
-            <TooltipSequence labels={labels} onTriggerBlur={(index) => blurredTriggers.push(index)} />
+            <TooltipSequence
+              labels={labels}
+              onTriggerBlur={(index) => blurredTriggers.push(index)}
+              onOpenChange={(index, open, details) => {
+                if (!open) siblingCloseDetails.push({ index, details })
+              }}
+            />
           )}
           <button data-testid="after-tooltip-triggers">After tooltips</button>
         </div>
@@ -43,6 +57,11 @@ describeNative("Tooltip Base UI parity tree", () => {
       )
       expect(blurredTriggers).toEqual([0, 1, 2])
       expect(observedOpenTooltips, "only the focused trigger's tooltip should be open after each Tab").toEqual([[0], [1], [2]])
+      expect(siblingCloseDetails.map(({ index, details }) => [index, details.reason, details.event])).toEqual([
+        [0, "none", undefined],
+        [1, "none", undefined],
+        [2, "trigger-focus", expect.anything()],
+      ])
       testRoot.unmount()
     },
     15_000
@@ -309,11 +328,15 @@ describeNative("Tooltip Base UI parity tree", () => {
   })
 })
 
-function TooltipSequence({ labels, onTriggerBlur }: { labels: readonly string[]; onTriggerBlur?: (index: number) => void }) {
+function TooltipSequence({ labels, onTriggerBlur, onOpenChange }: {
+  labels: readonly string[]
+  onTriggerBlur?: (index: number) => void
+  onOpenChange?: (index: number, open: boolean, details: TooltipChangeEventDetails) => void
+}) {
   return (
     <Tooltip.Provider delay={0} closeDelay={0}>
       {labels.map((label, index) => (
-        <Tooltip.Root key={label}>
+        <Tooltip.Root key={label} onOpenChange={(open, details) => onOpenChange?.(index, open, details)}>
           <Tooltip.Portal>
             <Tooltip.Positioner side="top" sideOffset={8}>
               <Tooltip.Popup data-testid={`focus-tooltip-${index}`} style={{ width: 100, height: 24 }}>
