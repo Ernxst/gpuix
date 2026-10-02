@@ -26,6 +26,7 @@ import {
   DismissLayerScope,
   FloatingLayer,
   FloatingPositioner,
+  floatingPopupStyle,
   renderSlot,
   setRefs,
   useControllableState,
@@ -547,9 +548,10 @@ export const ComboboxPopup = forwardRef<PublicInstance, ComboboxPopupProps>(func
   if (!context.open) return null
   const state: ComboboxPopupState = { open: context.open, side: position?.side ?? "bottom", align: position?.align ?? "center", anchorHidden: position?.anchorHidden ?? false, empty: context.filteredItems.length === 0, transitionStatus: "idle" }
   const popupProps = { ...stateProps({ render, className, style }, state), ...props, ref, role: "presentation", "data-open": "", "data-side": state.side, "data-align": state.align, "data-anchor-hidden": state.anchorHidden ? "" : undefined, "data-empty": state.empty ? "" : undefined }
+  popupProps.style = floatingPopupStyle(popupProps.style, popupProps.className)
   const content = renderPart("div", render, popupProps as Props, children, state, ref)
   if (positioned) return <>{content}</>
-  return <FloatingLayer ref={ref}>{content}</FloatingLayer>
+  return <FloatingLayer ref={ref} fallbackBackground={false}>{content}</FloatingLayer>
 })
 
 export interface ComboboxPositionerState extends PositionerState { empty: boolean }

@@ -1636,6 +1636,8 @@ export interface AnchoredProps extends Props {
   deferred?: boolean
   priority?: number
   occlude?: boolean
+  /** Keep the anchored surface's default opaque fill. */
+  fallbackBackground?: boolean
   /** Cover the viewport and follow resizes in the native renderer. */
   fill?: "window"
 }

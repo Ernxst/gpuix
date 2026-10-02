@@ -31,6 +31,7 @@ import {
   DismissLayerScope,
   FloatingPositioner,
   FloatingLayer,
+  floatingPopupStyle,
   renderSlot,
   setRefs,
   useControllableState,
@@ -660,12 +661,13 @@ export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
     const resolvedSide = positioned && positionerState ? positionerState.side : side
     const resolvedAlign = positioned && positionerState ? positionerState.align : align
     const popupState: SelectPopupState = { side: resolvedSide, align: resolvedAlign, open: context.open, transitionStatus: "idle" }
+    const resolvedClassName = resolveClassName(className, popupState)
     const resolvedPopupProps = {
       ...props,
       side,
       align,
-      className: resolveClassName(className, popupState),
-      style: resolvePartStyle(style, popupState),
+      className: resolvedClassName,
+      style: floatingPopupStyle(resolvePartStyle(style, popupState), resolvedClassName),
       position: context.popupPosition,
       "data-open": context.open ? "" : undefined,
       "data-side": resolvedSide,

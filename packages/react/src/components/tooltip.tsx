@@ -16,6 +16,7 @@ import type { GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
 import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
 import {
   FloatingPositioner,
+  floatingPopupStyle,
   renderSlot,
   useControllableState,
   useDismissLayer,
@@ -837,12 +838,13 @@ export const TooltipPopup = forwardRef<PublicInstance, TooltipPopupProps>(functi
     instant: context.instant,
     transitionStatus: "idle",
   }
+  const resolvedClassName = resolveClassName(className, state)
   if ((!context.open && !context.popupMounted) || context.forceUnmount) return null
   const resolved: Props = {
     ...props,
     ref,
-    className: resolveClassName(className, state),
-    style: resolveStyle(style, state),
+    className: resolvedClassName,
+    style: floatingPopupStyle(resolveStyle(style, state), resolvedClassName),
     "data-open": context.open ? "" : undefined,
     "data-closed": context.open ? undefined : "",
     "data-side": state.side,
