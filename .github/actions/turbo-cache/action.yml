@@ -17,16 +17,20 @@ outputs:
 runs:
   using: composite
   steps:
-    # An empty VITEST_SHARD hashes differently from an unset one, so it is set
-    # only for a sharded run.
+    # The dry run must hash exactly as the real run does. The native build
+    # hashes every variable matching patterns such as `AR*`, so naming the
+    # variable below ARGS would change its hash and report a miss. An empty
+    # VITEST_SHARD also hashes differently from an unset one, so it is set
+    # only for a sharded run. A package with no script for the task is listed
+    # as a miss with no command, and is left out.
     - name: Check the turbo cache
       id: dry
       shell: bash
       env:
-        ARGS: ${{ inputs.args }}
+        DRY_RUN_ARGS: ${{ inputs.args }}
         SHARD: ${{ inputs.shard }}
       run: |
         if [ -n "$SHARD" ]; then export VITEST_SHARD="$SHARD"; fi
-        misses=$(bunx turbo run $ARGS --dry=json | jq -r '[.tasks[] | select(.cache.status != "HIT") | .taskId] | join(" ")')
+        misses=$(bunx turbo run $DRY_RUN_ARGS --dry=json | jq -r '[.tasks[] | select(.cache.status != "HIT" and .command != "<NONEXISTENT>") | .taskId] | join(" ")')
         echo "Not in the cache: ${misses:-nothing}"
         echo "misses=$misses" >> "$GITHUB_OUTPUT"
