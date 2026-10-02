@@ -1,5 +1,5 @@
 name: Build
-description: Build every package on this runner, compiling the addon only when the turbo cache does not hold it.
+description: Build every package on this runner and seed the default branch's compiler cache when it is missing.
 
 outputs:
   host-tools:
@@ -24,27 +24,96 @@ runs:
       with:
         args: build
 
-    - name: Setup node
-      if: steps.cache.outputs.misses != ''
-      uses: ./.github/actions/node
-
     - name: Setup rust
-      if: contains(steps.cache.outputs.misses, '@gpuix/native#build')
+      if: contains(steps.cache.outputs.misses, '@gpuix/native#build') || (github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
       uses: ./.github/actions/rust
 
+    # A Turbo hit contains the addon, not the compiler objects new PRs need.
+    # Match the pinned mbx action's directory-object key and exact bundle path.
+    - name: Identify the compiler cache
+      id: cache-identity
+      if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      shell: bash
+      run: |
+        node <<'NODE'
+        const { execFileSync } = require('node:child_process');
+        const { createHash } = require('node:crypto');
+        const { appendFileSync } = require('node:fs');
+        const path = require('node:path');
+        const env = process.env;
+        const identity = execFileSync('rustc', ['-vV'], { encoding: 'utf8' }).trim();
+        const toolchain = createHash('sha256').update(identity).digest('hex').slice(0, 12);
+        const prefix = `${process.platform}-${process.arch}-mbx-v1-dir-rust-${toolchain}-`;
+        const cacheHome = process.platform === 'win32' ? env.LOCALAPPDATA
+          : process.platform === 'darwin' ? path.join(env.HOME, 'Library', 'Caches')
+          : env.XDG_CACHE_HOME && path.isAbsolute(env.XDG_CACHE_HOME) ? env.XDG_CACHE_HOME
+          : path.join(env.HOME, '.cache');
+        const root = env.MBX_CACHE_DIR || path.join(cacheHome, 'mbx');
+        const bundle = path.join(root, 'actions', 'github-actions-cache-v1');
+        appendFileSync(env.GITHUB_OUTPUT, `prefix=${prefix}\npath=${bundle}\n`);
+        // Keep the lookup and mbx on the same store even with runner-global config.
+        appendFileSync(env.GITHUB_ENV, `MBX_CACHE_DIR=${root}\n`);
+        NODE
+
+    # Use the active cache service, including Blacksmith's transparent cache.
+    # Lookup-only checks the real payload/version without downloading it.
+    - name: Look up the default-branch compiler cache
+      id: compiler-cache
+      if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.cache-identity.outputs.path }}
+        key: ${{ steps.cache-identity.outputs.prefix }}${{ github.sha }}
+        restore-keys: ${{ steps.cache-identity.outputs.prefix }}
+        lookup-only: true
+
+    - name: Decide whether to seed the compiler cache
+      id: baseline
+      if: github.event_name == 'push' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      shell: bash
+      env:
+        MATCHED_KEY: ${{ steps.compiler-cache.outputs.cache-matched-key }}
+      run: |
+        if [ -z "$MATCHED_KEY" ]; then
+          echo "missing=true" >> "$GITHUB_OUTPUT"
+          echo "No default-branch compiler cache; seeding it."
+        else
+          echo "missing=false" >> "$GITHUB_OUTPUT"
+          echo "Default-branch compiler cache found: $MATCHED_KEY"
+        fi
+
+    - name: Setup node
+      if: steps.cache.outputs.misses != '' || steps.baseline.outputs.missing == 'true'
+      uses: ./.github/actions/node
+
     - name: Setup macos
-      if: runner.os == 'macOS' && contains(steps.cache.outputs.misses, '@gpuix/native#build')
+      if: runner.os == 'macOS' && (contains(steps.cache.outputs.misses, '@gpuix/native#build') || steps.baseline.outputs.missing == 'true')
       uses: ./.github/actions/macos
 
     - name: Setup linux
-      if: runner.os == 'Linux' && contains(steps.cache.outputs.misses, '@gpuix/native#build')
+      if: runner.os == 'Linux' && (contains(steps.cache.outputs.misses, '@gpuix/native#build') || steps.baseline.outputs.missing == 'true')
       uses: ./.github/actions/linux
 
     - name: Setup mbx
-      if: contains(steps.cache.outputs.misses, '@gpuix/native#build')
+      if: contains(steps.cache.outputs.misses, '@gpuix/native#build') || steps.baseline.outputs.missing == 'true'
       uses: ./.github/actions/mbx
       with:
         working-directory: packages/native
+
+    # Run Cargo even when Turbo already holds the addon, so mbx's successful
+    # post step exports compiler objects under the trusted default-branch ref.
+    # Seeding is best-effort; any compatible baseline avoids another warm build.
+    - name: Seed the compiler cache
+      if: runner.os != 'Windows' && steps.baseline.outputs.missing == 'true' && !contains(steps.cache.outputs.misses, '@gpuix/native#build')
+      working-directory: packages/native
+      shell: bash
+      run: bun run build
+
+    - name: Seed the compiler cache
+      if: runner.os == 'Windows' && steps.baseline.outputs.missing == 'true' && !contains(steps.cache.outputs.misses, '@gpuix/native#build')
+      working-directory: packages/native
+      shell: pwsh
+      run: bun run build
 
     # Each platform builds in its runner's default shell.
     - name: Build
