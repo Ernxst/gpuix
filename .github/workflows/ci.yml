@@ -35,7 +35,7 @@ permissions: {}
 jobs:
   lint:
     name: Lint
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 1
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
@@ -59,7 +59,7 @@ jobs:
 
   affected:
     name: Affected
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 2
     permissions:
       contents: read
