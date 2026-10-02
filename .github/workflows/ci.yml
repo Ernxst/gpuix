@@ -56,8 +56,8 @@ jobs:
       matrix:
         os:
           - macos-latest
-          - ubuntu-latest
-          - windows-latest
+          - blacksmith-4vcpu-ubuntu-2404
+          - blacksmith-4vcpu-windows-2025
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -104,6 +104,11 @@ jobs:
       fail-fast: false
       matrix:
         # No Linux: its addon has no test renderer.
+        #
+        # Windows stays on a GitHub-hosted runner. The test renderer opens a
+        # real DirectX window, which needs an interactive desktop session, and
+        # Blacksmith runs its Windows agent as a service in session 0, where
+        # creating the DirectX renderer fails.
         os:
           - macos-latest
           - windows-latest
