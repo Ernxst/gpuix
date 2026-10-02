@@ -3666,6 +3666,8 @@ so item content can reflect its current state. `Select.ItemText` accepts the
 same function child; it renders with the current item state while the label
 used by the trigger and typeahead comes from the unhighlighted, unselected
 call. Item `label` and `textValue` props override that function-derived label.
+Arrow Up/Down, Home/End and typeahead keep the highlighted item in view. Pointer
+hover updates the highlight without changing the popup's scroll position.
 
 ### Build a local Select
 

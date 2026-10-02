@@ -70,7 +70,7 @@ describeNative("Select scroll arrows", () => {
     expect(screen.queryByTestId("up")).toBeNull()
     expect(screen.getByTestId("down")).toBeVisible()
 
-    screen.renderer.nativeSimulateScrollWheel(30, 70, 0, -100)
+    screen.renderer.nativeSimulateScrollWheel(30, 70, 0, -200)
     screen.renderer.drawPendingFrame()
 
     expect(screen.getByTestId("up")).toBeVisible()

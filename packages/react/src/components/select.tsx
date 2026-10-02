@@ -65,6 +65,7 @@ interface SelectContextValue {
   focused: boolean
   labels: Map<unknown, ReactNode>
   activeValue: unknown | null
+  revealActiveValue: unknown | null
   listId: string
   fieldLabelId: string
   listMounted: boolean
@@ -76,12 +77,14 @@ interface SelectContextValue {
   triggerRef: React.MutableRefObject<PublicInstance | null>
   setOpen: (open: boolean, reason?: SelectChangeEventDetails["reason"], event?: GpuixSyntheticEvent) => void
   setActiveValue: (value: unknown | null) => void
+  setKeyboardActiveValue: (value: unknown | null) => void
   setListId: (id: string) => void
   setListMounted: (mounted: boolean) => void
   setScrollability: (up: boolean, down: boolean) => void
   setFocused: (focused: boolean) => void
   typeahead: (character: string, event?: GpuixSyntheticEvent) => void
   moveActive: (delta: number) => void
+  moveActiveTo: (edge: "first" | "last") => void
   selectValue: (value: unknown, reason?: SelectChangeEventDetails["reason"], event?: GpuixSyntheticEvent) => void
   items: SelectItemRecord[]
   registerItem: (item: SelectItemRecord) => void
@@ -230,7 +233,8 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     value: openProp,
     defaultValue: defaultOpen,
   })
-  const [activeValue, setActiveValue] = useState<unknown | null>(null)
+  const [activeValue, setActiveValueState] = useState<unknown | null>(null)
+  const [revealActiveValue, setRevealActiveValue] = useState<unknown | null>(null)
   const generatedListId = useId()
   const [listId, setListId] = useState(generatedListId)
   const fieldLabelId = `${generatedListId}-label`
@@ -256,6 +260,15 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
   const itemRegistry = useRef<Map<unknown, SelectItemRecord>>(new Map())
   const itemOrder = useRef<unknown[]>([])
   const [items, setItems] = useState<SelectItemRecord[]>([])
+
+  const setActiveValue = (nextValue: unknown | null) => {
+    setRevealActiveValue(null)
+    setActiveValueState(nextValue)
+  }
+  const setKeyboardActiveValue = (nextValue: unknown | null) => {
+    setRevealActiveValue(nextValue)
+    setActiveValueState(nextValue)
+  }
 
   const registerItem = (item: SelectItemRecord) => {
     if (!itemRegistry.current.has(item.value)) itemOrder.current.push(item.value)
@@ -367,7 +380,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     const match = enabled[wrappedMatchIndex]
     if (!match) return
     typeaheadMatchIndex.current = wrappedMatchIndex
-    if (open) setActiveValue(match.value)
+    if (open) setKeyboardActiveValue(match.value)
     else if (!readOnly && !multiple) selectValue(match.value, "list-navigation", event)
   }
 
@@ -378,7 +391,14 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     const currentIndex = enabled.findIndex((item) => compareValues(item.value, activeValue))
     const start = currentIndex < 0 ? (delta > 0 ? -1 : 0) : currentIndex
     const nextIndex = (start + delta + enabled.length) % enabled.length
-    setActiveValue(enabled[nextIndex].value)
+    setKeyboardActiveValue(enabled[nextIndex].value)
+  }
+
+  const moveActiveTo = (edge: "first" | "last") => {
+    if (disabled) return
+    const enabled = items.filter((item) => !item.disabled)
+    const item = edge === "first" ? enabled[0] : enabled.at(-1)
+    if (item) setKeyboardActiveValue(item.value)
   }
 
   const selectValue = (nextValue: unknown, reason: SelectChangeEventDetails["reason"] = "item-press", event?: GpuixSyntheticEvent) => {
@@ -420,6 +440,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
       items,
       labels,
       activeValue,
+      revealActiveValue,
       listId,
       fieldLabelId,
       listMounted,
@@ -431,18 +452,20 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
       triggerRef,
       setOpen,
       setActiveValue,
+      setKeyboardActiveValue,
       setListId,
       setListMounted,
       setScrollability: (up, down) => setScrollability({ up, down }),
       setFocused,
       typeahead,
       moveActive,
+      moveActiveTo,
       selectValue,
       registerItem,
       unregisterItem,
       isItemEqualToValue: compareValues,
     }),
-    [open, value, multiple, disabled, readOnly, highlightItemOnHover, focused, items, labels, activeValue, listId, listMounted, popupPosition, scrollability, compareValues]
+    [open, value, multiple, disabled, readOnly, highlightItemOnHover, focused, items, labels, activeValue, revealActiveValue, listId, listMounted, popupPosition, scrollability, compareValues]
   )
 
   return (
@@ -708,6 +731,10 @@ export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
               context.moveActive(1)
             } else if (event.key === "ArrowUp" || (event.key === "p" && event.modifiers?.ctrl)) {
               context.moveActive(-1)
+            } else if (event.key === "Home") {
+              context.moveActiveTo("first")
+            } else if (event.key === "End") {
+              context.moveActiveTo("last")
             } else if ((event.key === "Enter" || event.key === " ") && context.activeValue) {
               context.selectValue(context.activeValue, "item-press", event)
             } else if (event.key.length === 1 && !event.modifiers?.ctrl && !event.modifiers?.alt && !event.modifiers?.cmd) {
@@ -795,8 +822,8 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
       return () => context.unregisterItem(itemValue)
     }, [itemValue, itemText, fallbackTextValue, disabled])
     useLayoutEffect(() => {
-      if (context.open && context.isItemEqualToValue(context.activeValue, itemValue)) instanceRef.current?.scrollIntoView({ block: "nearest" })
-    }, [context.open, context.activeValue, itemValue])
+      if (context.open && context.isItemEqualToValue(context.revealActiveValue, itemValue)) instanceRef.current?.scrollIntoView({ block: "nearest" })
+    }, [context.open, context.revealActiveValue, itemValue])
 
     // Closed content stays mounted (see registerItem's comment above), so
     // this marker keeps the item's document position current even while

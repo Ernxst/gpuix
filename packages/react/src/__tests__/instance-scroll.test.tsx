@@ -28,7 +28,7 @@ describeNative("host instance scroll properties", () => {
         {Array.from({ length: 8 }, (_, index) => (
           <div key={index} style={{ height: 40, flexShrink: 0 }}>
             {index === 4 ? (
-              <div ref={targetRef}>
+              <div ref={targetRef} style={{ height: 40 }}>
                 <text>target</text>
               </div>
             ) : (
@@ -152,6 +152,27 @@ describeNative("host instance scroll properties", () => {
     // DOM default is block: "start" — the row's top edge meets the viewport
     // top. A nearest-edge reveal would stop at 100.
     expect(scroller.scrollTop).toBe(160)
+  })
+
+  it("reveals a nested descendant instead of its scroll container's direct child", () => {
+    const scrollerRef = React.createRef<PublicInstance>()
+    const targetRef = React.createRef<PublicInstance>()
+    testRoot.render(
+      <div ref={scrollerRef} style={{ width: 200, height: 100, overflow: "scroll" }}>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {Array.from({ length: 8 }, (_, index) => (
+            <div key={index} style={{ height: 40, flexShrink: 0 }}>
+              {index === 4 ? <div ref={targetRef} style={{ height: 40 }}>target</div> : <text>{`row-${index}`}</text>}
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+
+    targetRef.current!.scrollIntoView({ block: "nearest" })
+    testRoot.renderer.flush()
+
+    expect(scrollerRef.current!.scrollTop).toBe(100)
   })
 
   // Audit probe for #406: scrollIntoView schedules the scroll during a draw,
