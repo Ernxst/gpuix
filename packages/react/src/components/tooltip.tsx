@@ -15,7 +15,6 @@ import React, {
 } from "react"
 import type { ReactElement, ReactNode } from "react"
 import type { GpuixMouseEvent, GpuixSyntheticEvent } from "../reconciler/synthetic-event.js"
-import { containerForPublicInstance } from "../reconciler/host-config.js"
 import type { Props, PublicInstance, StyleDesc } from "../types/host.js"
 import {
   FloatingPositioner,
@@ -29,123 +28,6 @@ import {
 import type { PositionerProps, PositionerState, StateStyle } from "./floating.js"
 
 const tooltipTriggerInstances = new Set<PublicInstance>()
-const tooltipTriggerParents = new WeakMap<PublicInstance, React.MutableRefObject<PublicInstance | null>>()
-const TooltipParentTriggerContext = createContext<React.MutableRefObject<PublicInstance | null> | null>(null)
-
-function isDescendantTooltipTrigger(parent: PublicInstance, child: PublicInstance): boolean {
-  if (parent.contains(child)) return true
-
-  let candidate = child.parentElement
-  while (candidate) {
-    if (candidate === parent) return true
-    candidate = candidate.parentElement
-  }
-
-  let parentRef = tooltipTriggerParents.get(child)
-  while (parentRef?.current) {
-    if (parentRef.current === parent) return true
-    parentRef = tooltipTriggerParents.get(parentRef.current)
-  }
-
-  return false
-}
-
-function isEnabledNestedTriggerFocusEvent(currentTarget: PublicInstance, event: GpuixSyntheticEvent): boolean {
-  if (event.eventPhase !== 3 || sameTooltipInstance(currentTarget, event.target, currentTarget)) return false
-  const nestedTrigger = registeredTooltipTrigger(event.target, currentTarget)
-  return (
-    nestedTrigger !== undefined &&
-    isDescendantTooltipTrigger(currentTarget, nestedTrigger) &&
-    nestedTrigger.getAttribute("data-trigger-disabled") === null
-  )
-}
-
-function sameTooltipInstance(first: PublicInstance, second: PublicInstance, scope: PublicInstance): boolean {
-  if (first === second) return true
-  const container = containerForPublicInstance(scope)
-  const secondContainer = containerForPublicInstance(second)
-  return (
-    container !== undefined &&
-    first.id === second.id &&
-    containerForPublicInstance(first) === container &&
-    (secondContainer === undefined || secondContainer === container)
-  )
-}
-
-function registeredTooltipTrigger(instance: PublicInstance, scope: PublicInstance): PublicInstance | undefined {
-  const container = containerForPublicInstance(scope)
-  const instanceContainer = containerForPublicInstance(instance)
-  for (const trigger of tooltipTriggerInstances) {
-    const sameIdInScope =
-      container !== undefined &&
-      trigger.id === instance.id &&
-      containerForPublicInstance(trigger) === container &&
-      (instanceContainer === undefined || instanceContainer === container)
-    if (trigger === instance || sameIdInScope) {
-      return trigger
-    }
-  }
-  return undefined
-}
-
-function isNestedTooltipTrigger(currentTarget: PublicInstance, target: PublicInstance | null, x?: number, y?: number): boolean {
-  let candidate = target
-  while (candidate && !sameTooltipInstance(candidate, currentTarget, currentTarget)) {
-    const registered = registeredTooltipTrigger(candidate, currentTarget)
-    if (registered && isDescendantTooltipTrigger(currentTarget, registered)) return true
-    candidate = candidate.parentElement
-  }
-  if (x !== undefined && y !== undefined) {
-    const parentBounds = currentTarget.getBoundingClientRect()
-    const pointerInsideParent = x >= parentBounds.left && x <= parentBounds.right && y >= parentBounds.top && y <= parentBounds.bottom
-    for (const trigger of tooltipTriggerInstances) {
-      const nestedByTree =
-        containerForPublicInstance(trigger) === containerForPublicInstance(currentTarget) &&
-        isDescendantTooltipTrigger(currentTarget, trigger)
-      const relatedTriggerInsideParent = pointerInsideParent && target !== null && sameTooltipInstance(trigger, target, currentTarget)
-      if (!sameTooltipInstance(trigger, currentTarget, currentTarget) && (nestedByTree || relatedTriggerInsideParent)) {
-        const bounds = trigger.getBoundingClientRect()
-        if (x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom) return true
-      }
-    }
-  }
-  return false
-}
-
-function isEnabledNestedTrigger(currentTarget: PublicInstance, target: PublicInstance | null, x?: number, y?: number): boolean {
-  // Focus and pointer events bubble from the nested Trigger with that Trigger
-  // as their target. Honour that identity directly before walking the host
-  // ancestry, which is not preserved by every native event bridge.
-  if (target && !sameTooltipInstance(target, currentTarget, currentTarget)) {
-    const registered = registeredTooltipTrigger(target, currentTarget)
-    if (registered && isDescendantTooltipTrigger(currentTarget, registered) && registered.getAttribute("data-trigger-disabled") === null) return true
-  }
-
-  let candidate = target
-  while (candidate && !sameTooltipInstance(candidate, currentTarget, currentTarget)) {
-    const registered = registeredTooltipTrigger(candidate, currentTarget)
-    if (registered && isDescendantTooltipTrigger(currentTarget, registered) && registered.getAttribute("data-trigger-disabled") === null) return true
-    candidate = candidate.parentElement
-  }
-  if (x !== undefined && y !== undefined) {
-    for (const trigger of tooltipTriggerInstances) {
-      if (sameTooltipInstance(trigger, currentTarget, currentTarget)) continue
-      if (
-        containerForPublicInstance(trigger) === containerForPublicInstance(currentTarget) &&
-        isDescendantTooltipTrigger(currentTarget, trigger) &&
-        trigger.getAttribute("data-trigger-disabled") === null
-      ) {
-        const bounds = trigger.getBoundingClientRect()
-        if (x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom) return true
-      }
-    }
-  }
-  return false
-}
-
-function hasEnabledNestedTriggerFocused(currentTarget: PublicInstance): boolean {
-  return isEnabledNestedTrigger(currentTarget, currentTarget.ownerDocument.activeElement as PublicInstance | null)
-}
 
 export type TooltipChangeEventReason =
   | "trigger-hover"
@@ -171,9 +53,7 @@ export interface TooltipChangeEventDetails {
 function focusRemainsWithinTriggers(trigger: PublicInstance, triggers: Iterable<PublicInstance>): boolean {
   const activeElement = trigger.ownerDocument.activeElement
   return activeElement !== null && Array.from(triggers).some((candidate) =>
-    candidate.getAttribute("data-trigger-disabled") === null && (
-      sameTooltipInstance(candidate, activeElement as PublicInstance, candidate) || isDescendantTooltipTrigger(candidate, activeElement as PublicInstance)
-    )
+    candidate.getAttribute("data-trigger-disabled") === null && candidate.contains(activeElement as PublicInstance)
   )
 }
 
@@ -854,7 +734,6 @@ const TooltipTriggerInRoot = forwardRef<PublicInstance, TooltipTriggerProps>(fun
     nativeButton = true,
     onMouseEnter,
     onMouseLeave,
-    onMouseMove,
     onFocus,
     onBlur,
     onClick,
@@ -867,11 +746,8 @@ const TooltipTriggerInRoot = forwardRef<PublicInstance, TooltipTriggerProps>(fun
   ref
 ) {
   const context = useTooltipContext("Tooltip.Trigger")
-  const parentTriggerRef = useContext(TooltipParentTriggerContext)
   const provider = useContext(ProviderContext)
   const disabled = disabledProp || context.disabled
-  const nestedTriggerHovered = useRef(false)
-  const pointerInside = useRef(false)
   const suppressHoverUntilLeave = useRef(false)
   const pointerPressed = useRef(false)
   const triggerInstanceRef = useRef<PublicInstance | null>(null)
@@ -879,21 +755,16 @@ const TooltipTriggerInRoot = forwardRef<PublicInstance, TooltipTriggerProps>(fun
   const isOpen = context.open && context.activeTriggerId === triggerId
   const state = { open: isOpen }
   const triggerRef = useCallback((instance: PublicInstance | null) => {
+    if (triggerInstanceRef.current) tooltipTriggerInstances.delete(triggerInstanceRef.current)
     triggerInstanceRef.current = instance
-    const previous = context.triggerRefs.current.get(triggerId)
-    if (previous) tooltipTriggerInstances.delete(previous)
+    if (instance) tooltipTriggerInstances.add(instance)
     context.setTriggerRef(triggerId, instance)
-    if (instance) {
-      tooltipTriggerInstances.add(instance)
-      if (parentTriggerRef) tooltipTriggerParents.set(instance, parentTriggerRef)
-    }
     if (handle) setTooltipHandleTrigger(handle, triggerId, instance, payload)
     if (typeof ref === "function") ref(instance)
     else if (ref) ref.current = instance
-  }, [context.setTriggerRef, triggerId, handle, payload, parentTriggerRef, ref])
+  }, [context.setTriggerRef, triggerId, handle, payload, ref])
   const resolved: Props = {
     ...props,
-    children,
     id: triggerId,
     ref: triggerRef,
     tabIndex: props.tabIndex ?? 0,
@@ -903,54 +774,19 @@ const TooltipTriggerInRoot = forwardRef<PublicInstance, TooltipTriggerProps>(fun
     style: resolveStyle(style, state),
     onMouseEnter: (event: GpuixMouseEvent) => {
       onMouseEnter?.(event as never)
-      if (pointerInside.current) return
-      pointerInside.current = true
-      if (nestedTriggerHovered.current) return
       if (suppressHoverUntilLeave.current) return
       if (disabled) return
-      if (isEnabledNestedTrigger(event.currentTarget, event.target, event.clientX, event.clientY)) {
-        nestedTriggerHovered.current = true
-        context.cancelOpen()
-        context.cancelClose()
-        if (context.lastOpenReason.current === "trigger-hover") context.close("trigger-hover")
-        return
-      }
       context.setCloseDelay(closeDelay ?? provider.closeDelay)
       context.scheduleOpen(delay ?? provider.delay, "trigger-hover", event, triggerId, payload)
     },
-    onMouseMove: (event: GpuixMouseEvent) => {
-      onMouseMove?.(event as never)
-      if (disabled) return
-      if (isEnabledNestedTrigger(event.currentTarget, event.target, event.clientX, event.clientY)) {
-        nestedTriggerHovered.current = true
-        context.cancelOpen()
-        context.cancelClose()
-        if (context.lastOpenReason.current === "trigger-hover") context.close("trigger-hover")
-      } else if (nestedTriggerHovered.current) {
-        nestedTriggerHovered.current = false
-        context.setCloseDelay(closeDelay ?? provider.closeDelay)
-        context.scheduleOpen(delay ?? provider.delay, "trigger-hover", event, triggerId, payload)
-      }
-    },
     onMouseLeave: (event: GpuixMouseEvent) => {
       onMouseLeave?.(event as never)
-      pointerInside.current = false
       suppressHoverUntilLeave.current = false
-      if (isNestedTooltipTrigger(event.currentTarget, event.relatedTarget, event.clientX, event.clientY)) {
-        if (isEnabledNestedTrigger(event.currentTarget, event.relatedTarget, event.clientX, event.clientY)) {
-          nestedTriggerHovered.current = true
-          context.cancelOpen()
-          context.cancelClose()
-          if (context.lastOpenReason.current === "trigger-hover") context.close("trigger-hover")
-        }
-        return
-      }
-      nestedTriggerHovered.current = false
       context.scheduleClose(closeDelay ?? provider.closeDelay, "trigger-hover", event)
     },
     onFocus: (event: GpuixSyntheticEvent) => {
       onFocus?.(event as never)
-      if (!disabled && !pointerPressed.current && !isEnabledNestedTriggerFocusEvent(event.currentTarget, event) && !isEnabledNestedTrigger(event.currentTarget, event.target) && !hasEnabledNestedTriggerFocused(event.currentTarget)) {
+      if (!disabled && !pointerPressed.current) {
         context.setCloseDelay(closeDelay ?? provider.closeDelay)
         context.openNow("trigger-focus", event, triggerId, payload)
       }
@@ -994,7 +830,7 @@ const TooltipTriggerInRoot = forwardRef<PublicInstance, TooltipTriggerProps>(fun
   if (typeof render === "function") element = render(resolved, state)
   else if (isValidElement<Props>(render)) element = renderSlot({ asChild: true, children: render, props: resolved, ref })
   else element = nativeButton ? <button {...resolved}>{children}</button> : <div {...resolved}>{children}</div>
-  return <TooltipParentTriggerContext.Provider value={triggerInstanceRef}>{element}</TooltipParentTriggerContext.Provider>
+  return <>{element}</>
 })
 
 const TooltipTriggerWithHandle = forwardRef<PublicInstance, TooltipTriggerProps>(function TooltipTriggerWithHandle(
@@ -1012,7 +848,6 @@ const TooltipTriggerWithHandle = forwardRef<PublicInstance, TooltipTriggerProps>
     nativeButton = true,
     onMouseEnter,
     onMouseLeave,
-    onMouseMove,
     onFocus,
     onBlur,
     onClick,
@@ -1025,7 +860,6 @@ const TooltipTriggerWithHandle = forwardRef<PublicInstance, TooltipTriggerProps>
   ref
 ) {
   const provider = useContext(ProviderContext)
-  const parentTriggerRef = useContext(TooltipParentTriggerContext)
   const generatedId = React.useId()
   const triggerId = id ?? `tooltip-trigger-${generatedId}`
   const activeHandle = handle!
@@ -1036,30 +870,25 @@ const TooltipTriggerWithHandle = forwardRef<PublicInstance, TooltipTriggerProps>
     () => false
   )
   const disabled = disabledProp || isTooltipHandleDisabled(activeHandle)
-  const nestedTriggerHovered = useRef(false)
-  const pointerInside = useRef(false)
   const suppressHoverUntilLeave = useRef(false)
-  const triggerInstanceRef = useRef<PublicInstance | null>(null)
   const pointerPressed = useRef(false)
+  const triggerInstanceRef = useRef<PublicInstance | null>(null)
   useEffect(() => () => {
     cancelTooltipHandleClose(activeHandle)
   }, [activeHandle])
   const state = { open: isOpen }
+  const triggerRef = useCallback((instance: PublicInstance | null) => {
+    if (triggerInstanceRef.current) tooltipTriggerInstances.delete(triggerInstanceRef.current)
+    triggerInstanceRef.current = instance
+    if (instance) tooltipTriggerInstances.add(instance)
+    setTooltipHandleTrigger(activeHandle, triggerId, instance, payload)
+    if (typeof ref === "function") ref(instance)
+    else if (ref) ref.current = instance
+  }, [activeHandle, triggerId, payload, ref])
   const resolved: Props = {
     ...props,
-    children,
     id: triggerId,
-    ref: (instance: PublicInstance | null) => {
-      if (triggerInstanceRef.current) tooltipTriggerInstances.delete(triggerInstanceRef.current)
-      triggerInstanceRef.current = instance
-      setTooltipHandleTrigger(activeHandle, triggerId, instance, payload)
-      if (instance) {
-        tooltipTriggerInstances.add(instance)
-        if (parentTriggerRef) tooltipTriggerParents.set(instance, parentTriggerRef)
-      }
-      if (typeof ref === "function") ref(instance)
-      else if (ref) ref.current = instance
-    },
+    ref: triggerRef,
     tabIndex: props.tabIndex ?? 0,
     "data-popup-open": isOpen ? "" : undefined,
     "data-trigger-disabled": disabled ? "" : undefined,
@@ -1067,56 +896,22 @@ const TooltipTriggerWithHandle = forwardRef<PublicInstance, TooltipTriggerProps>
     style: resolveStyle(style, state),
     onMouseEnter: (event: GpuixMouseEvent) => {
       onMouseEnter?.(event as never)
-      if (pointerInside.current) return
-      pointerInside.current = true
-      if (nestedTriggerHovered.current) return
       if (suppressHoverUntilLeave.current) return
       if (disabled) return
-      if (isEnabledNestedTrigger(event.currentTarget, event.target, event.clientX, event.clientY)) {
-        nestedTriggerHovered.current = true
-        cancelTooltipHandleOpen(activeHandle)
-        cancelTooltipHandleClose(activeHandle)
-        return
-      }
       focusOpened.current = false
       setTooltipHandleCloseDelay(activeHandle, closeDelay ?? provider.closeDelay)
       cancelTooltipHandleClose(activeHandle)
       const recentlyClosed = Date.now() - provider.lastClosedAt.current <= provider.timeout
       scheduleTooltipHandleOpen(activeHandle, recentlyClosed ? 0 : delay ?? provider.delay, triggerId, payload, "trigger-hover", event)
     },
-    onMouseMove: (event: GpuixMouseEvent) => {
-      onMouseMove?.(event as never)
-      if (disabled) return
-      if (isEnabledNestedTrigger(event.currentTarget, event.target, event.clientX, event.clientY)) {
-        nestedTriggerHovered.current = true
-        cancelTooltipHandleOpen(activeHandle)
-        cancelTooltipHandleClose(activeHandle)
-        return
-      }
-      if (nestedTriggerHovered.current) {
-        nestedTriggerHovered.current = false
-        const recentlyClosed = Date.now() - provider.lastClosedAt.current <= provider.timeout
-        scheduleTooltipHandleOpen(activeHandle, recentlyClosed ? 0 : delay ?? provider.delay, triggerId, payload, "trigger-hover", event)
-      }
-    },
     onMouseLeave: (event: GpuixMouseEvent) => {
       onMouseLeave?.(event as never)
-      pointerInside.current = false
       suppressHoverUntilLeave.current = false
-      if (isNestedTooltipTrigger(event.currentTarget, event.relatedTarget, event.clientX, event.clientY)) {
-        if (isEnabledNestedTrigger(event.currentTarget, event.relatedTarget, event.clientX, event.clientY)) {
-          nestedTriggerHovered.current = true
-          cancelTooltipHandleOpen(activeHandle)
-          cancelTooltipHandleClose(activeHandle)
-        }
-        return
-      }
-      nestedTriggerHovered.current = false
       scheduleTooltipHandleClose(activeHandle, closeDelay ?? provider.closeDelay, "trigger-hover", event)
     },
     onFocus: (event: GpuixSyntheticEvent) => {
       onFocus?.(event as never)
-      if (!disabled && !pointerPressed.current && !isEnabledNestedTriggerFocusEvent(event.currentTarget, event) && !isEnabledNestedTrigger(event.currentTarget, event.target) && !hasEnabledNestedTriggerFocused(event.currentTarget)) {
+      if (!disabled && !pointerPressed.current) {
         focusOpened.current = true
         setTooltipHandleCloseDelay(activeHandle, closeDelay ?? provider.closeDelay)
         activateTooltipHandle(activeHandle, triggerId, payload, "trigger-focus", event)
@@ -1157,7 +952,7 @@ const TooltipTriggerWithHandle = forwardRef<PublicInstance, TooltipTriggerProps>
   if (typeof render === "function") element = render(resolved, state)
   else if (isValidElement<Props>(render)) element = renderSlot({ asChild: true, children: render, props: resolved, ref })
   else element = nativeButton ? <button {...resolved}>{children}</button> : <div {...resolved}>{children}</div>
-  return <TooltipParentTriggerContext.Provider value={triggerInstanceRef}>{element}</TooltipParentTriggerContext.Provider>
+  return <>{element}</>
 })
 
 const TooltipTriggerImpl = forwardRef<PublicInstance, TooltipTriggerProps>(function TooltipTrigger(props, ref) {
@@ -1191,9 +986,7 @@ export const TooltipPortal = forwardRef<PublicInstance, TooltipPortalProps>(func
   if (typeof render === "function") portal = render({ ...resolved, ref }, state)
   else if (isValidElement<Props>(render)) portal = renderSlot({ asChild: true, children: render, props: resolved, ref })
   else portal = children
-  return <TooltipParentTriggerContext.Provider value={null}>
-    <TooltipKeepMountedContext.Provider value={_keepMounted ?? false}>{portal}</TooltipKeepMountedContext.Provider>
-  </TooltipParentTriggerContext.Provider>
+  return <TooltipKeepMountedContext.Provider value={_keepMounted ?? false}>{portal}</TooltipKeepMountedContext.Provider>
 })
 
 export interface TooltipPositionerState extends PositionerState {
