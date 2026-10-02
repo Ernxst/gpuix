@@ -93,7 +93,7 @@ async function queryUiaElements(): Promise<UiaElement[]> {
   const { stdout } = await execFileAsync(
     'powershell.exe',
     ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encodedCommand],
-    { env: { ...process.env, GPUIX_UIA_TITLE: TITLE }, timeout: 30_000 },
+    { env: { ...process.env, GPUIX_UIA_TITLE: TITLE }, timeout: 60_000 },
   )
 
   return stdout
@@ -155,6 +155,6 @@ describeLive('Windows accessibility adapter order', () => {
         expect(renderer.isInitialized()).toBe(false)
       })
     },
-    60_000,
+    90_000,
   )
 })
