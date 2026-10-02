@@ -31,8 +31,12 @@
       // Hashed: what changes the binary. The runner pair stands in for the
       // target, which turbo does not hash. CI sets GPUIX_HOST_TOOLS to the
       // versions of the compilers the runner image supplies.
+      // GPUI_FXC_PATH and TOOLCHAINS choose the shader compiler GPUI's build
+      // scripts run.
       "env": [
         "GPUIX_HOST_TOOLS",
+        "GPUI_FXC_PATH",
+        "TOOLCHAINS",
         "RUNNER_OS",
         "RUNNER_ARCH",
         "CARGO*",
@@ -76,8 +80,7 @@
         "INCLUDE",
         "LIB",
         "PKG_CONFIG*",
-        "VCPKG*",
-        "GPUI_FXC_PATH"
+        "VCPKG*"
       ]
     },
     // The same build without `test-support`. Keep its inputs and environment
@@ -102,6 +105,8 @@
       ],
       "env": [
         "GPUIX_HOST_TOOLS",
+        "GPUI_FXC_PATH",
+        "TOOLCHAINS",
         "RUNNER_OS",
         "RUNNER_ARCH",
         "CARGO*",
@@ -143,8 +148,7 @@
         "INCLUDE",
         "LIB",
         "PKG_CONFIG*",
-        "VCPKG*",
-        "GPUI_FXC_PATH"
+        "VCPKG*"
       ]
     },
     // The macOS addon with the counters that
@@ -175,6 +179,8 @@
       ],
       "env": [
         "GPUIX_HOST_TOOLS",
+        "GPUI_FXC_PATH",
+        "TOOLCHAINS",
         "RUNNER_OS",
         "RUNNER_ARCH",
         "CARGO*",
@@ -216,8 +222,7 @@
         "INCLUDE",
         "LIB",
         "PKG_CONFIG*",
-        "VCPKG*",
-        "GPUI_FXC_PATH"
+        "VCPKG*"
       ]
     },
     // Compiles the library and the Rust examples without `test-support`, the
@@ -241,6 +246,8 @@
       "outputs": [],
       "env": [
         "GPUIX_HOST_TOOLS",
+        "GPUI_FXC_PATH",
+        "TOOLCHAINS",
         "RUNNER_OS",
         "RUNNER_ARCH",
         "CARGO*",
@@ -282,8 +289,7 @@
         "INCLUDE",
         "LIB",
         "PKG_CONFIG*",
-        "VCPKG*",
-        "GPUI_FXC_PATH"
+        "VCPKG*"
       ]
     },
     // GPUI's own suite, which the fork's patches to `zed` can break. It takes
@@ -303,6 +309,8 @@
       "outputs": [],
       "env": [
         "GPUIX_HOST_TOOLS",
+        "GPUI_FXC_PATH",
+        "TOOLCHAINS",
         "RUNNER_OS",
         "RUNNER_ARCH",
         "CARGO*",
