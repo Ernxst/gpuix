@@ -642,6 +642,7 @@ export const AlertDialogTrigger = forwardRef<PublicInstance, AlertDialogTriggerP
 })
 
 export type AlertDialogRootState = DialogRootState
+export type AlertDialogRootActions = DialogRootActions
 export type AlertDialogRootChangeEventReason = DialogRootChangeEventReason
 export type AlertDialogRootChangeEventDetails = DialogChangeEventDetails
 export type AlertDialogTriggerState = DialogTriggerState
@@ -660,7 +661,15 @@ export type AlertDialogTitleState = DialogTitleState
 export type AlertDialogViewportProps = DialogViewportProps
 export type AlertDialogViewportState = DialogViewportState
 
-export const Dialog = Object.assign(DialogRoot, {
+export function Dialog<Payload = unknown>(props: DialogRootProps<Payload>): ReactElement {
+  return <DialogRoot {...props} />
+}
+
+export function AlertDialog<Payload = unknown>(props: AlertDialogRootProps<Payload>): ReactElement {
+  return <AlertDialogRoot {...props} />
+}
+
+Object.assign(Dialog, {
   Root: DialogRoot,
   Trigger: DialogTrigger,
   Portal: DialogPortal,
@@ -675,7 +684,7 @@ export const Dialog = Object.assign(DialogRoot, {
 })
 
 /** @deprecated Import AlertDialog from `@gpuix/react/alert-dialog`. */
-export const AlertDialog = Object.assign(AlertDialogRoot, {
+Object.assign(AlertDialog, {
   Root: AlertDialogRoot,
   Trigger: AlertDialogTrigger,
   Portal: DialogPortal,
@@ -689,6 +698,30 @@ export const AlertDialog = Object.assign(AlertDialogRoot, {
   createHandle: createAlertDialogHandle,
 })
 
+export namespace DialogRoot { export type Props<Payload = unknown> = DialogRootProps<Payload>; export type State = DialogRootState; export type Actions = DialogRootActions; export type ChangeEventReason = DialogRootChangeEventReason; export type ChangeEventDetails = DialogRootChangeEventDetails }
+export namespace DialogTrigger { export type Props<Payload = unknown> = DialogTriggerProps<Payload>; export type State = DialogTriggerState }
+export namespace DialogPortal { export type Props = DialogPortalProps; export type State = DialogPortalState }
+export namespace DialogBackdrop { export type Props = DialogBackdropProps; export type State = DialogBackdropState }
+export namespace DialogPopup { export type Props = DialogPopupProps; export type State = DialogPopupState }
+export namespace DialogViewport { export type Props = DialogViewportProps; export type State = DialogViewportState }
+export namespace DialogTitle { export type Props = DialogTitleProps; export type State = DialogTitleState }
+export namespace DialogDescription { export type Props = DialogDescriptionProps; export type State = DialogDescriptionState }
+export namespace DialogClose { export type Props = DialogCloseProps; export type State = DialogCloseState }
+export namespace Dialog {
+  export import Root = DialogRoot
+  export import Trigger = DialogTrigger
+  export import Portal = DialogPortal
+  export import Backdrop = DialogBackdrop
+  export import Popup = DialogPopup
+  export import Viewport = DialogViewport
+  export import Title = DialogTitle
+  export import Description = DialogDescription
+  export import Close = DialogClose
+  export const Handle = DialogHandle
+  export const createHandle = createDialogHandle
+}
+export namespace AlertDialogRoot { export type Props<Payload = unknown> = AlertDialogRootProps<Payload>; export type State = AlertDialogRootState; export type Actions = AlertDialogRootActions; export type ChangeEventReason = AlertDialogRootChangeEventReason; export type ChangeEventDetails = AlertDialogRootChangeEventDetails }
+export namespace AlertDialogTrigger { export type Props<Payload = unknown> = AlertDialogTriggerProps<Payload>; export type State = AlertDialogTriggerState }
 export {
   DialogRoot as Root,
   DialogTrigger as Trigger,
@@ -725,3 +758,24 @@ export const AlertDialogTitle = DialogTitle
 export const AlertDialogDescription = DialogDescription
 export const AlertDialogClose = DialogClose
 export const AlertDialogViewport = DialogViewport
+
+export namespace AlertDialogBackdrop { export type Props = AlertDialogBackdropProps; export type State = AlertDialogBackdropState }
+export namespace AlertDialogClose { export type Props = AlertDialogCloseProps; export type State = DialogCloseState }
+export namespace AlertDialogDescription { export type Props = AlertDialogDescriptionProps; export type State = AlertDialogDescriptionState }
+export namespace AlertDialogPopup { export type Props = AlertDialogPopupProps; export type State = AlertDialogPopupState }
+export namespace AlertDialogPortal { export type Props = AlertDialogPortalProps; export type State = AlertDialogPortalState }
+export namespace AlertDialogTitle { export type Props = AlertDialogTitleProps; export type State = AlertDialogTitleState }
+export namespace AlertDialogViewport { export type Props = AlertDialogViewportProps; export type State = AlertDialogViewportState }
+export namespace AlertDialog {
+  export import Root = AlertDialogRoot
+  export import Backdrop = AlertDialogBackdrop
+  export import Close = AlertDialogClose
+  export import Description = AlertDialogDescription
+  export import Popup = AlertDialogPopup
+  export import Portal = AlertDialogPortal
+  export import Title = AlertDialogTitle
+  export import Trigger = AlertDialogTrigger
+  export import Viewport = AlertDialogViewport
+  export const Handle = AlertDialogHandle
+  export const createHandle = createAlertDialogHandle
+}

@@ -896,7 +896,9 @@ export const TooltipViewport = forwardRef<PublicInstance, TooltipViewportProps>(
   return <>{renderPart("div", render, resolved, children, state, ref)}</>
 })
 
-export const Tooltip = {
+export function Tooltip(): null { return null }
+
+Object.assign(Tooltip, {
   Provider: TooltipProvider,
   Root: TooltipRoot,
   Trigger: TooltipTrigger,
@@ -907,7 +909,28 @@ export const Tooltip = {
   Viewport: TooltipViewport,
   Handle: TooltipHandleImpl,
   createHandle: createTooltipHandle,
-} as const
+})
+
+export namespace TooltipRoot { export type Props<Payload = unknown> = TooltipRootProps<Payload>; export type State = TooltipRootState; export type Actions = TooltipRootActions; export type ChangeEventReason = TooltipChangeEventReason; export type ChangeEventDetails = TooltipChangeEventDetails }
+export namespace TooltipTrigger { export type Props<Payload = unknown> = TooltipTriggerProps<Payload>; export type State = TooltipTriggerState }
+export namespace TooltipPortal { export type Props = TooltipPortalProps; export type State = TooltipPortalState }
+export namespace TooltipPositioner { export type Props = TooltipPositionerProps; export type State = TooltipPositionerState }
+export namespace TooltipPopup { export type Props = TooltipPopupProps; export type State = TooltipPopupState }
+export namespace TooltipArrow { export type Props = TooltipArrowProps; export type State = TooltipArrowState }
+export namespace TooltipProvider { export type Props = TooltipProviderProps; export type State = Record<string, never> }
+export namespace TooltipViewport { export type Props = TooltipViewportProps; export type State = TooltipViewportState }
+export namespace Tooltip {
+  export import Root = TooltipRoot
+  export import Trigger = TooltipTrigger
+  export import Portal = TooltipPortal
+  export import Positioner = TooltipPositioner
+  export import Popup = TooltipPopup
+  export import Arrow = TooltipArrow
+  export import Provider = TooltipProvider
+  export import Viewport = TooltipViewport
+  export const Handle = TooltipHandleImpl
+  export const createHandle = createTooltipHandle
+}
 
 // Backwards-compatible prefixed parts for imports from `@gpuix/react`.
 export {
