@@ -3673,8 +3673,12 @@ with a `List`, the role belongs to the list and the trigger does not set
 `aria-controls`.
 Opening the popup focuses the selected item, and closing it returns focus to
 the trigger.
-Arrow Up/Down, Home/End and typeahead keep the highlighted item in view. Pointer
-hover updates the highlight without changing the popup's scroll position.
+Arrow Up/Down, Home/End and typeahead move focus with the highlighted item and
+keep it in view. Arrow Down on a closed trigger opens the popup; the next arrow
+press moves through the items. Pointer hover updates the highlight without
+changing the popup's scroll position. If a selected item is removed from the
+list, a single Select returns to its initial value when that item remains;
+multiple Select removes values whose items are no longer present.
 
 ### Build a local Select
 

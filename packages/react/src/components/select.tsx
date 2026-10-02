@@ -48,6 +48,7 @@ export interface SelectItemData<Value = unknown> {
 }
 
 interface SelectItemRecord {
+  id: string
   value: unknown
   label: ReactNode
   textValue: string
@@ -66,8 +67,8 @@ interface SelectContextValue {
   focused: boolean
   labels: Map<unknown, ReactNode>
   itemToStringLabel: ((value: unknown) => string) | undefined
-  activeValue: unknown | null
-  revealActiveValue: unknown | null
+  activeItemId: string | null
+  revealActiveItemId: string | null
   listId: string
   rootId: string
   fieldLabelId: string
@@ -86,13 +87,13 @@ interface SelectContextValue {
   triggerDragY: React.MutableRefObject<number>
   dragPointerType: React.MutableRefObject<string>
   focusSelectedItemOnOpen: React.MutableRefObject<boolean>
-  focusItem: (id: string) => void
+  focusItem: (id: number) => void
   closeInteraction: React.MutableRefObject<string>
   dismissedByOutsidePress: React.MutableRefObject<boolean>
   triggerRef: React.MutableRefObject<PublicInstance | null>
   setOpen: (open: boolean, reason?: SelectChangeEventDetails["reason"], event?: GpuixSyntheticEvent) => void
-  setActiveValue: (value: unknown | null) => void
-  setKeyboardActiveValue: (value: unknown | null) => void
+  setActiveItem: (id: string) => void
+  setKeyboardActiveItem: (item: SelectItemRecord) => void
   setListId: (id: string) => void
   setListMounted: (mounted: boolean) => void
   setScrollability: (up: boolean, down: boolean) => void
@@ -101,9 +102,10 @@ interface SelectContextValue {
   moveActive: (delta: number) => void
   moveActiveTo: (edge: "first" | "last") => void
   selectValue: (value: unknown, reason?: SelectChangeEventDetails["reason"], event?: GpuixSyntheticEvent) => void
+  selectItem: (item: SelectItemRecord, reason?: SelectChangeEventDetails["reason"], event?: GpuixSyntheticEvent) => void
   items: SelectItemRecord[]
   registerItem: (item: SelectItemRecord) => void
-  unregisterItem: (value: unknown) => void
+  unregisterItem: (id: string) => void
   isItemEqualToValue: (item: unknown, value: unknown) => boolean
 }
 
@@ -159,7 +161,7 @@ function textContent(node: ReactNode): string {
 function compareItemRecords(
   a: SelectItemRecord,
   b: SelectItemRecord,
-  registrationIndex: (value: unknown) => number
+  registrationIndex: (id: string) => number
 ): number {
   if (a.instance && b.instance) {
     const position = a.instance.compareDocumentPosition(b.instance)
@@ -167,7 +169,7 @@ function compareItemRecords(
     if (position & DOCUMENT_POSITION_PRECEDING) return 1
     return 0
   }
-  return registrationIndex(a.value) - registrationIndex(b.value)
+  return registrationIndex(a.id) - registrationIndex(b.id)
 }
 
 export interface SelectProps<Value = unknown, Multiple extends boolean | undefined = false>
@@ -255,6 +257,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     value: valueProp,
     defaultValue: defaultValue ?? null,
   })
+  const initialValue = useRef(valueProp !== undefined ? valueProp : defaultValue ?? null)
   const [open, setOpenState] = useControllableState({
     value: openProp,
     defaultValue: defaultOpen,
@@ -262,8 +265,8 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
   const previousOpen = useRef(open)
   const onCompleteRef = useRef(onOpenChangeComplete)
   onCompleteRef.current = onOpenChangeComplete
-  const [activeValue, setActiveValueState] = useState<unknown | null>(null)
-  const [revealActiveValue, setRevealActiveValue] = useState<unknown | null>(null)
+  const [activeItemId, setActiveItemId] = useState<string | null>(null)
+  const [revealActiveItemId, setRevealActiveItemId] = useState<string | null>(null)
   const generatedListId = useId()
   const rootId = rootIdProp ?? generatedListId
   const [listId, setListId] = useState(generatedListId)
@@ -301,27 +304,29 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
   // before the Select has ever opened. SelectItem always carries a host node
   // (an inert marker while closed), so every record's instance has a document
   // position once its own layout effect below has run.
-  const itemRegistry = useRef<Map<unknown, SelectItemRecord>>(new Map())
-  const itemOrder = useRef<unknown[]>([])
+  const itemRegistry = useRef<Map<string, SelectItemRecord>>(new Map())
+  const itemOrder = useRef<string[]>([])
   const [items, setItems] = useState<SelectItemRecord[]>([])
+  const previousItems = useRef<SelectItemRecord[]>([])
 
-  const setActiveValue = (nextValue: unknown | null) => {
-    setRevealActiveValue(null)
-    setActiveValueState(nextValue)
+  const setActiveItem = (id: string) => {
+    setActiveItemId(id)
+    setRevealActiveItemId(null)
   }
-  const setKeyboardActiveValue = (nextValue: unknown | null) => {
-    setRevealActiveValue(nextValue)
-    setActiveValueState(nextValue)
+  const setKeyboardActiveItem = (item: SelectItemRecord) => {
+    setActiveItemId(item.id)
+    setRevealActiveItemId(item.id)
+    if (item.instance) renderer?.focusElement?.(item.instance.id)
   }
 
   const registerItem = (item: SelectItemRecord) => {
-    if (!itemRegistry.current.has(item.value)) itemOrder.current.push(item.value)
-    itemRegistry.current.set(item.value, item)
+    if (!itemRegistry.current.has(item.id)) itemOrder.current.push(item.id)
+    itemRegistry.current.set(item.id, item)
   }
 
-  const unregisterItem = (value: unknown) => {
-    itemRegistry.current.delete(value)
-    itemOrder.current = itemOrder.current.filter((candidate) => candidate !== value)
+  const unregisterItem = (id: string) => {
+    itemRegistry.current.delete(id)
+    itemOrder.current = itemOrder.current.filter((candidate) => candidate !== id)
   }
 
   // Re-derive item order once per commit, rather than once per registration:
@@ -331,11 +336,11 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
   // of resorting after each individual item. The functional `setItems`
   // update bails when nothing actually changed - same length, same records
   // at the same indices - so a commit that touched something else in Select
-  // (`open`, `activeValue`, ...) re-renders once here, not once per item.
+  // (`open`, `activeItemId`, ...) re-renders once here, not once per item.
   useLayoutEffect(() => {
-    const registrationIndex = (value: unknown): number => itemOrder.current.indexOf(value)
+    const registrationIndex = (id: string): number => itemOrder.current.indexOf(id)
     const sorted = itemOrder.current
-      .map((itemValue) => itemRegistry.current.get(itemValue))
+      .map((itemId) => itemRegistry.current.get(itemId))
       .filter((item): item is SelectItemRecord => item !== undefined)
       .sort((a, b) => compareItemRecords(a, b, registrationIndex))
 
@@ -347,12 +352,39 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     })
   })
   useLayoutEffect(() => {
-    if (!open || activeValue !== null) return
+    const previous = previousItems.current
+    previousItems.current = items
+    if (previous.length === 0) return
+
+    if (multiple) {
+      const selected = Array.isArray(value) ? value : []
+      const nextValue = selected.filter((selectedValue) =>
+        items.some((item) => compareValues(item.value, selectedValue)),
+      )
+      if (nextValue.length === selected.length) return
+      const details = createSelectChangeDetails("none")
+      onValueChange?.(nextValue as SelectValueFor<Value, Multiple>, details)
+      if (!details.isCanceled) setValue(nextValue)
+      return
+    }
+
+    const selectedWasRegistered = previous.some((item) => compareValues(item.value, value))
+    const selectedRemainsRegistered = items.some((item) => compareValues(item.value, value))
+    if (!selectedWasRegistered || selectedRemainsRegistered) return
+
+    const defaultValue = initialValue.current
+    const nextValue = items.some((item) => compareValues(item.value, defaultValue)) ? defaultValue : null
+    const details = createSelectChangeDetails("none")
+    onValueChange?.(nextValue as SelectValueFor<Value, Multiple>, details)
+    if (!details.isCanceled) setValue(nextValue)
+  }, [items, value, multiple, compareValues, onValueChange, setValue])
+  useLayoutEffect(() => {
+    if (!open || activeItemId !== null) return
     const selected = items.find(
       (item) => isValueSelected(value, multiple === true, item.value, compareValues) && !item.disabled
     )
-    if (selected) setActiveValue(selected.value)
-  }, [open, value, items, activeValue])
+    if (selected) setActiveItem(selected.id)
+  }, [open, value, items, activeItemId])
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) return
     const rect = triggerRef.current.getBoundingClientRect()
@@ -386,7 +418,11 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
       const selected = items.find(
         (item) => isValueSelected(value, multiple === true, item.value, compareValues) && !item.disabled
       )
-      setActiveValue(selected?.value ?? null)
+      if (selected) setActiveItem(selected.id)
+      else {
+        setActiveItemId(null)
+        setRevealActiveItemId(null)
+      }
     }
   }
 
@@ -402,8 +438,10 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     const lower = character.toLocaleLowerCase()
     const enabled = items.filter((item) => !item.disabled)
     const continuesSession = typeaheadBuffer.current.length > 0 && now - typeaheadTime.current < 750
-    const currentValue = activeValue ?? (!open && !multiple ? value : null)
-    const currentIndex = enabled.findIndex((item) => compareValues(item.value, currentValue))
+    const currentValue = !open && !multiple ? value : null
+    const currentIndex = open
+      ? enabled.findIndex((item) => item.id === activeItemId)
+      : enabled.findIndex((item) => compareValues(item.value, currentValue))
     let startIndex = continuesSession ? typeaheadStartIndex.current : currentIndex
     let prefix = continuesSession ? typeaheadBuffer.current + lower : lower
 
@@ -433,7 +471,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     const match = enabled[wrappedMatchIndex]
     if (!match) return
     typeaheadMatchIndex.current = wrappedMatchIndex
-    if (open) setKeyboardActiveValue(match.value)
+    if (open) setKeyboardActiveItem(match)
     else if (!readOnly && !multiple) selectValue(match.value, "list-navigation", event)
   }
 
@@ -441,17 +479,17 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     if (disabled) return
     const enabled = items.filter((item) => !item.disabled)
     if (enabled.length === 0) return
-    const currentIndex = enabled.findIndex((item) => compareValues(item.value, activeValue))
+    const currentIndex = enabled.findIndex((item) => item.id === activeItemId)
     const start = currentIndex < 0 ? (delta > 0 ? -1 : 0) : currentIndex
     const nextIndex = (start + delta + enabled.length) % enabled.length
-    setKeyboardActiveValue(enabled[nextIndex].value)
+    setKeyboardActiveItem(enabled[nextIndex])
   }
 
   const moveActiveTo = (edge: "first" | "last") => {
     if (disabled) return
     const enabled = items.filter((item) => !item.disabled)
     const item = edge === "first" ? enabled[0] : enabled.at(-1)
-    if (item) setKeyboardActiveValue(item.value)
+    if (item) setKeyboardActiveItem(item)
   }
 
   const selectValue = (nextValue: unknown, reason: SelectChangeEventDetails["reason"] = "item-press", event?: GpuixSyntheticEvent) => {
@@ -481,6 +519,11 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
     }
   }
 
+  const selectItem = (item: SelectItemRecord, reason: SelectChangeEventDetails["reason"] = "item-press", event?: GpuixSyntheticEvent) => {
+    if (disabled || readOnly || item.disabled) return
+    selectValue(item.value, reason, event)
+  }
+
   const context = useMemo<SelectContextValue>(
     () => ({
       open,
@@ -492,9 +535,9 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
       focused,
       items,
       labels,
-      itemToStringLabel,
-      activeValue,
-      revealActiveValue,
+      itemToStringLabel: itemToStringLabel as ((value: unknown) => string) | undefined,
+      activeItemId,
+      revealActiveItemId,
       listId,
       rootId,
       fieldLabelId,
@@ -518,8 +561,8 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
       dismissedByOutsidePress,
       triggerRef,
       setOpen,
-      setActiveValue,
-      setKeyboardActiveValue,
+      setActiveItem,
+      setKeyboardActiveItem,
       setListId,
       setListMounted,
       setScrollability: (up, down) => setScrollability({ up, down }),
@@ -528,11 +571,12 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
       moveActive,
       moveActiveTo,
       selectValue,
+      selectItem,
       registerItem,
       unregisterItem,
       isItemEqualToValue: compareValues,
     }),
-    [open, value, multiple, disabled, readOnly, highlightItemOnHover, focused, items, labels, itemToStringLabel, activeValue, revealActiveValue, listId, rootId, fieldLabelId, labelId, registerLabelId, listMounted, popupPosition, scrollability, compareValues, renderer]
+    [open, value, multiple, disabled, readOnly, highlightItemOnHover, focused, items, labels, itemToStringLabel, activeItemId, revealActiveItemId, listId, rootId, fieldLabelId, labelId, registerLabelId, listMounted, popupPosition, scrollability, compareValues, renderer]
   )
 
   return (
@@ -688,10 +732,10 @@ export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
           if (!event.defaultPrevented) context.setOpen(false, "escape-key", event)
         } else if (event.key === "ArrowDown" || (event.key === "n" && event.modifiers?.ctrl)) {
           if (!context.open) context.setOpen(true, "trigger-press", event)
-          context.moveActive(1)
+          else context.moveActive(1)
         } else if (event.key === "ArrowUp" || (event.key === "p" && event.modifiers?.ctrl)) {
           if (!context.open) context.setOpen(true, "trigger-press", event)
-          context.moveActive(-1)
+          else context.moveActive(-1)
         } else if (event.key === "Enter" || event.key === " ") {
           context.setOpen(!context.open, "trigger-press", event)
         } else if (event.key.length === 1 && !event.modifiers?.ctrl && !event.modifiers?.alt && !event.modifiers?.cmd) {
@@ -806,6 +850,7 @@ export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
     const resolvedSide = positioned && positionerState ? positionerState.side : side
     const resolvedAlign = positioned && positionerState ? positionerState.align : align
     const popupState: SelectPopupState = { side: resolvedSide, align: resolvedAlign, open: context.open, transitionStatus: "idle" }
+    const popupRole: Props["role"] = context.listMounted ? "presentation" : "listbox"
     const resolvedClassName = resolveClassName(className, popupState)
     const resolvedPopupProps = {
       ...props,
@@ -817,7 +862,7 @@ export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
       "data-open": context.open ? "" : undefined,
       "data-side": resolvedSide,
       "data-align": resolvedAlign,
-      role: context.listMounted ? "presentation" : "listbox",
+      role: popupRole,
       id: context.listMounted ? undefined : context.listId,
       ariaMultiSelectable: !context.listMounted && context.multiple || undefined,
       ariaReadOnly: !context.listMounted && context.readOnly || undefined,
@@ -861,8 +906,9 @@ export const SelectPopup = forwardRef<PublicInstance, SelectPopupProps>(
               context.moveActiveTo("first")
             } else if (event.key === "End") {
               context.moveActiveTo("last")
-            } else if ((event.key === "Enter" || event.key === " ") && context.activeValue) {
-              context.selectValue(context.activeValue, "item-press", event)
+            } else if (event.key === "Enter" || event.key === " ") {
+              const activeItem = context.items.find((item) => item.id === context.activeItemId)
+              if (activeItem) context.selectItem(activeItem, "item-press", event)
             } else if (event.key.length === 1 && !event.modifiers?.ctrl && !event.modifiers?.alt && !event.modifiers?.cmd) {
               context.typeahead(event.key, event)
             }
@@ -907,12 +953,13 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
   ) {
     const context = useSelectContext("SelectItem")
     const itemDisabled = disabled || context.disabled
+    const itemId = useId()
     const instanceRef = useRef<PublicInstance | null>(null)
     const [itemText, setItemText] = useState<{ label: string; textValue: string } | null>(null)
     const itemValue = value ?? null
     const state = {
       selected: isValueSelected(context.value, context.multiple, itemValue, context.isItemEqualToValue),
-      highlighted: compareSelectItemEquality(context.activeValue, itemValue, context.isItemEqualToValue),
+      highlighted: context.activeItemId === itemId,
       disabled: itemDisabled,
     }
     const stateRef = useRef(state)
@@ -940,17 +987,18 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
 
     useLayoutEffect(() => {
       context.registerItem({
+        id: itemId,
         value: itemValue,
         label: label ?? itemText?.label ?? fallbackTextValue,
         textValue: textValue ?? label ?? itemText?.textValue ?? fallbackTextValue,
         disabled: itemDisabled,
         instance: instanceRef.current,
       })
-      return () => context.unregisterItem(itemValue)
-    }, [itemValue, itemText, fallbackTextValue, itemDisabled])
+      return () => context.unregisterItem(itemId)
+    }, [itemId, itemValue, itemText, fallbackTextValue, itemDisabled])
     useLayoutEffect(() => {
-      if (context.open && compareSelectItemEquality(context.revealActiveValue, itemValue, context.isItemEqualToValue)) instanceRef.current?.scrollIntoView({ block: "nearest" })
-    }, [context.open, context.revealActiveValue, itemValue])
+      if (context.open && context.revealActiveItemId === itemId) instanceRef.current?.scrollIntoView({ block: "nearest" })
+    }, [context.open, context.revealActiveItemId, itemId])
     useLayoutEffect(() => {
       if (!context.open || !context.focusSelectedItemOnOpen.current || !state.highlighted || !instanceRef.current) return
       context.focusSelectedItemOnOpen.current = false
@@ -984,7 +1032,7 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
       },
       onMouseEnter: (event: GpuixMouseEvent) => {
         onMouseEnter?.(event)
-        if (!itemDisabled && context.highlightItemOnHover) context.setActiveValue(itemValue)
+        if (!itemDisabled && context.highlightItemOnHover) context.setActiveItem(itemId)
       },
       onPointerEnter: (event: GpuixPointerEvent) => {
         context.dragPointerType.current = event.pointerType
@@ -1108,7 +1156,9 @@ export const SelectItemText = forwardRef<PublicInstance, SelectItemTextProps>(
   function SelectItemText({ children, render, className, style, ...props }, ref) {
     useSelectContext("SelectItemText")
     const context = useContext(SelectItemContext)
-    if (!context) throw new Error("SelectItemText must be used inside SelectItem")
+    if (!context) {
+      throw new Error("SelectItemContext is missing. SelectItem parts must be placed within <Select.Item>.")
+    }
     const state = context.state.current
     const renderedChildren = typeof children === "function" ? children(state) : children
     const label = typeof children === "function"

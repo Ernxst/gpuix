@@ -299,6 +299,107 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     await screen.waitFor(() => expect(screen.getByTestId("share")).toHaveFocus())
   })
 
+  it("restores the default value when the selected item is removed", async () => {
+    function DynamicMenu() {
+      const [visibleItems, setVisibleItems] = useState(items)
+      return (
+        <>
+          <Select.Root defaultValue="Birch">
+            <Select.Trigger data-testid="trigger"><Select.Value /></Select.Trigger>
+            <Select.Popup><Select.List>
+              {visibleItems.map((item) => <Select.Item key={item} value={item} data-testid={item}>{item}</Select.Item>)}
+            </Select.List></Select.Popup>
+          </Select.Root>
+          <button data-testid="remove-dogwood" onClick={() => setVisibleItems((current) => current.filter((item) => item !== "Dogwood"))}>Remove</button>
+        </>
+      )
+    }
+
+    screen.render(<DynamicMenu />)
+    clickTrigger()
+    await screen.waitFor(() => expect(screen.getByTestId("Cedar")).toBeInTheDocument())
+    const dogwood = screen.getByTestId("Dogwood").getBoundingClientRect()
+    screen.renderer.nativeSimulateClick(dogwood.left + dogwood.width / 2, dogwood.top + dogwood.height / 2)
+    await screen.waitFor(() => expect(screen.getByTestId("trigger")).toHaveTextContent("Dogwood"))
+    const remove = screen.getByTestId("remove-dogwood").getBoundingClientRect()
+    screen.renderer.nativeSimulateClick(remove.left + remove.width / 2, remove.top + remove.height / 2)
+    await screen.waitFor(() => expect(screen.getByTestId("trigger")).toHaveTextContent("Birch"))
+  })
+
+  it("restores the default value when the selected item is replaced", async () => {
+    function DynamicMenu() {
+      const [visibleItems, setVisibleItems] = useState(items)
+      return (
+        <>
+          <Select.Root defaultValue="Birch">
+            <Select.Trigger data-testid="trigger"><Select.Value /></Select.Trigger>
+            <Select.Popup><Select.List>
+              {visibleItems.map((item) => <Select.Item key={item} value={item} data-testid={item}>{item}</Select.Item>)}
+            </Select.List></Select.Popup>
+          </Select.Root>
+          <button data-testid="replace-dogwood" onClick={() => setVisibleItems((current) => current.map((item) => item === "Dogwood" ? "Elm" : item))}>Replace</button>
+        </>
+      )
+    }
+
+    screen.render(<DynamicMenu />)
+    clickTrigger()
+    await screen.waitFor(() => expect(screen.getByTestId("Dogwood")).toBeInTheDocument())
+    const dogwood = screen.getByTestId("Dogwood").getBoundingClientRect()
+    screen.renderer.nativeSimulateClick(dogwood.left + dogwood.width / 2, dogwood.top + dogwood.height / 2)
+    await screen.waitFor(() => expect(screen.getByTestId("trigger")).toHaveTextContent("Dogwood"))
+    const replace = screen.getByTestId("replace-dogwood").getBoundingClientRect()
+    screen.renderer.nativeSimulateClick(replace.left + replace.width / 2, replace.top + replace.height / 2)
+    await screen.waitFor(() => expect(screen.getByTestId("trigger")).toHaveTextContent("Birch"))
+  })
+
+  it("removes multiple selections when their items are removed", async () => {
+    function DynamicMenu() {
+      const [visibleItems, setVisibleItems] = useState(items)
+      return (
+        <>
+          <Select.Root multiple defaultValue={["Almond", "Dogwood"]}>
+            <Select.Trigger data-testid="trigger"><Select.Value /></Select.Trigger>
+            <Select.Popup><Select.List>
+              {visibleItems.map((item) => <Select.Item key={item} value={item} data-testid={item}>{item}</Select.Item>)}
+            </Select.List></Select.Popup>
+          </Select.Root>
+          <button data-testid="remove-dogwood" onClick={() => setVisibleItems((current) => current.filter((item) => item !== "Dogwood"))}>Remove</button>
+        </>
+      )
+    }
+
+    screen.render(<DynamicMenu />)
+    await screen.waitFor(() => expect(screen.getByTestId("trigger")).toHaveTextContent("Almond, Dogwood"))
+    const remove = screen.getByTestId("remove-dogwood").getBoundingClientRect()
+    screen.renderer.nativeSimulateClick(remove.left + remove.width / 2, remove.top + remove.height / 2)
+    await screen.waitFor(() => expect(screen.getByTestId("trigger")).toHaveTextContent("Almond"))
+  })
+
+  it("clears a controlled selection when its item is removed", async () => {
+    function DynamicMenu() {
+      const [visibleItems, setVisibleItems] = useState(items)
+      const [value, setValue] = useState<string | null>("Dogwood")
+      return (
+        <>
+          <Select.Root value={value} onValueChange={setValue}>
+            <Select.Trigger data-testid="trigger"><Select.Value /></Select.Trigger>
+            <Select.Popup><Select.List>
+              {visibleItems.map((item) => <Select.Item key={item} value={item}>{item}</Select.Item>)}
+            </Select.List></Select.Popup>
+          </Select.Root>
+          <button data-testid="remove-dogwood" onClick={() => setVisibleItems((current) => current.filter((item) => item !== "Dogwood"))}>Remove</button>
+        </>
+      )
+    }
+
+    screen.render(<DynamicMenu />)
+    await screen.waitFor(() => expect(screen.getByTestId("trigger")).toHaveTextContent("Dogwood"))
+    const remove = screen.getByTestId("remove-dogwood").getBoundingClientRect()
+    screen.renderer.nativeSimulateClick(remove.left + remove.width / 2, remove.top + remove.height / 2)
+    await screen.waitFor(() => expect(screen.getByTestId("trigger")).toHaveTextContent(/^$/))
+  })
+
 
   it("does not mark a selected single value as a placeholder", async () => {
     screen.render(<Menu root={{ defaultValue: "Birch" }} />)
@@ -568,6 +669,16 @@ describeNative("Select Base UI 1.8.0 parity", () => {
       </Select.Root>,
     )
     await screen.waitFor(() => expect(screen.getByTestId("item-text")).toHaveTextContent("Chosen"))
+  })
+
+  it("requires Select.ItemText to be rendered inside Select.Item", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {})
+    try {
+      screen.render(<Select.Root open><Select.Trigger><Select.Value /></Select.Trigger><Select.Popup><Select.ItemText /></Select.Popup></Select.Root>)
+      expect(error.mock.calls.flat().join(" ")).toContain("SelectItemContext is missing. SelectItem parts must be placed within <Select.Item>.")
+    } finally {
+      error.mockRestore()
+    }
   })
 
   it("keeps a disabled item out of the keyboard highlight and selection", async () => {
