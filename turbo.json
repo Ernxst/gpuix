@@ -2,6 +2,11 @@
   "$schema": "./node_modules/turbo/schema.json",
   "cacheMaxSize": "5GB",
   "cacheMaxAge": "30d",
+  "futureFlags": {
+    // `turbo watch` reruns a task only when a changed file matches the task's
+    // `inputs`, so an edit beside the Rust sources leaves the addon alone.
+    "watchUsingTaskInputs": true
+  },
   "tasks": {
     "dev": {
       "dependsOn": [
