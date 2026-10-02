@@ -125,11 +125,11 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     expect(screen.queryByRole("listbox")).toBeNull()
   })
 
-  it("opens with ArrowDown, moves the highlight, and commits with Enter", async () => {
+  it("opens with ArrowDown, highlights the first item once, and commits with Enter", async () => {
     screen.render(<Menu />)
-    clickTrigger()
-    await screen.waitFor(() => expect(screen.getByRole("listbox")).toBeInTheDocument())
+    screen.renderer.focusElement(screen.getByTestId("trigger").id)
     screen.renderer.simulateKeystrokes("down")
+    await screen.waitFor(() => expect(screen.getByRole("listbox")).toBeInTheDocument())
     await screen.waitFor(() => expect(screen.getByTestId("Almond")).toHaveAttribute("data-highlighted", ""))
     screen.renderer.simulateKeystrokes("down")
     await screen.waitFor(() => expect(screen.getByTestId("Birch")).toHaveAttribute("data-highlighted", ""))
