@@ -1,0 +1,36 @@
+{
+  "extends": "../../../tsconfig.exact-optional.json",
+  "compilerOptions": {
+    "baseUrl": "../../..",
+    "paths": {
+      "@gpuix/react/tooltip": [
+        "dist/components/tooltip.d.ts"
+      ],
+      "@gpuix/react/jsx-runtime": [
+        "jsx-runtime.d.ts"
+      ]
+    },
+    "jsx": "react-jsx",
+    "jsxImportSource": "@gpuix/react"
+  },
+  "files": [
+    "tooltip-01.tsx",
+    "tooltip-02.tsx",
+    "tooltip-03.tsx",
+    "tooltip-04.tsx",
+    "tooltip-05.tsx",
+    "tooltip-06.tsx",
+    "tooltip-07.tsx",
+    "tooltip-08.tsx"
+  ],
+  "include": [
+    "tooltip-01.tsx",
+    "tooltip-02.tsx",
+    "tooltip-03.tsx",
+    "tooltip-04.tsx",
+    "tooltip-05.tsx",
+    "tooltip-06.tsx",
+    "tooltip-07.tsx",
+    "tooltip-08.tsx"
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "extends": "../../../tsconfig.exact-optional.json",
+  "compilerOptions": {
+    "baseUrl": "../../..",
+    "jsx": "react-jsx",
+    "jsxImportSource": "react"
+  },
+  "files": [
+    "tooltip-01.tsx",
+    "tooltip-02.tsx",
+    "tooltip-03.tsx",
+    "tooltip-04.tsx",
+    "tooltip-05.tsx",
+    "tooltip-06.tsx",
+    "tooltip-07.tsx",
+    "tooltip-08.tsx"
+  ],
+  "include": [
+    "tooltip-01.tsx",
+    "tooltip-02.tsx",
+    "tooltip-03.tsx",
+    "tooltip-04.tsx",
+    "tooltip-05.tsx",
+    "tooltip-06.tsx",
+    "tooltip-07.tsx",
+    "tooltip-08.tsx"
+  ]
+}
