@@ -156,3 +156,5 @@ mod tests {
         }
     }
 }
+
+// Temporary: forces a native rebuild to time a warm mbx cache in CI.
