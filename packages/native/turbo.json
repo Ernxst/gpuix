@@ -29,8 +29,10 @@
         "dist/*"
       ],
       // Hashed: what changes the binary. The runner pair stands in for the
-      // target, which turbo does not hash.
+      // target, which turbo does not hash. CI sets GPUIX_HOST_TOOLS to the
+      // versions of the compilers the runner image supplies.
       "env": [
+        "GPUIX_HOST_TOOLS",
         "RUNNER_OS",
         "RUNNER_ARCH",
         "CARGO*",
@@ -99,6 +101,7 @@
         "dist/*"
       ],
       "env": [
+        "GPUIX_HOST_TOOLS",
         "RUNNER_OS",
         "RUNNER_ARCH",
         "CARGO*",
@@ -171,6 +174,7 @@
         "test-fault-binding/*"
       ],
       "env": [
+        "GPUIX_HOST_TOOLS",
         "RUNNER_OS",
         "RUNNER_ARCH",
         "CARGO*",
@@ -236,6 +240,7 @@
       ],
       "outputs": [],
       "env": [
+        "GPUIX_HOST_TOOLS",
         "RUNNER_OS",
         "RUNNER_ARCH",
         "CARGO*",
@@ -297,6 +302,7 @@
       ],
       "outputs": [],
       "env": [
+        "GPUIX_HOST_TOOLS",
         "RUNNER_OS",
         "RUNNER_ARCH",
         "CARGO*",

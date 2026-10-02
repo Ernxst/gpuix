@@ -1,0 +1,38 @@
+name: Identify the host tools
+description: Name the versions of the compilers the runner image supplies, so the native tasks' turbo hashes change when the image changes them.
+
+outputs:
+  value:
+    description: The versions, on one line.
+    value: ${{ steps.identify.outputs.value }}
+
+runs:
+  using: composite
+  steps:
+    # The native tasks hash GPUIX_HOST_TOOLS. It names what the image supplies
+    # and no file in the repository pins: Xcode, which brings clang, the linker
+    # and the Metal shader compiler; the Windows SDK, which brings `fxc`, and
+    # MSVC; the Linux release, which fixes the packages apt installs. A job
+    # that restores what another job built takes the value from that job's
+    # output instead, because its own image may differ.
+    - name: Identify the host tools
+      id: identify
+      shell: bash
+      run: |
+        case "$RUNNER_OS" in
+          macOS)
+            tools=$(xcodebuild -version | tr '\n' ' ')
+            ;;
+          Windows)
+            sdk=$(ls "/c/Program Files (x86)/Windows Kits/10/bin" | grep '^10\.' | sort -V | tail -1 || true)
+            msvc=$(ls -d "/c/Program Files/Microsoft Visual Studio"/*/*/VC/Tools/MSVC/* 2>/dev/null | sort -V | tail -1 || true)
+            tools="Windows SDK $sdk MSVC ${msvc##*/}"
+            ;;
+          Linux)
+            tools=$(. /etc/os-release && echo "$PRETTY_NAME")
+            ;;
+        esac
+        tools=$(echo "$tools" | xargs)
+        echo "Host tools: $tools"
+        echo "value=$tools" >> "$GITHUB_OUTPUT"
+        echo "GPUIX_HOST_TOOLS=$tools" >> "$GITHUB_ENV"

@@ -78,11 +78,16 @@ jobs:
   # Each platform builds and then tests on its own, so one platform's tests
   # never wait for another platform's build. The build stores the packages in
   # the turbo remote cache, and the test and typecheck jobs restore them.
+  # A build job also reports the compiler versions it built with, which the
+  # native tasks hash; the jobs that restore its build set GPUIX_HOST_TOOLS
+  # from that output, so their hashes match on a different image.
   build-macos:
     name: Build (macOS)
     runs-on: macos-latest
     permissions:
       contents: read
+    outputs:
+      host-tools: ${{ steps.build.outputs.host-tools }}
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
@@ -94,6 +99,7 @@ jobs:
           submodules: recursive
 
       - name: Build
+        id: build
         uses: ./.github/actions/build
 
   build-linux:
@@ -101,6 +107,8 @@ jobs:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     permissions:
       contents: read
+    outputs:
+      host-tools: ${{ steps.build.outputs.host-tools }}
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
@@ -112,6 +120,7 @@ jobs:
           submodules: recursive
 
       - name: Build
+        id: build
         uses: ./.github/actions/build
 
   build-windows:
@@ -119,6 +128,8 @@ jobs:
     runs-on: blacksmith-4vcpu-windows-2025
     permissions:
       contents: read
+    outputs:
+      host-tools: ${{ steps.build.outputs.host-tools }}
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
@@ -130,6 +141,7 @@ jobs:
           submodules: recursive
 
       - name: Build
+        id: build
         uses: ./.github/actions/build
 
   typecheck:
@@ -143,6 +155,7 @@ jobs:
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+      GPUIX_HOST_TOOLS: ${{ needs.build-macos.outputs.host-tools }}
     steps:
       - name: Clone repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -209,6 +222,7 @@ jobs:
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+      GPUIX_HOST_TOOLS: ${{ needs.build-macos.outputs.host-tools }}
     steps:
       - name: Clone repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -251,6 +265,7 @@ jobs:
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+      GPUIX_HOST_TOOLS: ${{ needs.build-windows.outputs.host-tools }}
     steps:
       - name: Clone repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -277,6 +292,7 @@ jobs:
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+      GPUIX_HOST_TOOLS: ${{ needs.build-linux.outputs.host-tools }}
     steps:
       - name: Clone repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -305,6 +321,9 @@ jobs:
         with:
           persist-credentials: false
           submodules: recursive
+
+      - name: Identify the host tools
+        uses: ./.github/actions/host-tools
 
       - name: Setup bun
         uses: ./.github/actions/bun
@@ -355,6 +374,9 @@ jobs:
           persist-credentials: false
           submodules: recursive
 
+      - name: Identify the host tools
+        uses: ./.github/actions/host-tools
+
       - name: Setup bun
         uses: ./.github/actions/bun
 
@@ -399,6 +421,7 @@ jobs:
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+      GPUIX_HOST_TOOLS: ${{ needs.build-macos.outputs.host-tools }}
     steps:
       - name: Clone repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -454,12 +477,15 @@ jobs:
       matrix:
         settings:
           - host: macos-latest
+            build: build-macos
             target: aarch64-apple-darwin
             bunTarget: bun-darwin-arm64
           - host: blacksmith-2vcpu-ubuntu-2404
+            build: build-linux
             target: x86_64-unknown-linux-gnu
             bunTarget: bun-linux-x64
           - host: windows-latest
+            build: build-windows
             target: x86_64-pc-windows-msvc
             bunTarget: bun-windows-x64
     permissions:
@@ -467,6 +493,7 @@ jobs:
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+      GPUIX_HOST_TOOLS: ${{ needs[matrix.settings.build].outputs.host-tools }}
     steps:
       - name: Clone repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
