@@ -105,7 +105,10 @@ describeNative("Select scrolled list", () => {
     screen.renderer.nativeSimulateMouseMove(-1, -1)
     screen.renderer.nativeSimulateMouseMove(target.left + 4, target.top + 4)
     await screen.waitFor(() => expect(screen.getByTestId("Resource 10")).toHaveAttribute("data-highlighted", ""))
-    await screen.waitFor(() => expect(screen.renderer.getScrollMetrics(popup.id)?.[1]).toBe(before), { timeout: 250 })
+    for (let frame = 0; frame < 3; frame += 1) {
+      screen.renderer.drawPendingFrame()
+      expect(screen.renderer.getScrollMetrics(popup.id)?.[1]).toBe(before)
+    }
   })
 
   it("reveals Arrow Down, Home, End and typeahead highlights in the list", async () => {

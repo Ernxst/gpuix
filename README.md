@@ -3922,7 +3922,8 @@ callback parameters are permissive like Base UI 1.8.0's `any` declarations.
 `Root` still types its `items`, filtering and value callbacks from its generics.
 The root `autoComplete` option controls the browser's form autofill hint. The input
 uses `aria-autocomplete="list"` by default and `"none"` while read-only,
-and `locale` sets the default filter's string comparison locale.
+and `locale` sets the default filter's string comparison locale. Arrow Up/Down
+keep the highlighted item in view as keyboard navigation moves through the list.
 
 Parts that accept `render={<element />}` preserve and combine the element's
 `className` with the part's class. The element's inline styles take precedence,

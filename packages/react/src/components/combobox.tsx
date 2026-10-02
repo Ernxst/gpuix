@@ -8,6 +8,7 @@ import React, {
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -191,6 +192,7 @@ interface ComboboxContextValue<Value = unknown> {
   filteredItems: readonly unknown[]
   selectedValues: readonly Value[]
   activeValue: Value | undefined
+  revealActiveValue: Value | undefined
   activeIndex: number
   listId: string
   labelId: string
@@ -338,6 +340,7 @@ export function ComboboxRoot<Value = unknown, Multiple extends boolean | undefin
   const [inputValue, setInputValueState] = useControllableState({ value: inputValueProp, defaultValue: defaultInputValue ?? initialInputValue })
   const [open, setOpenState] = useControllableState({ value: openProp, defaultValue: defaultOpen })
   const [activeValue, setActiveValue] = useState<Value | undefined>()
+  const [revealActiveValue, setRevealActiveValue] = useState<Value | undefined>()
   const [focused, setFocused] = useState(false)
   const [touched, setTouched] = useState(false)
   const records = useRef(new Map<unknown, ComboboxItemRecord<Value>>())
@@ -381,6 +384,10 @@ export function ComboboxRoot<Value = unknown, Multiple extends boolean | undefin
   const fieldState = { touched, dirty, valid: null, filled: selectedValues.length > 0, focused }
   const activeIndex = activeValue === undefined ? -1 : filteredItems.findIndex((item) => isItemEqualToValue(itemToValue(item), activeValue))
   const disabledFor = (candidate: unknown) => records.current.get(itemToValue(candidate))?.disabled ?? false
+  const updateActiveValue = (next: Value | undefined, reveal: boolean) => {
+    setRevealActiveValue(reveal ? next : undefined)
+    setActiveValue(next)
+  }
 
   const setOpen = (next: boolean, reason: ComboboxChangeReason = "trigger-press", event?: GpuixSyntheticEvent) => {
     if (open === next) return
@@ -388,10 +395,11 @@ export function ComboboxRoot<Value = unknown, Multiple extends boolean | undefin
     onOpenChange?.(next, details)
     if (details.isCanceled) return
     setOpenState(next)
+    setRevealActiveValue(undefined)
     onOpenChangeComplete?.(next)
     if (next && autoHighlight === "always") {
       const first = filteredItems.find((item) => !disabledFor(item))
-      setActiveValue(first === undefined ? undefined : itemToValue(first))
+      updateActiveValue(first === undefined ? undefined : itemToValue(first), false)
     }
     if (!next && inputRef.current) renderer?.focusElement?.(inputRef.current.id)
   }
@@ -402,7 +410,7 @@ export function ComboboxRoot<Value = unknown, Multiple extends boolean | undefin
     setInputValueState(next)
     if (autoHighlight && next) {
       const first = flatItems.filter((item) => filteredItemsProp || matchesItem(item, next.trim())).slice(0, limit >= 0 ? limit : undefined).find((item) => !disabledFor(item))
-      setActiveValue(first === undefined ? undefined : itemToValue(first))
+      updateActiveValue(first === undefined ? undefined : itemToValue(first), false)
     }
     if (!disabled && !readOnly) setOpen(true, "input-press", event)
     return true
@@ -417,7 +425,7 @@ export function ComboboxRoot<Value = unknown, Multiple extends boolean | undefin
     const index = next === undefined ? -1 : filteredItems.findIndex((item) => isItemEqualToValue(itemToValue(item), next))
     const details = highlightDetails(reason, index, event)
     onItemHighlighted?.(next, details)
-    if (!details.isCanceled) setActiveValue(next)
+    if (!details.isCanceled) updateActiveValue(next, reason === "keyboard")
   }
   const moveActive = (delta: number, event?: GpuixKeyboardEvent) => {
     const enabled = filteredItems.filter((item) => !disabledFor(item))
@@ -458,7 +466,7 @@ export function ComboboxRoot<Value = unknown, Multiple extends boolean | undefin
     open, disabled, readOnly, required, ...fieldState, setFocused, setTouched, name: props.name, form: props.form, autoComplete: "list", locale,
     formAutoComplete: autoComplete, openOnInputClick, multiple: multiple === true, value: value as Value | Value[] | null,
     inputValue: String(inputValue ?? ""), items: flatItems, filteredItems, selectedValues,
-    activeValue, activeIndex, listId, labelId: generatedLabelId, hasLabel, setHasLabel, inputId: generatedInputId, inputRef, inputRefProp,
+    activeValue, revealActiveValue, activeIndex, listId, labelId: generatedLabelId, hasLabel, setHasLabel, inputId: generatedInputId, inputRef, inputRefProp,
     itemRecords: records.current, itemToValue, itemToLabel, isEqual: isItemEqualToValue, matchesItem,
     setOpen, setInputValue, setValue, setActive, moveActive, select, registerItem,
     isTopDismissLayer: dismiss, filter: (filter ?? null) as ComboboxContextValue<Value>["filter"], itemToStringLabel, autoHighlight, highlightItemOnHover,
@@ -573,6 +581,7 @@ export interface ComboboxItemState { disabled: boolean; selected: boolean; highl
 export interface ComboboxItemProps<Value = unknown> extends PartProps<ComboboxItemState, "id"> { value?: Value | undefined; disabled?: boolean | undefined; index?: number | undefined; label?: string | undefined; children?: ReactNode }
 export const ComboboxItem = forwardRef<PublicInstance, ComboboxItemProps>(function ComboboxItem({ value, disabled = false, index, label, render, className, style, children, onClick, onMouseEnter, ...props }, ref) {
   const context = useComboboxContext("Combobox.Item")
+  const instanceRef = useRef<PublicInstance | null>(null)
   const itemValue = value as unknown
   const derived = context.itemToValue(itemValue)
   const activeIndex = index ?? context.filteredItems.findIndex((item) => context.isEqual(context.itemToValue(item), derived))
@@ -581,7 +590,12 @@ export const ComboboxItem = forwardRef<PublicInstance, ComboboxItemProps>(functi
   const state = { disabled, selected, highlighted }
   const itemLabel = label ?? context.itemToLabel(derived)
   const itemRef = useCallback((instance: PublicInstance | null) => context.registerItem({ value: derived, label: itemLabel, textValue: itemLabel, disabled, instance }, instance), [context.registerItem, derived, itemLabel, disabled])
-  const combinedRef = useCallback((instance: PublicInstance | null) => { itemRef(instance); setRefs(instance, ref) }, [itemRef, ref])
+  const combinedRef = useCallback((instance: PublicInstance | null) => { instanceRef.current = instance; itemRef(instance); setRefs(instance, ref) }, [itemRef, ref])
+  useLayoutEffect(() => {
+    if (context.open && context.revealActiveValue !== undefined && context.isEqual(context.revealActiveValue, derived)) {
+      instanceRef.current?.scrollIntoView({ block: "nearest" })
+    }
+  }, [context.open, context.revealActiveValue, context.isEqual, derived])
   const itemProps = { ...stateProps({ render, className, style }, state), ...props, ref: combinedRef, hidden: props.hidden ?? activeIndex < 0, id: `${context.listId}-item-${activeIndex}`, role: "option", "aria-selected": selected, "aria-disabled": disabled || undefined, "data-selected": selected ? "" : undefined, "data-highlighted": highlighted ? "" : undefined, "data-disabled": disabled ? "" : undefined, onClick: (event: GpuixMouseEvent) => { onClick?.(event); if (!event.defaultPrevented && !disabled) context.select(derived, event) }, onMouseEnter: (event: GpuixMouseEvent) => { onMouseEnter?.(event); if (context.highlightItemOnHover && !disabled) context.setActive(derived, "pointer", event) } }
   return <ComboboxItemContext.Provider value={{ selected }}>{renderPart("div", render, itemProps as Props, children, state, ref) as ReactElement}</ComboboxItemContext.Provider>
 })

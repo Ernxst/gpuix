@@ -3,6 +3,6 @@
 "@gpuix/react": patch
 ---
 
-Keep pointer-hovered Select rows aligned without moving the popup, and reveal keyboard-highlighted rows in nested scroll containers. Home and End move to the first and last enabled items.
+Keep pointer-hovered Select rows aligned without moving the popup, reveal keyboard-highlighted Select and Combobox rows in scroll containers, and support Select Home and End navigation.
 
 Fixes #863 and #864
