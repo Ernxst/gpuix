@@ -177,20 +177,14 @@ jobs:
         if: runner.os == 'macOS'
         uses: ./.github/actions/macos
 
-      # The shard runs outside turbo. Arguments after `--` change the hash of
-      # every task in the run, so turbo would miss the cached build, and
-      # `--only` leaves the build and the operating system out of the test's
-      # hash, so turbo would replay a result from another build or platform.
-      - name: Restore the build
-        if: matrix.part.shard
-        shell: bash
-        run: bunx turbo run build --filter=@gpuix/react
-
+      # packages/react/vitest.config.ts reads the shard from VITEST_SHARD, which
+      # is part of the test task's hash.
       - name: Test React
         if: matrix.part.shard
         shell: bash
-        working-directory: packages/react
-        run: bun run test --shard=${{ matrix.part.shard }}
+        env:
+          VITEST_SHARD: ${{ matrix.part.shard }}
+        run: bunx turbo run test --filter=@gpuix/react
 
       - name: Test the other packages
         if: ${{ !matrix.part.shard }}

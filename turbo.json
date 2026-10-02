@@ -31,6 +31,9 @@
       "dependsOn": [
         "build"
       ],
+      "env": [
+        "VITEST_SHARD"
+      ],
       "description": "Run workspace tests in dependency order."
     }
   }
