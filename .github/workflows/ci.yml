@@ -140,7 +140,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # No Linux: its addon has no test renderer.
+        # Linux has its own job, `test-linux`: this one runs the `test` task,
+        # which needs a build that does not compile there.
         #
         # Windows stays on a GitHub-hosted runner. The test renderer opens a
         # real DirectX window, which needs an interactive desktop session, and
@@ -192,3 +193,70 @@ jobs:
         if: ${{ !matrix.part.shard }}
         shell: bash
         run: bunx turbo run test --filter=!@gpuix/react --concurrency=1 --continue=dependencies-successful
+
+  test-linux:
+    name: Test (linux)
+    # Waits for the build so the addon comes from the cache.
+    needs: build
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Setup bun
+        uses: ./.github/actions/bun
+
+      # The addon loads these libraries at run time.
+      - name: Setup linux
+        uses: ./.github/actions/linux
+
+      # The `test` task depends on the native `build`, which does not compile
+      # on Linux. So this job restores the addon built without `test-support`
+      # and runs each package's own scripts, which turbo does not cache.
+      - name: Restore the native addon
+        run: bunx turbo run build:release --filter=@gpuix/native
+
+      - name: Build React
+        run: bun run build
+        working-directory: packages/react
+
+      # packages/react/vitest.config.ts leaves out the files that need the
+      # test renderer.
+      - name: Test React
+        run: bun run test
+        working-directory: packages/react
+
+      - name: Test the examples
+        run: bun run test
+        working-directory: examples
+
+      # GPUI's test target does not compile on Linux at the pinned Zed revision; see #828.
+
+  test-gpui:
+    name: Test GPUI (macos)
+    # GPUI's own suite takes about eight minutes, so it runs on request.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Setup rust
+        uses: ./.github/actions/rust
+
+      - name: Test GPUI
+        run: cargo test -p gpui
+        working-directory: zed

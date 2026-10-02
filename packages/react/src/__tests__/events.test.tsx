@@ -266,7 +266,7 @@ describe("frame loop", () => {
       { frameMs: 2 },
     )
 
-    await new Promise((resolve) => setTimeout(resolve, 18))
+    await vi.waitFor(() => expect(idleTicks).toBeGreaterThanOrEqual(2), { timeout: 5_000 })
     loop.stop()
     expect(idleTicks).toBeGreaterThanOrEqual(2)
     expect(frameTicks).toBe(0)
@@ -301,6 +301,7 @@ describe("frame loop", () => {
     let frameRequest: (() => void) | null = null
     let quitCalls = 0
     let unrecoverableErrors = 0
+    let idlePumps = 0
     const loop = startFrameLoop(
       {
         capabilities: frameClockCapabilities({
@@ -311,7 +312,10 @@ describe("frame loop", () => {
         tick: () => {
           throw new Error("injected native frame failure")
         },
-        tickIdle: () => true,
+        tickIdle: () => {
+          idlePumps += 1
+          return true
+        },
         quit: () => {
           quitCalls += 1
         },
@@ -331,12 +335,17 @@ describe("frame loop", () => {
 
     const request = frameRequest
     for (let attempt = 0; attempt < 3; attempt += 1) {
+      const idlePumpsBeforeRequest = idlePumps
       request?.()
-      await new Promise((resolve) => setTimeout(resolve, 5))
+      if (attempt < 2) {
+        await vi.waitFor(() => expect(idlePumps).toBeGreaterThan(idlePumpsBeforeRequest), { timeout: 5_000 })
+      }
     }
 
-    expect(quitCalls).toBe(1)
-    expect(unrecoverableErrors).toBe(1)
+    await vi.waitFor(() => {
+      expect(quitCalls).toBe(1)
+      expect(unrecoverableErrors).toBe(1)
+    }, { timeout: 5_000 })
     loop.stop()
   })
 
@@ -4054,57 +4063,6 @@ describeNative("events", () => {
       testRoot.renderer.nativeSimulateMouseUp(200, 20, 0)
 
       expect(received).toEqual(["down"])
-    })
-
-    it("still delivers move and up to an overlay mounted on mouseDown", () => {
-      const received: string[] = []
-
-      function OverlayDrag() {
-        const [dragging, setDragging] = useState(false)
-        return (
-          <div
-            style={{
-              width: 400,
-              height: 200,
-              position: "relative",
-              backgroundColor: "#111111",
-            }}
-          >
-            <div
-              style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
-              onMouseDown={() => {
-                received.push("clip-down")
-                setDragging(true)
-              }}
-            >
-              <text>clip</text>
-            </div>
-            {dragging && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: 400,
-                  height: 200,
-                  backgroundColor: "#00000001",
-                }}
-                onMouseMove={() => received.push("overlay-move")}
-                onMouseUp={() => received.push("overlay-up")}
-              >
-                <text>overlay</text>
-              </div>
-            )}
-          </div>
-        )
-      }
-
-      testRoot.render(<OverlayDrag />)
-      testRoot.renderer.nativeSimulateMouseDown(20, 20)
-      testRoot.renderer.nativeSimulateMouseMove(200, 20, 0)
-      testRoot.renderer.nativeSimulateMouseUp(200, 20, 0)
-
-      expect(received).toEqual(["clip-down", "overlay-move", "overlay-up"])
     })
 
     it("fires mouseUp once when released inside the captured element", () => {

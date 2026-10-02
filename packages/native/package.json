@@ -1,6 +1,6 @@
 {
   "name": "@gpuix/native",
-  "version": "0.26.0-fork",
+  "version": "0.26.1-fork",
   "license": "Apache-2.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
