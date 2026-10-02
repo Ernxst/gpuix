@@ -101,6 +101,7 @@ const SelectPopupSideContext = createContext<string>("bottom")
 const SelectPositionedContext = createContext(false)
 interface SelectItemContextValue {
   value: unknown
+  state: React.MutableRefObject<SelectItemState>
   setText: (text: { label: string; textValue: string } | null) => void
 }
 
@@ -602,7 +603,7 @@ export interface SelectValueState {
 
 export interface SelectValueProps extends SelectPartProps<SelectValueState, "children"> {
   placeholder?: ReactNode
-  children?: ReactNode | ((value: SelectSelection<unknown>) => ReactNode)
+  children?: ReactNode | ((value: any) => ReactNode)
 }
 
 export const SelectValue = forwardRef<PublicInstance, SelectValueProps>(
@@ -758,10 +759,12 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
       highlighted: context.isItemEqualToValue(context.activeValue, itemValue),
       disabled,
     }
+    const stateRef = useRef(state)
+    stateRef.current = state
     const fallbackTextValue = label ?? textValue ?? (typeof children === "function" ? "" : textContent(children))
     const renderedChildren = typeof children === "function" ? children(state) : children
     const itemContext = useMemo<SelectItemContextValue>(
-      () => ({ value: itemValue, setText: setItemText }),
+      () => ({ value: itemValue, state: stateRef, setText: setItemText }),
       [itemValue]
     )
 
@@ -782,8 +785,8 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
     useLayoutEffect(() => {
       context.registerItem({
         value: itemValue,
-        label: itemText?.label ?? fallbackTextValue,
-        textValue: itemText?.textValue ?? fallbackTextValue,
+        label: label ?? itemText?.label ?? fallbackTextValue,
+        textValue: textValue ?? label ?? itemText?.textValue ?? fallbackTextValue,
         disabled,
         instance: instanceRef.current,
       })
@@ -906,19 +909,25 @@ export const SelectIcon = forwardRef<PublicInstance, SelectIconProps>(function S
   return renderPart({ render, props: { ...props, "data-open": context.open ? "" : undefined, className: resolveClassName(className, state), style: resolvePartStyle(style, state) }, children, state, ref }) as ReactElement
 })
 
-export interface SelectItemTextProps extends SelectPartProps<Record<string, never>> {}
+export interface SelectItemTextProps extends SelectPartProps<Record<string, never>, "children"> {
+  children?: ReactNode | ((state: SelectItemState) => ReactNode)
+}
 
 export const SelectItemText = forwardRef<PublicInstance, SelectItemTextProps>(
   function SelectItemText({ children, render, className, style, ...props }, ref) {
     useSelectContext("SelectItemText")
     const context = useContext(SelectItemContext)
     if (!context) throw new Error("SelectItemText must be used inside SelectItem")
-    const label = textContent(children)
+    const state = context.state.current
+    const renderedChildren = typeof children === "function" ? children(state) : children
+    const label = typeof children === "function"
+      ? textContent(children({ selected: false, highlighted: false, disabled: state.disabled }))
+      : textContent(children)
     useLayoutEffect(() => {
       context.setText({ label, textValue: label })
       return () => context.setText(null)
     }, [context, label])
-    return renderPart({ tag: "span", render, props: { ...props, className: resolveClassName(className, {}), style: resolvePartStyle(style, {}) }, children, state: {}, ref }) as ReactElement
+    return renderPart({ tag: "span", render, props: { ...props, className: resolveClassName(className, {}), style: resolvePartStyle(style, {}) }, children: renderedChildren, state: {}, ref }) as ReactElement
   }
 )
 
@@ -962,6 +971,7 @@ export interface SelectLabelState {
   filled: boolean
   focused: boolean
 }
+export type SelectLabelProps = SelectPartProps<SelectLabelState>
 
 export interface SelectGroupLabelState {}
 export const SelectGroupLabel = forwardRef<PublicInstance, SelectPartProps<SelectGroupLabelState>>(function SelectGroupLabel({ render, className, style, children, ...props }, ref) {
@@ -1093,27 +1103,51 @@ export const SelectScrollDownArrow = forwardRef<PublicInstance, SelectScrollArro
   }
 )
 
-export namespace Select {
-  export const Root = Select
-  export const Trigger = SelectTrigger
-  export const Value = SelectValue
-  export const Icon = SelectIcon
-  export const Portal = SelectPortal
-  export const Backdrop = SelectBackdrop
-  export const Positioner = SelectPositioner
-  export const Popup = SelectPopup
-  export const List = SelectList
-  export const Item = SelectItem
-  export const ItemIndicator = SelectItemIndicator
-  export const ItemText = SelectItemText
-  export const Arrow = SelectArrow
-  export const ScrollUpArrow = SelectScrollUpArrow
-  export const ScrollDownArrow = SelectScrollDownArrow
-  export const Group = SelectGroup
-  export const GroupLabel = SelectGroupLabel
-  export const Label = SelectLabel
-  export const Separator = SelectSeparator
+export function SelectRoot<Value = unknown, Multiple extends boolean | undefined = false>(props: SelectProps<Value, Multiple>): ReactElement {
+  return <Select {...props} />
 }
+
+export namespace Select {
+  export import Root = SelectRoot
+  export import Trigger = SelectTrigger
+  export import Value = SelectValue
+  export import Icon = SelectIcon
+  export import Portal = SelectPortal
+  export import Backdrop = SelectBackdrop
+  export import Positioner = SelectPositioner
+  export import Popup = SelectPopup
+  export import List = SelectList
+  export import Item = SelectItem
+  export import ItemIndicator = SelectItemIndicator
+  export import ItemText = SelectItemText
+  export import Arrow = SelectArrow
+  export import ScrollUpArrow = SelectScrollUpArrow
+  export import ScrollDownArrow = SelectScrollDownArrow
+  export import Group = SelectGroup
+  export import GroupLabel = SelectGroupLabel
+  export import Label = SelectLabel
+  export import Separator = SelectSeparator
+}
+
+export namespace SelectRoot { export type Props<Value = unknown, Multiple extends boolean | undefined = false> = SelectRootProps<Value, Multiple>; export type State = SelectRootState; export type Actions = SelectRootActions; export type ChangeEventReason = SelectRootChangeEventReason; export type ChangeEventDetails = SelectRootChangeEventDetails }
+export namespace SelectTrigger { export type Props = SelectTriggerProps; export type State = SelectTriggerState }
+export namespace SelectValue { export type Props = SelectValueProps; export type State = SelectValueState }
+export namespace SelectIcon { export type Props = SelectIconProps; export type State = SelectIconState }
+export namespace SelectPortal { export type Props = SelectPortalProps; export type State = SelectPortalState }
+export namespace SelectBackdrop { export type Props = SelectBackdropProps; export type State = SelectBackdropState }
+export namespace SelectPositioner { export type Props = SelectPositionerProps; export type State = SelectPositionerState }
+export namespace SelectPopup { export type Props = SelectPopupProps; export type State = SelectPopupState }
+export namespace SelectList { export type Props = SelectListProps; export type State = Record<string, never> }
+export namespace SelectItem { export type Props = SelectItemProps; export type State = SelectItemState }
+export namespace SelectItemIndicator { export type Props = SelectItemIndicatorProps; export type State = SelectItemIndicatorState }
+export namespace SelectItemText { export type Props = SelectItemTextProps; export type State = Record<string, never> }
+export namespace SelectArrow { export type Props = SelectArrowProps; export type State = SelectArrowState }
+export namespace SelectScrollUpArrow { export type Props = SelectScrollUpArrowProps; export type State = SelectScrollUpArrowState }
+export namespace SelectScrollDownArrow { export type Props = SelectScrollDownArrowProps; export type State = SelectScrollDownArrowState }
+export namespace SelectGroup { export type Props = SelectGroupProps; export type State = SelectGroupState }
+export namespace SelectGroupLabel { export type Props = SelectGroupLabelProps; export type State = SelectGroupLabelState }
+export namespace SelectLabel { export type Props = SelectLabelProps; export type State = SelectLabelState }
+export namespace SelectSeparator { export type Props = SelectSeparatorProps; export type State = SelectSeparatorState }
 
 export {
   Select as Root,

@@ -278,4 +278,73 @@ describeNative("Select typeahead", () => {
 
     expect(screen.getByTestId("trigger")).toHaveTextContent("Blackcurrant")
   })
+
+  it("uses a function ItemText child for display, selected value and typeahead", () => {
+    screen.render(
+      <Select.Root defaultValue="other">
+        <Select.Trigger data-testid="trigger" ariaLabel="Fruit">
+          <Select.Value placeholder="Choose" />
+        </Select.Trigger>
+        <Select.Popup>
+          <Select.List>
+            <Select.Item value="other">
+              <Select.ItemText>Other</Select.ItemText>
+            </Select.Item>
+            <Select.Item value="apple" data-testid="apple">
+              <Select.ItemText>
+                {({ highlighted, selected }) =>
+                  highlighted ? "Highlighted apple" : selected ? "Selected apple" : "Apple label"}
+              </Select.ItemText>
+            </Select.Item>
+          </Select.List>
+        </Select.Popup>
+      </Select.Root>
+    )
+
+    screen.renderer.nativeSimulateClick(30, 25)
+    expect(screen.getByTestId("apple")).toHaveTextContent("Apple label")
+    expect(screen.getByTestId("trigger")).toHaveTextContent("Other")
+    screen.renderer.simulateKeystrokes("a")
+
+    expect(screen.getByTestId("apple")).toHaveAttribute("data-highlighted", "")
+    expect(screen.getByTestId("apple")).toHaveTextContent("Highlighted apple")
+    expect(screen.getByTestId("trigger")).toHaveTextContent("Other")
+
+    screen.renderer.simulateKeystrokes("enter")
+
+    expect(screen.getByTestId("trigger")).toHaveTextContent("Apple label")
+  })
+
+  it("honours label and textValue overrides for a function ItemText child", () => {
+    screen.render(
+      <Select.Root defaultValue="other">
+        <Select.Trigger data-testid="trigger" ariaLabel="Fruit">
+          <Select.Value placeholder="Choose" />
+        </Select.Trigger>
+        <Select.Popup>
+          <Select.List>
+            <Select.Item value="other">
+              <Select.ItemText>Other</Select.ItemText>
+            </Select.Item>
+            <Select.Item value="override" label="Override label" textValue="mango" data-testid="override">
+              <Select.ItemText>{() => "Function label"}</Select.ItemText>
+            </Select.Item>
+          </Select.List>
+        </Select.Popup>
+      </Select.Root>
+    )
+
+    screen.renderer.nativeSimulateClick(30, 25)
+    expect(screen.getByTestId("override")).toHaveTextContent("Function label")
+    expect(screen.getByTestId("trigger")).toHaveTextContent("Other")
+    screen.renderer.simulateKeystrokes("m")
+
+    expect(screen.getByTestId("override")).toHaveAttribute("data-highlighted", "")
+    expect(screen.getByTestId("override")).toHaveTextContent("Function label")
+    expect(screen.getByTestId("trigger")).toHaveTextContent("Other")
+
+    screen.renderer.simulateKeystrokes("enter")
+
+    expect(screen.getByTestId("trigger")).toHaveTextContent("Override label")
+  })
 })

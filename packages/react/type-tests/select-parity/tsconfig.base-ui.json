@@ -3,6 +3,9 @@
   "compilerOptions": {
     "paths": {
       "@gpuix/react/select": ["../../node_modules/@base-ui/react/select/index.d.ts"],
+      "@gpuix/react/tooltip": ["../../node_modules/@base-ui/react/tooltip/index.d.ts"],
+      "@gpuix/react/dialog": ["../../node_modules/@base-ui/react/dialog/index.d.ts"],
+      "@gpuix/react/alert-dialog": ["../../node_modules/@base-ui/react/alert-dialog/index.d.ts"],
       "@gpuix/react/jsx-runtime": ["../../jsx-runtime.d.ts"]
     }
   },
