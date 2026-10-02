@@ -8060,7 +8060,7 @@ pub(crate) struct GpuixView {
     /// Minimal-scroll anchors for focusable elements and nested scrollers.
     /// Each anchor targets the nearest ordinary overflow ancestor; virtual
     /// lists use their item-aware `ListState` path instead.
-    focus_scroll_anchors: HashMap<u64, FocusScrollAnchor>,
+    scroll_reveal_anchors: HashMap<u64, ScrollRevealAnchor>,
     /// Native animation clocks keyed by retained element ID.
     pub(crate) motion_states: HashMap<u64, crate::motion::MotionState>,
     intrinsic_probe_cache: HashMap<u64, IntrinsicProbeCacheEntry>,
@@ -8172,7 +8172,7 @@ struct VirtualFocusBounds {
     height: gpui::Pixels,
 }
 
-enum FocusScrollAnchor {
+enum ScrollRevealAnchor {
     Overflow {
         scroller_id: u64,
         anchor: gpui::ScrollAnchor,
@@ -8185,7 +8185,7 @@ enum FocusScrollAnchor {
     },
 }
 
-impl FocusScrollAnchor {
+impl ScrollRevealAnchor {
     fn overflow_anchor(&self) -> Option<&gpui::ScrollAnchor> {
         match self {
             Self::Overflow { anchor, .. } => Some(anchor),
@@ -8492,7 +8492,7 @@ impl GpuixView {
             drawn_img_image_revision: 0,
             drawn_scroll_offsets: HashMap::new(),
             scroll_event_offsets: Arc::new(Mutex::new(HashMap::new())),
-            focus_scroll_anchors: HashMap::new(),
+            scroll_reveal_anchors: HashMap::new(),
             motion_states: HashMap::new(),
             intrinsic_probe_cache: HashMap::new(),
             intrinsic_probe_layouts: 0,
@@ -9276,7 +9276,7 @@ impl GpuixView {
             canvas_image_store: &self.canvas_image_store,
             event_callback: &callback,
             focus_handles: &self.focus_handles,
-            focus_scroll_anchors: &self.focus_scroll_anchors,
+            scroll_reveal_anchors: &self.scroll_reveal_anchors,
             scroll_handles: &mut self.scroll_handles,
             scroll_event_offsets: &self.scroll_event_offsets,
             custom_registry: &mut self.custom_registry,
@@ -9577,7 +9577,7 @@ pub(crate) struct BuildCtx<'a> {
     pub canvas_image_store: &'a crate::custom_elements::img::SharedCanvasImageStore,
     pub event_callback: &'a Option<EventCallback>,
     pub focus_handles: &'a HashMap<u64, gpui::FocusHandle>,
-    focus_scroll_anchors: &'a HashMap<u64, FocusScrollAnchor>,
+    scroll_reveal_anchors: &'a HashMap<u64, ScrollRevealAnchor>,
     pub scroll_handles: &'a mut HashMap<u64, gpui::ScrollHandle>,
     scroll_event_offsets: &'a Arc<Mutex<HashMap<u64, gpui::Point<gpui::Pixels>>>>,
     pub custom_registry: &'a mut CustomElementRegistry,
@@ -11598,7 +11598,7 @@ impl GpuixView {
         // scroll anchors and subscriptions from the live focus set.
         self.focus_handles
             .retain(|id, _| tree.elements.get(id).is_some_and(&needs_focus));
-        self.sync_focus_scroll_anchors(tree);
+        self.sync_scroll_reveal_anchors(tree);
 
         self.focus_subscriptions
             .retain(|(id, _), _| self.focus_handles.contains_key(id));
@@ -11650,7 +11650,7 @@ impl GpuixView {
         }
     }
 
-    fn sync_focus_scroll_anchors(&mut self, tree: &RetainedTree) {
+    fn sync_scroll_reveal_anchors(&mut self, tree: &RetainedTree) {
         let mut targets: HashSet<u64> = self.focus_handles.keys().copied().collect();
         targets.extend(
             tree.elements
@@ -11658,8 +11658,11 @@ impl GpuixView {
                 .filter(|element| is_overflow_scroller(element))
                 .map(|element| element.id),
         );
+        targets.extend(tree.elements.keys().copied().filter(|id| {
+            matches!(nearest_scroll_ancestor(tree, *id), Some(ScrollAncestor::Overflow(_)))
+        }));
 
-        let mut previous = std::mem::take(&mut self.focus_scroll_anchors);
+        let mut previous = std::mem::take(&mut self.scroll_reveal_anchors);
         for id in targets {
             let Some(ancestor) = nearest_scroll_ancestor(tree, id) else {
                 continue;
@@ -11668,10 +11671,10 @@ impl GpuixView {
                 ScrollAncestor::Overflow(scroller_id) => previous
                     .remove(&id)
                     .and_then(|entry| match entry {
-                        FocusScrollAnchor::Overflow {
+                        ScrollRevealAnchor::Overflow {
                             scroller_id: previous_id,
                             anchor,
-                        } if previous_id == scroller_id => Some(FocusScrollAnchor::Overflow {
+                        } if previous_id == scroller_id => Some(ScrollRevealAnchor::Overflow {
                             scroller_id,
                             anchor,
                         }),
@@ -11679,7 +11682,7 @@ impl GpuixView {
                     })
                     .unwrap_or_else(|| {
                         let handle = self.scroll_handles.entry(scroller_id).or_default().clone();
-                        FocusScrollAnchor::Overflow {
+                        ScrollRevealAnchor::Overflow {
                             scroller_id,
                             anchor: gpui::ScrollAnchor::for_handle(handle),
                         }
@@ -11687,24 +11690,24 @@ impl GpuixView {
                 ScrollAncestor::VirtualList(list_id) => previous
                     .remove(&id)
                     .and_then(|entry| match entry {
-                        FocusScrollAnchor::VirtualList {
+                        ScrollRevealAnchor::VirtualList {
                             list_id: previous_id,
                             bounds,
                             pending_reveal_origin,
-                        } if previous_id == list_id => Some(FocusScrollAnchor::VirtualList {
+                        } if previous_id == list_id => Some(ScrollRevealAnchor::VirtualList {
                             list_id,
                             bounds,
                             pending_reveal_origin,
                         }),
                         _ => None,
                     })
-                    .unwrap_or_else(|| FocusScrollAnchor::VirtualList {
+                    .unwrap_or_else(|| ScrollRevealAnchor::VirtualList {
                         list_id,
                         bounds: Arc::new(Mutex::new(None)),
                         pending_reveal_origin: Arc::new(Mutex::new(None)),
                     }),
             };
-            self.focus_scroll_anchors.insert(id, entry);
+            self.scroll_reveal_anchors.insert(id, entry);
         }
     }
 
@@ -11725,8 +11728,8 @@ impl GpuixView {
         let mut current = id;
         let mut requested = false;
 
-        for anchor in self.focus_scroll_anchors.values() {
-            if let FocusScrollAnchor::VirtualList {
+        for anchor in self.scroll_reveal_anchors.values() {
+            if let ScrollRevealAnchor::VirtualList {
                 pending_reveal_origin,
                 ..
             } = anchor
@@ -11743,10 +11746,10 @@ impl GpuixView {
                     // own child index instead.
                     let anchor = (alignment == RevealAlignment::Nearest)
                         .then(|| {
-                            self.focus_scroll_anchors
+                            self.scroll_reveal_anchors
                                 .get(&current)
                                 .and_then(|entry| match entry {
-                                    FocusScrollAnchor::Overflow {
+                                    ScrollRevealAnchor::Overflow {
                                         scroller_id: anchor_scroller_id,
                                         anchor,
                                     } if *anchor_scroller_id == scroller_id => Some(anchor),
@@ -11804,9 +11807,9 @@ impl GpuixView {
                     }
                     if let Some(entry) = self.virtual_lists.get(&list_id) {
                         let exact =
-                            self.focus_scroll_anchors.get(&current).and_then(
+                            self.scroll_reveal_anchors.get(&current).and_then(
                                 |anchor| match anchor {
-                                    FocusScrollAnchor::VirtualList {
+                                    ScrollRevealAnchor::VirtualList {
                                         list_id: anchor_list_id,
                                         bounds,
                                         pending_reveal_origin,
@@ -12080,7 +12083,7 @@ impl gpui::Render for GpuixView {
                     canvas_image_store: &self.canvas_image_store,
                     event_callback: &callback,
                     focus_handles: &self.focus_handles,
-                    focus_scroll_anchors: &self.focus_scroll_anchors,
+                    scroll_reveal_anchors: &self.scroll_reveal_anchors,
                     scroll_handles: &mut self.scroll_handles,
                     scroll_event_offsets: &self.scroll_event_offsets,
                     custom_registry: &mut self.custom_registry,
@@ -12252,11 +12255,11 @@ fn focus_paint_bounds_listener(
     id: u64,
     ctx: &BuildCtx,
 ) -> Option<crate::automation::PaintBoundsListener> {
-    let FocusScrollAnchor::VirtualList {
+    let ScrollRevealAnchor::VirtualList {
         list_id,
         bounds,
         pending_reveal_origin,
-    } = ctx.focus_scroll_anchors.get(&id)?
+    } = ctx.scroll_reveal_anchors.get(&id)?
     else {
         return None;
     };
@@ -12999,9 +13002,9 @@ fn build_element_inner(
                 focus_handle: ctx.focus_handles.get(&id),
                 focus_within,
                 scroll_anchor: ctx
-                    .focus_scroll_anchors
+                    .scroll_reveal_anchors
                     .get(&id)
-                    .and_then(FocusScrollAnchor::overflow_anchor),
+                    .and_then(ScrollRevealAnchor::overflow_anchor),
                 paint_bounds_listener,
                 style,
                 children: custom_children,
@@ -14443,8 +14446,8 @@ fn build_virtual_list(
         });
     let pending_reveal_origin =
         focused_target.and_then(
-            |(target_id, _)| match ctx.focus_scroll_anchors.get(&target_id) {
-                Some(FocusScrollAnchor::VirtualList {
+            |(target_id, _)| match ctx.scroll_reveal_anchors.get(&target_id) {
+                Some(ScrollRevealAnchor::VirtualList {
                     list_id,
                     pending_reveal_origin,
                     ..
@@ -16343,9 +16346,9 @@ pub(crate) fn build_host_container(
         }
     }
     if let Some(anchor) = ctx
-        .focus_scroll_anchors
+        .scroll_reveal_anchors
         .get(&element.id)
-        .and_then(FocusScrollAnchor::overflow_anchor)
+        .and_then(ScrollRevealAnchor::overflow_anchor)
     {
         el = el.anchor_scroll(Some(anchor.clone()));
     }
