@@ -5,6 +5,10 @@ inputs:
   working-directory:
     description: The directory of the Cargo workspace that the job builds.
     required: true
+  cache-generation:
+    description: Names the saved objects. GitHub keeps the first cache saved under a key, so a job that compiles something other than the addon's release build needs a name of its own, or its objects are never saved.
+    required: false
+    default: v1
 
 runs:
   using: composite
@@ -19,6 +23,7 @@ runs:
       uses: jdx/mr-boxington-action@1687e54eb349cadf61fa38b5813a77875489e8e6 # v1.6.0
       with:
         working-directory: ${{ inputs.working-directory }}
+        cache-generation: ${{ inputs.cache-generation }}
         github-cache-mode: objects
         save-on-workflow-dispatch: true
         save-on-pull-request: true

@@ -347,6 +347,7 @@ jobs:
         uses: ./.github/actions/mbx
         with:
           working-directory: zed
+          cache-generation: v1-gpui
 
       - name: Test GPUI
         run: bun run test:gpui
@@ -399,6 +400,7 @@ jobs:
         uses: ./.github/actions/mbx
         with:
           working-directory: packages/native
+          cache-generation: v1-check
 
       - name: Check without default features
         run: bunx turbo run check:no-default-features
