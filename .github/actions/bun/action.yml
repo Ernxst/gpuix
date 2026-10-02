@@ -9,6 +9,15 @@ runs:
       with:
         bun-version-file: package.json
 
+    # `bun install` takes about 24 seconds on the GitHub-hosted Windows runner,
+    # most of it downloading packages, so Bun's package cache is kept there.
+    - name: Restore the package cache
+      if: runner.os == 'Windows'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.bun/install/cache
+        key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+
     - name: Install dependencies
       run: bun install --frozen-lockfile
       shell: bash

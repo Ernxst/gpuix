@@ -75,50 +75,68 @@ jobs:
       - name: Lint dependencies
         run: bunx turbo run "//#lint:dependencies"
 
-  affected:
-    name: Affected
-    runs-on: blacksmith-2vcpu-ubuntu-2404
-    timeout-minutes: 2
+  # Each platform builds and then tests on its own, so one platform's tests
+  # never wait for another platform's build. The build stores the packages in
+  # the turbo remote cache, and the test and typecheck jobs restore them.
+  build-macos:
+    name: Build (macOS)
+    runs-on: macos-latest
     permissions:
       contents: read
-    outputs:
-      tasks: ${{ steps.affected.outputs.tasks }}
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
     steps:
-      # Two commits deep: a pull request's merge commit and its first parent,
-      # the base. The `zed` submodule stays out, because a change to it shows
-      # as a change to the path `zed` in this repository.
       - name: Clone repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 2
+          submodules: recursive
 
-      - name: Setup bun
-        if: github.event_name == 'pull_request'
-        uses: ./.github/actions/bun
+      - name: Build
+        uses: ./.github/actions/build
 
-      # The tasks whose inputs the pull request changes. When there are none,
-      # the jobs below are skipped. Nothing under .github is a task's input,
-      # yet a change there changes how every task runs here, so it counts as
-      # all of them. So does a run that is not for a pull request.
-      - name: List the affected tasks
-        id: affected
-        shell: bash
-        run: |
-          if [ "$GITHUB_EVENT_NAME" != pull_request ] || ! git diff --quiet HEAD^1 HEAD -- .github; then
-            tasks=all
-          else
-            tasks=$(bunx turbo query affected --tasks build typecheck test test:gpui --base HEAD^1 --head HEAD | jq -r '[.data.affectedTasks.items[].fullName] | join(" ")')
-          fi
-          echo "Affected: ${tasks:-nothing}"
-          echo "tasks=$tasks" >> "$GITHUB_OUTPUT"
+  build-linux:
+    name: Build (Linux)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Build
+        uses: ./.github/actions/build
+
+  build-windows:
+    name: Build (Windows)
+    runs-on: blacksmith-4vcpu-windows-2025
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Build
+        uses: ./.github/actions/build
 
   typecheck:
     name: Typecheck
-    # Waits for the build so the native binding's types come from the cache.
-    # Runs on macOS because those types include the test renderer, which the
-    # Linux build leaves out.
-    needs: build
+    # Runs on macOS because the native binding's types include the test
+    # renderer, which the Linux build leaves out.
+    needs: build-macos
     runs-on: macos-latest
     permissions:
       contents: read
@@ -154,18 +172,33 @@ jobs:
         with:
           name: turbo-runs-typecheck
 
-  build:
-    name: Build (${{ matrix.os }})
-    needs: affected
-    if: needs.affected.outputs.tasks != ''
+  test-macos:
+    name: Test (macOS, ${{ matrix.part.name }})
+    needs: build-macos
+    # React's suite is most of the test time, so it runs as shards on separate
+    # runners. The other packages share one.
+    runs-on: macos-latest
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - macos-latest
-          - blacksmith-4vcpu-ubuntu-2404
-          - blacksmith-4vcpu-windows-2025
-    runs-on: ${{ matrix.os }}
+        part:
+          - name: react 1/5
+            shard: 1/5
+            filter: --filter=@gpuix/react
+          - name: react 2/5
+            shard: 2/5
+            filter: --filter=@gpuix/react
+          - name: react 3/5
+            shard: 3/5
+            filter: --filter=@gpuix/react
+          - name: react 4/5
+            shard: 4/5
+            filter: --filter=@gpuix/react
+          - name: react 5/5
+            shard: 5/5
+            filter: --filter=@gpuix/react
+          - name: others
+            filter: --filter=!@gpuix/react
     permissions:
       contents: read
     env:
@@ -178,88 +211,24 @@ jobs:
           persist-credentials: false
           submodules: recursive
 
-      - name: Setup bun
-        uses: ./.github/actions/bun
-
-      # The steps below install what a task needs to run. A task the cache
-      # holds is restored instead, so its setup is skipped.
-      - name: Check the turbo cache
-        id: cache
-        uses: ./.github/actions/turbo-cache
+      - name: Test
+        uses: ./.github/actions/test
         with:
-          args: build
+          filter: ${{ matrix.part.filter }}
+          shard: ${{ matrix.part.shard }}
+          summary-name: turbo-runs-test-${{ runner.os }}-${{ strategy.job-index }}
 
-      - name: Setup node
-        if: steps.cache.outputs.misses != ''
-        uses: ./.github/actions/node
-
-      - name: Setup rust
-        if: contains(steps.cache.outputs.misses, '@gpuix/native#build')
-        uses: ./.github/actions/rust
-
-      - name: Setup macos
-        if: runner.os == 'macOS' && contains(steps.cache.outputs.misses, '@gpuix/native#build')
-        uses: ./.github/actions/macos
-
-      - name: Setup linux
-        if: runner.os == 'Linux' && contains(steps.cache.outputs.misses, '@gpuix/native#build')
-        uses: ./.github/actions/linux
-
-      # Brings back mbx's compiled objects from the last build on this pull
-      # request, or else on the default branch. Objects match by content, so the
-      # crates in the `zed` submodule are cache hits on a fresh checkout; Cargo's
-      # own target directory would treat them as changed and recompile them.
-      # Runs after the toolchain is installed, because the cache key includes
-      # the compiler.
-      #
-      # Pinned to a commit on the action's main branch: v1.5.0, the latest
-      # release, has no `save-on-pull-request`.
-      - name: Setup mbx
-        if: contains(steps.cache.outputs.misses, '@gpuix/native#build')
-        uses: jdx/mr-boxington-action@81ec44711945b482d44718f5f1543d2df54c6b19 # main
-        with:
-          working-directory: packages/native
-          github-cache-mode: objects
-          save-on-workflow-dispatch: true
-          save-on-pull-request: true
-
-      # napi runs `cargo`, so mbx's Cargo shim goes first on PATH.
-      - name: Route cargo through mbx
-        if: contains(steps.cache.outputs.misses, '@gpuix/native#build')
-        shell: bash
-        run: |
-          mbx setup --yes
-          case "$RUNNER_OS" in
-            macOS) echo "$HOME/Library/Application Support/mbx/bin" >> "$GITHUB_PATH" ;;
-            Linux) echo "$HOME/.local/share/mbx/bin" >> "$GITHUB_PATH" ;;
-            Windows) echo "$LOCALAPPDATA\\mbx\\bin" >> "$GITHUB_PATH" ;;
-          esac
-
-      - name: Build
-        run: bun run build
-
-      - name: Report the turbo runs
-        if: ${{ !cancelled() }}
-        uses: ./.github/actions/turbo-summary
-        with:
-          name: turbo-runs-build-${{ matrix.os }}
-
-  test:
-    name: Test (${{ matrix.os }}, ${{ matrix.part.name }})
-    # Waits for the build so the packages come from the cache.
-    needs: build
+  test-windows:
+    name: Test (Windows, ${{ matrix.part.name }})
+    needs: build-windows
+    # A GitHub-hosted runner, not Blacksmith's. The test renderer opens a real
+    # DirectX window, which needs an interactive desktop session, and
+    # Blacksmith runs its Windows agent as a service in session 0, where
+    # creating the DirectX renderer fails.
+    runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
-        # Windows stays on a GitHub-hosted runner. The test renderer opens a
-        # real DirectX window, which needs an interactive desktop session, and
-        # Blacksmith runs its Windows agent as a service in session 0, where
-        # creating the DirectX renderer fails.
-        os:
-          - macos-latest
-          - windows-latest
-        # React's suite is most of the test time, so it runs as three shards on
-        # separate runners. The other packages share one.
         part:
           - name: react 1/3
             shard: 1/3
@@ -272,20 +241,11 @@ jobs:
             filter: --filter=@gpuix/react
           - name: others
             filter: --filter=!@gpuix/react
-        # Linux has no test renderer, so packages/react/vitest.config.ts leaves
-        # out the files that need one. What remains takes seconds, so one
-        # runner tests every package.
-        include:
-          - os: blacksmith-2vcpu-ubuntu-2404
-            part:
-              name: all
-              filter: ""
-    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
-    permissions:
-      contents: read
     steps:
       - name: Clone repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -293,57 +253,41 @@ jobs:
           persist-credentials: false
           submodules: recursive
 
-      - name: Setup bun
-        uses: ./.github/actions/bun
-
-      # A test task the cache holds is replayed, so nothing below it needs
-      # installing.
-      - name: Check the turbo cache
-        id: cache
-        uses: ./.github/actions/turbo-cache
+      - name: Test
+        uses: ./.github/actions/test
         with:
-          args: test ${{ matrix.part.filter }}
+          filter: ${{ matrix.part.filter }}
           shard: ${{ matrix.part.shard }}
+          summary-name: turbo-runs-test-${{ runner.os }}-${{ strategy.job-index }}
 
-      - name: Setup node
-        if: steps.cache.outputs.misses != ''
-        uses: ./.github/actions/node
-
-      - name: Setup macos
-        if: runner.os == 'macOS' && steps.cache.outputs.misses != ''
-        uses: ./.github/actions/macos
-
-      # The addon loads these libraries at run time.
-      - name: Setup linux
-        if: runner.os == 'Linux' && steps.cache.outputs.misses != ''
-        uses: ./.github/actions/linux
-
-      # packages/react/vitest.config.ts reads the shard from VITEST_SHARD, which
-      # is part of the test task's hash.
-      - name: Test React
-        if: matrix.part.shard
-        shell: bash
-        env:
-          VITEST_SHARD: ${{ matrix.part.shard }}
-        run: bunx turbo run test ${{ matrix.part.filter }}
-
-      - name: Test the other packages
-        if: ${{ !matrix.part.shard }}
-        shell: bash
-        run: bunx turbo run test ${{ matrix.part.filter }} --concurrency=1 --continue=dependencies-successful
-
-      - name: Report the turbo runs
-        if: ${{ !cancelled() }}
-        uses: ./.github/actions/turbo-summary
+  test-linux:
+    name: Test (Linux)
+    needs: build-linux
+    # Linux has no test renderer, so packages/react/vitest.config.ts leaves out
+    # the files that need one. What remains takes seconds, so one runner tests
+    # every package.
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: turbo-runs-test-${{ matrix.os }}-${{ strategy.job-index }}
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Test
+        uses: ./.github/actions/test
+        with:
+          summary-name: turbo-runs-test-Linux
 
   test-gpui:
-    name: Test GPUI (macos)
-    # GPUI's own suite takes about eight minutes. Its inputs are the `zed`
+    name: Test GPUI (macOS)
+    # GPUI's own suite takes about ten minutes. Its inputs are in the `zed`
     # submodule, so turbo replays the result until the submodule changes.
-    needs: affected
-    if: needs.affected.outputs.tasks == 'all' || contains(needs.affected.outputs.tasks, '@gpuix/native#test:gpui')
     runs-on: macos-latest
     permissions:
       contents: read
