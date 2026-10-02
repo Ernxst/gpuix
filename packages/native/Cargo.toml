@@ -114,7 +114,9 @@ gpui_windows = { path = "../../zed/crates/gpui_windows", default-features = fals
 # letting users write GPU-backed tests for their apps.
 default = ["test-support"]
 display-discovery-fault-injection = ["gpui_macos/display-discovery-fault-injection"]
-test-support = ["gpui/test-support", "gpui_platform/test-support", "gpui_macos/test-support", "gpui_macos/font-kit", "gpui_windows/test-support"]
+# `gpui_platform/test-support` is left out: it turns on `gpui_wgpu/test-support`,
+# which does not compile on Linux, and this crate uses nothing else it adds.
+test-support = ["gpui/test-support", "gpui_macos/test-support", "gpui_macos/font-kit", "gpui_windows/test-support"]
 
 [build-dependencies]
 napi-build = "2"
