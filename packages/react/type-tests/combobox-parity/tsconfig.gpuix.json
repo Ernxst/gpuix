@@ -6,6 +6,20 @@
       "@gpuix/react/jsx-runtime": ["../../jsx-runtime.d.ts"]
     }
   },
-  "files": ["./combobox-parity.tsx"],
-  "include": ["./combobox-parity.tsx"]
+  "files": [
+    "./combobox-parity.tsx",
+    "./base-ui-docs/combobox-02.tsx",
+    "./base-ui-docs/combobox-04.tsx",
+    "./base-ui-docs/combobox-07.tsx",
+    "./base-ui-docs/combobox-12.tsx",
+    "./compatibility.tsx"
+  ],
+  "include": [
+    "./combobox-parity.tsx",
+    "./base-ui-docs/combobox-02.tsx",
+    "./base-ui-docs/combobox-04.tsx",
+    "./base-ui-docs/combobox-07.tsx",
+    "./base-ui-docs/combobox-12.tsx",
+    "./compatibility.tsx"
+  ]
 }

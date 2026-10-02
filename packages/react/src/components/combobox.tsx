@@ -530,7 +530,7 @@ export const ComboboxTrigger = forwardRef<PublicInstance, ComboboxTriggerProps>(
   return renderPart("button", render, { ...resolved, onClick: (event: GpuixMouseEvent) => { onClick?.(event); if (!event.defaultPrevented && !state.disabled) context.setOpen(!context.open, "trigger-press", event) } } as Props, children, state, ref) as ReactElement
 })
 
-export interface ComboboxValueProps { placeholder?: ReactNode; children?: ReactNode | ((value: unknown) => ReactNode) }
+export interface ComboboxValueProps { placeholder?: ReactNode; children?: ReactNode | ((value: any) => ReactNode) }
 export const ComboboxValue = function ComboboxValue({ placeholder, children }: ComboboxValueProps): ReactElement {
   const context = useComboboxContext("Combobox.Value")
   const content = typeof children === "function" ? children(context.value) : children
@@ -585,7 +585,7 @@ export const ComboboxItem = forwardRef<PublicInstance, ComboboxItemProps>(functi
 })
 
 export interface ComboboxListState { empty: boolean }
-export interface ComboboxListProps extends PartProps<ComboboxListState, "children"> { children?: ReactNode | ((item: unknown, index: number) => ReactNode) }
+export interface ComboboxListProps extends PartProps<ComboboxListState, "children"> { children?: ReactNode | ((item: any, index: number) => ReactNode) }
 export const ComboboxList = forwardRef<PublicInstance, ComboboxListProps>(function ComboboxList({ children, render, className, style, ...props }, ref) {
   const context = useComboboxContext("Combobox.List")
   const state = { empty: context.filteredItems.length === 0 }
