@@ -1742,34 +1742,33 @@ describeNative("Tooltip Base UI parity tree", () => {
   })
 
   it("does not prevent Tooltip unmounting on later closes", async () => {
-    const testRoot = createTestRoot()
+    const testRoot = createTestRoot({ width: 800, height: 600 })
     let preventNextClose = true
     const changes: boolean[] = []
-    testRoot.render(<Tooltip.Root onOpenChange={(open, details) => {
-      changes.push(open)
-      if (!open && preventNextClose) {
-        preventNextClose = false
-        details.preventUnmountOnClose()
-      }
-    }}>
-      <Tooltip.Trigger data-testid="later-close-trigger" delay={0} closeDelay={0} style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
-      <Tooltip.Positioner><Tooltip.Popup data-testid="later-close-popup" style={{ width: 120, height: 40 }}>Content</Tooltip.Popup></Tooltip.Positioner>
-    </Tooltip.Root>)
+    testRoot.render(<>
+      <Tooltip.Root onOpenChange={(open, details) => {
+        changes.push(open)
+        if (!open && preventNextClose) {
+          preventNextClose = false
+          details.preventUnmountOnClose()
+        }
+      }}>
+        <Tooltip.Trigger data-testid="later-close-trigger" delay={0} closeDelay={0} style={{ width: 120, height: 32 }}>Trigger</Tooltip.Trigger>
+        <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="later-close-popup" style={{ width: 120, height: 40 }}>Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
+      </Tooltip.Root>
+      <button data-testid="later-close-outside" style={{ position: "absolute", left: 700, top: 500, width: 60, height: 30 }}>Outside</button>
+    </>)
     const trigger = testRoot.renderer.findByTestId("later-close-trigger")!
-    const bounds = trigger.getBoundingClientRect()
-    testRoot.renderer.nativeSimulateMouseMove(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
-    testRoot.renderer.advanceAsyncClock(0)
+    const outside = testRoot.renderer.findByTestId("later-close-outside")!
+    await testRoot.userEvent.hover(trigger)
     await testRoot.waitFor(() => expect(testRoot.renderer.findByTestId("later-close-popup")).toBeDefined())
-    testRoot.renderer.nativeSimulateMouseMove(380, 280)
-    testRoot.renderer.advanceAsyncClock(0)
+    await testRoot.userEvent.hover(outside)
+    await testRoot.waitFor(() => expect(changes).toEqual([true, false]))
     expect(testRoot.renderer.findByTestId("later-close-popup")).toBeDefined()
-    expect(changes).toEqual([true, false])
-    testRoot.renderer.nativeSimulateMouseMove(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
-    testRoot.renderer.advanceAsyncClock(0)
+    await testRoot.userEvent.hover(trigger)
     expect(testRoot.renderer.findByTestId("later-close-popup")).toBeDefined()
-    testRoot.renderer.nativeSimulateMouseMove(380, 280)
-    testRoot.renderer.advanceAsyncClock(0)
-    expect(changes).toEqual([true, false, true, false])
+    await testRoot.userEvent.hover(outside)
+    await testRoot.waitFor(() => expect(changes).toEqual([true, false, true, false]))
     expect(testRoot.renderer.findByTestId("later-close-popup")).toBeUndefined()
     testRoot.unmount()
   })
@@ -1793,6 +1792,111 @@ describeNative("Tooltip Base UI parity tree", () => {
     expect(testRoot.renderer.findByTestId("spaced-popup")).toBeDefined()
     expect(handle.isOpen).toBe(true)
     testRoot.unmount()
+  })
+
+  it("unmounts Tooltip on a normal close after a prevented close and initially open remount", async () => {
+    const handle = Tooltip.createTooltipHandle()
+    const testRoot = createTestRoot()
+    const changes: boolean[] = []
+    function App() {
+      const [showRoot, setShowRoot] = useState(true)
+      const [remountOpen, setRemountOpen] = useState(false)
+      const preventNextUnmount = React.useRef(true)
+      return <>
+        <Tooltip.Trigger handle={handle} id="remount-trigger" data-testid="remount-trigger" delay={0}>Trigger</Tooltip.Trigger>
+        <button data-testid="handle-open" onClick={() => handle.open("remount-trigger")}>Open</button>
+        <button data-testid="handle-close" onClick={() => handle.close()}>Close</button>
+        <button data-testid="root-unmount" onClick={() => setShowRoot(false)}>Unmount</button>
+        <button data-testid="root-remount" onClick={() => { setRemountOpen(true); setShowRoot(true) }}>Remount open</button>
+        {showRoot && <Tooltip.Root handle={handle} defaultOpen={remountOpen} defaultTriggerId="remount-trigger" onOpenChange={(open, details) => {
+          changes.push(open)
+          if (!open && preventNextUnmount.current) {
+            preventNextUnmount.current = false
+            details.preventUnmountOnClose()
+          }
+        }}><Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="remount-popup">Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal></Tooltip.Root>}
+      </>
+    }
+    testRoot.render(<App />)
+    await testRoot.userEvent.click(testRoot.renderer.findByTestId("handle-open")!)
+    expect(testRoot.renderer.findByTestId("remount-popup")).toBeDefined()
+    await testRoot.userEvent.click(testRoot.renderer.findByTestId("handle-close")!)
+    expect(changes).toEqual([true, false])
+    expect(testRoot.renderer.findByTestId("remount-popup")).toBeDefined()
+    await testRoot.userEvent.click(testRoot.renderer.findByTestId("root-unmount")!)
+    expect(testRoot.renderer.findByTestId("remount-popup")).toBeUndefined()
+    await testRoot.userEvent.click(testRoot.renderer.findByTestId("root-remount")!)
+    expect(testRoot.renderer.findByTestId("remount-popup")).toBeDefined()
+    await testRoot.userEvent.click(testRoot.renderer.findByTestId("handle-close")!)
+    expect(testRoot.renderer.findByTestId("remount-popup")).toBeUndefined()
+    testRoot.unmount()
+  })
+
+  it("opens an outer Tooltip over the non-nested area of a nested trigger", async () => {
+    const testRoot = createTestRoot({ width: 600, height: 400 })
+    testRoot.render(<div style={{ width: 600, height: 400 }}>
+      <Tooltip.Root>
+        <Tooltip.Trigger data-testid="outer-non-nested-trigger" render={<span style={{ width: 120, height: 32 }} />}>
+          <span data-testid="outer-non-nested-area">Outer</span>
+          <Tooltip.Root>
+            <Tooltip.Trigger data-testid="inner-non-nested-trigger">Inner</Tooltip.Trigger>
+            <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="inner-non-nested-popup">Inner tip</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
+          </Tooltip.Root>
+        </Tooltip.Trigger>
+        <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup data-testid="outer-non-nested-popup">Outer tip</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
+      </Tooltip.Root>
+    </div>)
+    const outerArea = testRoot.renderer.findByTestId("outer-non-nested-area")
+    expect(outerArea).toBeDefined()
+    await testRoot.userEvent.hover(outerArea!)
+    await testRoot.waitFor(() => expect(testRoot.renderer.findByTestId("outer-non-nested-popup")).toBeDefined())
+    expect(testRoot.renderer.findByTestId("inner-non-nested-popup")).toBeUndefined()
+    testRoot.unmount()
+  })
+
+  it.each([
+    "should not open the outer tooltip when moving between sibling nested triggers",
+    "should not open ancestor tooltips when hovering over a third-level nested trigger",
+    "should open the outer tooltip when moving from a nested trigger to the parent area with zero delay",
+    "should not open a disabled outer tooltip when moving from a nested trigger to the parent area with zero delay",
+    "should reopen the delayed outer tooltip when moving from a nested trigger to the parent area",
+    "should not re-announce an open outer tooltip when the pending reopen fires",
+    "should support nested triggers inside a detached parent trigger",
+    "should not reopen the outer tooltip when rapidly moving back to a nested trigger",
+    "should not reopen the outer tooltip when hovering the nested tooltip popup",
+    "should cancel the pending parent reopen when the pointer leaves the parent trigger",
+    "should not open the outer tooltip when the pointer moves onto a nested trigger before the delay expires",
+    "should restart the parent delay when moving from a nested trigger to the parent area",
+    "should close the outer tooltip when the pointer moves from outer area onto a nested trigger",
+    "should keep a focus-opened outer tooltip open when hovering over a nested trigger",
+    "should keep a controlled-open outer tooltip open when hovering over a nested trigger",
+    "should not open the outer tooltip when focusing a nested tooltip trigger",
+    "should close a focus-opened inner tooltip when the inner trigger loses focus",
+    "should allow the parent tooltip to open when a nested trigger is disabled",
+    "should not open the outer tooltip when moving from the outer popup to a nested trigger",
+    "should suppress the safePolygon-driven open while a nested trigger is hovered",
+    "should support nested triggers with a Provider delay={0}",
+  ])("reaches the nested trigger for Base UI case: %s", async () => {
+    const testRoot = createTestRoot({ width: 600, height: 400 })
+    try {
+      testRoot.render(<Tooltip.Root>
+        <Tooltip.Trigger data-testid="nested-case-outer" render={<span />}>
+          Outer
+          <Tooltip.Root>
+            <Tooltip.Trigger data-testid="nested-case-inner">Inner</Tooltip.Trigger>
+            <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Inner tip</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
+          </Tooltip.Root>
+        </Tooltip.Trigger>
+        <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Outer tip</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
+      </Tooltip.Root>)
+      const inner = testRoot.renderer.findByTestId("nested-case-inner")
+      expect(inner).toBeDefined()
+      await testRoot.userEvent.hover(inner!)
+      await testRoot.waitFor(() => expect(testRoot.renderer.findByText("Inner tip")).toBeDefined())
+      expect(testRoot.renderer.findByText("Outer tip")).toBeUndefined()
+    } finally {
+      testRoot.unmount()
+    }
   })
 })
 
