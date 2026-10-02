@@ -762,6 +762,16 @@ describeNative("Select Base UI 1.8.0 parity", () => {
     })
   })
 
+  it("does not add aria-labelledby when the Select has no label", async () => {
+    screen.render(
+      <Select.Root>
+        <Select.Trigger data-testid="trigger" ariaLabel="Font"><Select.Value /></Select.Trigger>
+        <Select.Popup />
+      </Select.Root>,
+    )
+    expect(screen.getByTestId("trigger")).not.toHaveAttribute("aria-labelledby")
+  })
+
   it("focuses the trigger without opening when the label is clicked", async () => {
     screen.render(
       <Select.Root>
