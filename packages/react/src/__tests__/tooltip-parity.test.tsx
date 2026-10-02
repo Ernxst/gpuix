@@ -1,13 +1,147 @@
 import React, { useState } from "react"
+import path from "node:path"
 import { describe, expect, it } from "vitest"
 import * as Tooltip from "../components/tooltip.js"
 import type { TooltipChangeEventDetails } from "../components/tooltip.js"
 import { createTestRoot, isNativeTestRendererAvailable } from "../testing.js"
 import type { PublicInstance } from "../types/host.js"
+import { expectScreenshotsEqual, SHOTS_DIR } from "./test-utils.js"
 
 const describeNative = isNativeTestRendererAvailable() ? describe : describe.skip
 
 describeNative("Tooltip Base UI parity tree", () => {
+  it("closes a focus-opened tooltip when Tab moves to a non-tooltip button", async () => {
+    const testRoot = createTestRoot()
+    const blurredTriggers: string[] = []
+
+    testRoot.render(
+      <>
+        <Tooltip.Root>
+          <Tooltip.Trigger onBlur={() => blurredTriggers.push("Map")}>Map</Tooltip.Trigger>
+          <Tooltip.Portal>
+            <Tooltip.Positioner>
+              <Tooltip.Popup>Map tooltip</Tooltip.Popup>
+            </Tooltip.Positioner>
+          </Tooltip.Portal>
+        </Tooltip.Root>
+        <button type="button" data-testid="next-button">Next</button>
+      </>
+    )
+
+    await testRoot.userEvent.tab()
+    expect(testRoot.renderer.findByText("Map tooltip")).toBeDefined()
+
+    await testRoot.userEvent.tab()
+    const tree = testRoot.renderer.getAccessibilityTree()
+    const nextButton = Object.entries(tree.nodes).find(([, node]) => node.aria.label === "Next")
+    expect(tree.gpui_focus).toBe(nextButton?.[0])
+    expect(blurredTriggers).toEqual(["Map"])
+    expect(testRoot.renderer.findByText("Map tooltip")).toBeUndefined()
+
+    const closedScreenshot = path.join(SHOTS_DIR, "tooltip-focus-leave-closed.png")
+    testRoot.renderer.captureScreenshot(closedScreenshot)
+    const reference = createTestRoot()
+    reference.render(
+      <>
+        <Tooltip.Root>
+          <Tooltip.Trigger>Map</Tooltip.Trigger>
+          <Tooltip.Portal>
+            <Tooltip.Positioner>
+              <Tooltip.Popup>Map tooltip</Tooltip.Popup>
+            </Tooltip.Positioner>
+          </Tooltip.Portal>
+        </Tooltip.Root>
+        <button type="button" data-testid="next-button">Next</button>
+      </>
+    )
+    const referenceNextButton = reference.renderer.findByTestId("next-button")!
+    reference.renderer.focusElement(referenceNextButton.id)
+    const referenceScreenshot = path.join(SHOTS_DIR, "tooltip-focus-leave-reference.png")
+    reference.renderer.captureScreenshot(referenceScreenshot)
+    expectScreenshotsEqual(closedScreenshot, referenceScreenshot)
+    reference.unmount()
+    testRoot.render(null)
+  })
+
+  it("closes a focus-opened tooltip before focus reaches another provider tooltip", async () => {
+    const testRoot = createTestRoot()
+
+    testRoot.render(
+      <Tooltip.Provider>
+        <Tooltip.Root>
+          <Tooltip.Trigger>First</Tooltip.Trigger>
+          <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>First tooltip</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
+        </Tooltip.Root>
+        <button type="button">Outside</button>
+        <Tooltip.Root>
+          <Tooltip.Trigger>Last</Tooltip.Trigger>
+          <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Last tooltip</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
+        </Tooltip.Root>
+      </Tooltip.Provider>
+    )
+
+    await testRoot.userEvent.tab()
+    expect(testRoot.renderer.findByText("First tooltip")).toBeDefined()
+    await testRoot.userEvent.tab()
+    const tree = testRoot.renderer.getAccessibilityTree()
+    const outsideButton = Object.entries(tree.nodes).find(([, node]) => node.aria.label === "Outside")
+    expect(tree.gpui_focus).toBe(outsideButton?.[0])
+    expect(testRoot.renderer.findByText("First tooltip")).toBeUndefined()
+    testRoot.unmount()
+  })
+
+  it("closes a rendered trigger's focus-opened tooltip on Shift+Tab despite closeDelay", async () => {
+    const testRoot = createTestRoot()
+
+    testRoot.render(
+      <Tooltip.Provider closeDelay={500}>
+        <button type="button">Before</button>
+        <Tooltip.Root>
+          <Tooltip.Trigger render={<button type="button">Map</button>} />
+          <Tooltip.Portal>
+            <Tooltip.Positioner>
+              <Tooltip.Popup>Map tooltip</Tooltip.Popup>
+            </Tooltip.Positioner>
+          </Tooltip.Portal>
+        </Tooltip.Root>
+      </Tooltip.Provider>
+    )
+
+    await testRoot.userEvent.tab()
+    await testRoot.userEvent.tab()
+    expect(testRoot.renderer.findByText("Map tooltip")).toBeDefined()
+
+    await testRoot.userEvent.tab({ shift: true })
+    const tree = testRoot.renderer.getAccessibilityTree()
+    const beforeButton = Object.entries(tree.nodes).find(([, node]) => node.aria.label === "Before")
+    expect(tree.gpui_focus).toBe(beforeButton?.[0])
+    expect(testRoot.renderer.findByText("Map tooltip")).toBeUndefined()
+    testRoot.unmount()
+  })
+
+  it("closes a detached Handle's focus-opened tooltip immediately on blur", () => {
+    const testRoot = createTestRoot()
+    const handle = Tooltip.createTooltipHandle()
+    let trigger: PublicInstance | null = null
+    let next: PublicInstance | null = null
+
+    testRoot.render(
+      <Tooltip.Provider closeDelay={500}>
+        <Tooltip.Root handle={handle}>
+          <Tooltip.Portal><Tooltip.Positioner><Tooltip.Popup>Handle tooltip</Tooltip.Popup></Tooltip.Positioner></Tooltip.Portal>
+        </Tooltip.Root>
+        <Tooltip.Trigger handle={handle} ref={(instance) => { trigger = instance }}>Map</Tooltip.Trigger>
+        <button ref={(instance) => { next = instance }} type="button">Next</button>
+      </Tooltip.Provider>
+    )
+
+    testRoot.renderer.focusElement(trigger!.id)
+    expect(testRoot.renderer.findByText("Handle tooltip")).toBeDefined()
+    testRoot.renderer.focusElement(next!.id)
+    expect(testRoot.renderer.findByText("Handle tooltip")).toBeUndefined()
+    testRoot.unmount()
+  })
+
   it.each([false, true])(
     "closes the previous focus-opened tooltip when focus moves to another trigger with an absolute z-index ancestor=%s",
     async (positionedAncestor) => {
@@ -58,8 +192,8 @@ describeNative("Tooltip Base UI parity tree", () => {
       expect(blurredTriggers).toEqual([0, 1, 2])
       expect(observedOpenTooltips, "only the focused trigger's tooltip should be open after each Tab").toEqual([[0], [1], [2]])
       expect(siblingCloseDetails.map(({ index, details }) => [index, details.reason, details.event])).toEqual([
-        [0, "none", undefined],
-        [1, "none", undefined],
+        [0, "trigger-focus", expect.anything()],
+        [1, "trigger-focus", expect.anything()],
         [2, "trigger-focus", expect.anything()],
       ])
       testRoot.unmount()

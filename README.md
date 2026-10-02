@@ -3942,10 +3942,12 @@ are retained.
 Combobox uses the native input for text editing, IME, clipboard, and focus.
 Tooltip parts accept `render`, state-based `className` and `style`, and expose
 Base UI state attributes. Keyboard focus opens a tooltip immediately; moving
-focus to another trigger in the same Provider closes the tooltip opened by the
-previous trigger. The Positioner follows the active rendered Trigger and
-places the popup on its requested side. `Tooltip.Viewport` is optional unless
-animated content switches between triggers. The native Portal keeps children
+focus away from a focus-opened trigger closes its tooltip immediately, including
+when focus moves outside the Provider; `closeDelay` continues to apply to hover
+closure. Focusing another trigger in the same Provider also closes the previous
+tooltip. The Positioner follows the active rendered Trigger and places the
+popup on its requested side. `Tooltip.Viewport` is optional unless animated
+content switches between triggers. The native Portal keeps children
 in the retained tree; its `container` prop does not select a destination. The
 shared floating Positioner uses GPUI's deferred `anchored()` layer, flips and
 shifts against the padded window boundary, and occludes controls behind it. A

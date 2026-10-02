@@ -614,7 +614,8 @@ const TooltipTriggerInRoot = forwardRef<PublicInstance, TooltipTriggerProps>(fun
     },
     onBlur: (event: GpuixSyntheticEvent) => {
       onBlur?.(event as never)
-      context.scheduleClose(closeDelay ?? provider.closeDelay, "trigger-focus", event)
+      if (context.instant === "focus") context.close("trigger-focus", event)
+      else context.scheduleClose(closeDelay ?? provider.closeDelay, "trigger-focus", event)
     },
     onMouseDown: (event: GpuixSyntheticEvent) => {
       onMouseDown?.(event as never)
@@ -662,6 +663,7 @@ const TooltipTriggerWithHandle = forwardRef<PublicInstance, TooltipTriggerProps>
   const generatedId = React.useId()
   const triggerId = id ?? `tooltip-trigger-${generatedId}`
   const activeHandle = handle!
+  const focusOpened = useRef(false)
   const isOpen = useSyncExternalStore(
     (listener) => subscribeTooltipHandle(activeHandle, listener),
     () => isTooltipHandleTriggerOpen(activeHandle, triggerId),
@@ -688,6 +690,7 @@ const TooltipTriggerWithHandle = forwardRef<PublicInstance, TooltipTriggerProps>
     onMouseEnter: (event: GpuixSyntheticEvent) => {
       onMouseEnter?.(event as never)
       if (disabled) return
+      focusOpened.current = false
       setTooltipHandleCloseDelay(activeHandle, closeDelay ?? provider.closeDelay)
       cancelTooltipHandleClose(activeHandle)
       const recentlyClosed = Date.now() - provider.lastClosedAt.current <= provider.timeout
@@ -700,13 +703,15 @@ const TooltipTriggerWithHandle = forwardRef<PublicInstance, TooltipTriggerProps>
     onFocus: (event: GpuixSyntheticEvent) => {
       onFocus?.(event as never)
       if (!disabled) {
+        focusOpened.current = true
         setTooltipHandleCloseDelay(activeHandle, closeDelay ?? provider.closeDelay)
         activateTooltipHandle(activeHandle, triggerId, payload, "trigger-focus", event)
       }
     },
     onBlur: (event: GpuixSyntheticEvent) => {
       onBlur?.(event as never)
-      scheduleTooltipHandleClose(activeHandle, closeDelay ?? provider.closeDelay, "trigger-focus", event)
+      if (focusOpened.current && isOpen) closeTooltipHandleWithReason(activeHandle, "trigger-focus", event)
+      else scheduleTooltipHandleClose(activeHandle, closeDelay ?? provider.closeDelay, "trigger-focus", event)
     },
     onMouseDown: (event: GpuixSyntheticEvent) => {
       onMouseDown?.(event as never)
