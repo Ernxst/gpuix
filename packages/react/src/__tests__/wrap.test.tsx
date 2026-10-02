@@ -34,6 +34,43 @@ function expectInside(
 }
 
 describeNative("text wrapping", () => {
+  it("lets a trailing space hang in the 320px Satisfactory cell (#860)", () => {
+    const text =
+      "The well's ~180 split is a chain of combined junctions; any Mk.1 pipe or junction on that path caps at 300 m³/min and starves the plastic leg unevenly. Any Phase 4 plastic draw beyond the Supercomputers would expose the shortfall."
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", width: 1040, paddingLeft: 32, paddingRight: 32, gap: 28, alignItems: "flex-start" }}>
+        <div style={{ width: 216, minWidth: 216, maxWidth: 216 }}>Finding</div>
+        <div style={{ width: 140 }}>Signal</div>
+        <div
+          data-testid="watchlist-cell"
+          style={{
+            display: "flex",
+            flexGrow: 1,
+            flexShrink: 1,
+            flexBasis: 0,
+            minWidth: 0,
+            alignItems: "flex-start",
+            minHeight: 0,
+            whiteSpace: "normal",
+            padding: 0,
+            fontFamily: "Avenir Next",
+            fontSize: 12,
+            lineHeight: "16px",
+          }}
+        >
+          {text}
+        </div>
+        <div style={{ width: 216 }}>Response</div>
+      </div>,
+    )
+
+    expect(rect(renderer, "watchlist-cell")).toEqual(
+      expect.objectContaining({ width: 320, height: 64 }),
+    )
+    expect(renderer.getPaintedText()).toContain(text)
+  })
+
   it("renders CSS module pixel line-height at the same height as inline pixels", async () => {
     const styles = await transformGpuixCssModule(
       ".label { font-size: 12px; line-height: 18px; }",
@@ -167,6 +204,18 @@ describeNative("text wrapping", () => {
     const nowrapHeight = rect(renderer, "line").height
     expect(wrappedHeight).toBeGreaterThan(nowrapHeight)
     expect(nowrapHeight).toBeLessThanOrEqual(22)
+
+    render(
+      <div style={{ width: 120 }}>
+        <text
+          data-testid="line"
+          style={{ fontSize: 14, lineHeight: "20px", color: "#eee", whiteSpace: "pre" }}
+        >
+          {PROSE}
+        </text>
+      </div>,
+    )
+    expect(rect(renderer, "line").height).toBeLessThanOrEqual(22)
   })
 
   it("wraps in a flex row when the text has minWidth 0", () => {
