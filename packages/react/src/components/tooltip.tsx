@@ -36,13 +36,13 @@ function isDescendantTooltipTrigger(parent: PublicInstance, child: PublicInstanc
 
   let candidate = child.parentElement
   while (candidate) {
-    if (candidate.id === parent.id) return true
+    if (candidate === parent) return true
     candidate = candidate.parentElement
   }
 
   let parentRef = tooltipTriggerParents.get(child)
   while (parentRef?.current) {
-    if (parentRef.current.id === parent.id) return true
+    if (parentRef.current === parent) return true
     parentRef = tooltipTriggerParents.get(parentRef.current)
   }
 
@@ -50,16 +50,13 @@ function isDescendantTooltipTrigger(parent: PublicInstance, child: PublicInstanc
 }
 
 function isEnabledNestedTriggerFocusEvent(currentTarget: PublicInstance, event: GpuixSyntheticEvent): boolean {
-  if (event.eventPhase !== 3 || event.target.id === currentTarget.id) return false
+  if (event.eventPhase !== 3 || event.target === currentTarget) return false
   const nestedTrigger = registeredTooltipTrigger(event.target)
   return nestedTrigger !== undefined && isDescendantTooltipTrigger(currentTarget, nestedTrigger) && nestedTrigger.getAttribute("data-trigger-disabled") === null
 }
 
 function registeredTooltipTrigger(instance: PublicInstance): PublicInstance | undefined {
-  for (const trigger of tooltipTriggerInstances) {
-    if (trigger.id === instance.id) return trigger
-  }
-  return undefined
+  return tooltipTriggerInstances.has(instance) ? instance : undefined
 }
 
 function isNestedTooltipTrigger(currentTarget: PublicInstance, target: PublicInstance | null, x?: number, y?: number): boolean {
@@ -74,8 +71,8 @@ function isNestedTooltipTrigger(currentTarget: PublicInstance, target: PublicIns
     const pointerInsideParent = x >= parentBounds.left && x <= parentBounds.right && y >= parentBounds.top && y <= parentBounds.bottom
     for (const trigger of tooltipTriggerInstances) {
       const nestedByTree = isDescendantTooltipTrigger(currentTarget, trigger)
-      const relatedTriggerInsideParent = pointerInsideParent && trigger.id === target?.id
-      if (trigger.id !== currentTarget.id && (nestedByTree || relatedTriggerInsideParent)) {
+      const relatedTriggerInsideParent = pointerInsideParent && trigger === target
+      if (trigger !== currentTarget && (nestedByTree || relatedTriggerInsideParent)) {
         const bounds = trigger.getBoundingClientRect()
         if (x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom) return true
       }
@@ -88,7 +85,7 @@ function isEnabledNestedTrigger(currentTarget: PublicInstance, target: PublicIns
   // Focus and pointer events bubble from the nested Trigger with that Trigger
   // as their target. Honour that identity directly before walking the host
   // ancestry, which is not preserved by every native event bridge.
-  if (target && target.id !== currentTarget.id) {
+  if (target && target !== currentTarget) {
     const registered = registeredTooltipTrigger(target)
     if (registered && isDescendantTooltipTrigger(currentTarget, registered) && registered.getAttribute("data-trigger-disabled") === null) return true
   }
@@ -101,7 +98,7 @@ function isEnabledNestedTrigger(currentTarget: PublicInstance, target: PublicIns
   }
   if (x !== undefined && y !== undefined) {
     for (const trigger of tooltipTriggerInstances) {
-      if (trigger.id !== currentTarget.id && isDescendantTooltipTrigger(currentTarget, trigger) && trigger.getAttribute("data-trigger-disabled") === null) {
+      if (trigger !== currentTarget && isDescendantTooltipTrigger(currentTarget, trigger) && trigger.getAttribute("data-trigger-disabled") === null) {
         const bounds = trigger.getBoundingClientRect()
         if (x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom) return true
       }
@@ -139,7 +136,7 @@ function focusRemainsWithinTriggers(trigger: PublicInstance, triggers: Iterable<
   const activeElement = trigger.ownerDocument.activeElement
   return activeElement !== null && Array.from(triggers).some((candidate) =>
     candidate.getAttribute("data-trigger-disabled") === null && (
-      candidate.id === (activeElement as PublicInstance).id || isDescendantTooltipTrigger(candidate, activeElement as PublicInstance)
+      candidate === activeElement || isDescendantTooltipTrigger(candidate, activeElement as PublicInstance)
     )
   )
 }

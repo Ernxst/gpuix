@@ -2137,6 +2137,23 @@ describeNative("Tooltip Base UI parity tree", () => {
     testRoot.unmount()
   })
 
+  it("keeps nested trigger detection scoped to its renderer when roots overlap", async () => {
+    const firstRoot = createTestRoot({ width: 600, height: 400 })
+    renderNestedTooltipScene(firstRoot)
+    const secondRoot = createTestRoot({ width: 600, height: 400 })
+    renderNestedTooltipScene(secondRoot, { disabledInner: true })
+
+    moveTo(secondRoot, "nested-outer-area")
+    await secondRoot.waitFor(() => expect(secondRoot.renderer.findByTestId("nested-outer-popup")).toBeDefined())
+    moveTo(secondRoot, "nested-inner-trigger")
+
+    expect(secondRoot.renderer.findByTestId("nested-outer-popup")).toBeDefined()
+    expect(secondRoot.renderer.findByTestId("nested-inner-popup")).toBeUndefined()
+
+    secondRoot.unmount()
+    firstRoot.unmount()
+  })
+
   it("does not reopen the outer Tooltip when moving from its popup to a nested Trigger", async () => {
     const testRoot = createTestRoot({ width: 600, height: 400 })
     renderNestedTooltipScene(testRoot)
