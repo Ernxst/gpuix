@@ -1,5 +1,5 @@
 /**
- * Startup/memory/bundle-size fixture for `scripts/app-bench.ts`.
+ * Startup/memory/bundle-size fixture for `examples/bench/app-bench.ts`.
  *
  * One window, one line of text, ~400x300 — the same shape as
  * `packages/native/examples/hello_bench.rs`, the plain-GPUI baseline this
@@ -48,7 +48,7 @@ async function main(): Promise<void> {
     width: 400,
     height: 300,
     // GPUIX_BENCH_BACKGROUND=1 opens the window unfocused, for a manual run
-    // that must not steal focus. scripts/app-bench.ts does not set it: an
+    // that must not steal focus. examples/bench/app-bench.ts does not set it: an
     // unfocused window opens behind the active app, and requestAnimationFrame
     // pauses while it is covered. See examples/bench/README.md.
     focus: process.env.GPUIX_BENCH_BACKGROUND !== '1',

@@ -16,11 +16,12 @@
     },
     "./preload": "./dist/preload.js",
     "./css-modules": {
-      "types": "./dist/css-modules-types.d.ts"
+      "types": "./src/css-modules-types.d.ts"
     }
   },
   "files": [
     "dist",
+    "src/css-modules-types.d.ts",
     "LICENSE",
     "README.md"
   ],
@@ -30,9 +31,10 @@
   },
   "scripts": {
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuix/plugins locally. CI is the only release path. See AGENTS.md.'); process.exit(1) }\"",
-    "build": "tsc && bun scripts/copy-css-modules-types.ts",
+    "build": "tsdown",
+    "dev": "tsdown --watch",
     "prepack": "bun run build",
-    "test": "cd ../react && bun run build && cd ../plugins && bun run build && bun test src/css.test.ts src/css-modules.test.ts src/skill.test.ts",
+    "test": "bun test",
     "typecheck": "tsc --project tsconfig.json --noEmit"
   },
   "peerDependencies": {
@@ -48,18 +50,19 @@
     }
   },
   "dependencies": {
-    "css-to-react-native-transform": "^2.1.0",
-    "postcss": "^8.5.28",
-    "postcss-custom-properties": "^15.0.1",
-    "postcss-import": "^17.0.0",
-    "postcss-nesting": "^14.0.1",
-    "resolve.exports": "^2.0.3",
-    "unplugin": "^3.4.0"
+    "css-to-react-native-transform": "2.1.0",
+    "postcss": "8.5.28",
+    "postcss-custom-properties": "15.0.1",
+    "postcss-import": "17.0.0",
+    "postcss-nesting": "14.0.1",
+    "resolve.exports": "2.0.3",
+    "unplugin": "3.4.0"
   },
   "devDependencies": {
     "@gpuix/react": "workspace:*",
-    "@types/postcss-import": "^14.0.3",
-    "react": "^19.2.4",
-    "vite": "^8.2.1"
+    "@types/postcss-import": "14.0.3",
+    "react": "19.2.4",
+    "tsdown": "0.23.0",
+    "vite": "8.3.2"
   }
 }

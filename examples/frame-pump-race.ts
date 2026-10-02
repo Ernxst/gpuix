@@ -1,4 +1,4 @@
-import { GpuixRenderer } from "../packages/native/index.js"
+import { GpuixRenderer } from "@gpuix/native"
 
 const sampleCount = Number(process.env.PUMP_RACE_SAMPLES ?? 64)
 const maximumPumpMs = Number(process.env.PUMP_RACE_MAX_MS ?? 1_000 / 60)

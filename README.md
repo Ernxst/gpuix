@@ -44,8 +44,8 @@ diagnostic instead. Browser event callbacks in the wasm build are not wired up y
 the web example notes below.
 
 **Platform status:** macOS is this fork's primary platform. Windows builds and runs the same CI
-test suite as macOS on dispatch runs. Linux builds, but nothing tests it — the test renderer is
-waiting on GPUI's headless wgpu backend.
+test suite as macOS. Linux builds and runs the tests that need no test renderer; the test renderer
+there is waiting on GPUI's headless wgpu backend.
 
 **How this differs from upstream**
 
@@ -335,7 +335,7 @@ if [ "$(uname -m)" != arm64 ]; then
 fi
 ADDON="gpuix-native.darwin-arm64.node"
 mkdir -p "$APP/Contents/Frameworks"
-cp "node_modules/@gpuix/native/$ADDON" "$APP/Contents/Frameworks/"
+cp "node_modules/@gpuix/native/dist/$ADDON" "$APP/Contents/Frameworks/"
 codesign --force --sign - "$APP/Contents/Frameworks/$ADDON"
 codesign --force --sign - "$APP"
 codesign --verify --deep --strict "$APP"
@@ -957,7 +957,7 @@ Run the two-canvas animated indexed-geometry fixture with:
 
 ```sh
 cd examples
-bun run native-webgpu
+bun --hot native-webgpu.tsx
 ```
 
 ### Canvas image residency
@@ -5559,12 +5559,12 @@ realistically when measuring #58. This is functional automation and paced
 testing, not passive physical-input capture. GPUI has no separate momentum
 phase, so paced momentum samples are injected as `moved` events.
 
-The repository includes a real-window smoke target that sends a phased pixel
+The repository includes a real-window test that sends a phased pixel
 and line-delta sequence, then checks both the scroll event and scroll offset:
 
 ```bash
 cd examples
-bun run live-scroll-wheel:smoke
+bunx vitest run live-scroll-wheel.test.ts
 ```
 
 The window may briefly appear while the controller sends the gesture. The command
@@ -6945,15 +6945,11 @@ bun scripts/screenshots.ts
 ```
 
 Canvas equivalence uses committed Chromium goldens at a fixed 320×240 logical
-size and 2× device-pixel ratio. Playwright is needed only to regenerate them;
-the Vitest comparison path uses the native PNG decoder and does not load it.
+size and 2× device-pixel ratio. The Vitest comparison path uses the native PNG
+decoder and needs no browser.
 
-```bash
-bun run canvas:goldens
-```
-
-The equivalence suite is a local-macOS gate. Push CI is Linux-only and GPU
-capture is not treated as reliable in virtual machines.
+The equivalence suite is a local-macOS gate. CI skips it, because GPU capture
+is not treated as reliable in virtual machines.
 
 ## Developing the Rust side
 
@@ -6974,12 +6970,12 @@ after touching one file:
 | `bun run build:debug` (napi) | ~2s |
 | One vitest screenshot file | ~2s |
 
-`bun run dev` wires that into a loop: it watches `packages/native/src`,
+`bun scripts/dev.ts` wires that into a loop: it watches `packages/native/src`,
 rebuilds, and re-renders the screenshot tests. **Rust edit to fresh PNGs is
 about 4 seconds.**
 
 ```bash
-bun run dev                      # rebuild, re-render the showcase screenshots
+bun scripts/dev.ts               # rebuild, re-render the showcase screenshots
 bun scripts/dev.ts --shots diff  # only tests matching "diff"
 bun scripts/dev.ts --app native-text   # rebuild, restart an example app
 ```
@@ -6987,6 +6983,10 @@ bun scripts/dev.ts --app native-text   # rebuild, restart an example app
 Screenshot mode is the better default. Open
 `packages/react/screenshots/showcase.png` in Preview.app, which reloads on
 write, and unlike a live window the PNG can also be read by an agent.
+
+`bun run dev` from the repository root runs the todo app in `example-app/`
+under `turbo watch`. A Rust edit rebuilds the debug addon and restarts the
+app; a React or plugin edit hot-reloads it.
 
 Two things avoid the rebuild entirely:
 

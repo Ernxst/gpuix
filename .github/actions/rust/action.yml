@@ -1,0 +1,15 @@
+name: Setup Rust
+description: Install the Rust toolchain pinned in rust-toolchain.toml.
+
+runs:
+  using: composite
+  steps:
+    # Reads the channel from rust-toolchain.toml, which must match zed's
+    # pin for the gpui revision in packages/native/Cargo.toml.
+    - name: Install Rust
+      uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
+      with:
+        cache: false
+        # the action defaults to RUSTFLAGS="-D warnings"; keep lint policy
+        # in the crate instead of letting CI deny every warning
+        rustflags: ""

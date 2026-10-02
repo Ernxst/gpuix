@@ -8,6 +8,8 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    // TypeScript 6 and later load no `@types` packages unless they are named.
+    "types": ["bun"],
     // Bun runs these files straight from source and `compile-chat.ts` bundles
     // them. Nothing here is ever compiled by tsc, so an accidental `tsc -p .`
     // must not litter the folder with .js next to every .tsx.

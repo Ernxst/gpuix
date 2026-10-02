@@ -3,38 +3,44 @@
   "private": true,
   "license": "Apache-2.0",
   "packageManager": "bun@1.4.0",
+  "type": "module",
   "workspaces": [
     "packages/*",
     "examples",
     "example-app"
   ],
   "scripts": {
-    "build": "bun run build:native && bun run build:react && bun run build:vite",
-    "build:native": "bun scripts/native-build.ts",
-    "native:build": "bun scripts/native-build-task.ts",
-    "bench:webgpu": "bun plans/evidence/native-webgpu-reuse/per-draw-benchmark/bench.mjs",
-    "build:react": "cd packages/react && bun run build",
-    "build:vite": "cd packages/plugins && bun run build",
-    "canvas:wpt": "cd packages/react && bun run canvas:wpt",
-    "canvas:goldens": "bun scripts/canvas-goldens.ts",
-    "hatch:goldens": "bun scripts/hatch-goldens.ts",
-    "shadow:goldens": "bun scripts/shadow-goldens.ts",
-    "example:counter": "cd examples && bun --hot counter.tsx",
-    "dev": "bun scripts/dev.ts",
-    "web": "bun scripts/web.ts",
-    "web:wasm": "bun scripts/web.ts --build-only"
+    "-------------------------------------------------------------------------------": "",
+    "dev": "turbo watch dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "--------------------------------------------------------------------------------": "",
+    "lint:monorepo": "sherif",
+    "lint:dependencies": "syncpack lint",
+    "---------------------------------------------------------------------------------": "",
+    "test": "turbo run test --concurrency=1",
+    "test:gpui": "turbo run test:gpui",
+    "test:watch": "vitest --project '!*(perf)' --project '!*(wpt)'",
+    "test:coverage": "vitest run --coverage --project '!*(perf)' --project '!*(wpt)'",
+    "----------------------------------------------------------------------------------": ""
   },
   "devDependencies": {
-    "@types/bun": "^1.4.0",
-    "playwright": "^1.62.1",
-    "react-refresh": "^0.18.0",
-    "tsx": "^4.19.0",
-    "typescript": "^5.3.0",
-    "turbo": "2.11.0",
-    "vite": "^8.2.1"
+    "@types/bun": "1.4.0",
+    "@vitest/coverage-istanbul": "5.0.3",
+    "react": "19.2.4",
+    "react-reconciler": "0.33.0",
+    "react-refresh": "0.18.0",
+    "sherif": "1.13.0",
+    "syncpack": "15.3.3",
+    "turbo": "2.11.6",
+    "typescript": "7.0.2",
+    "vite": "8.3.2",
+    "vitest": "5.0.3"
   },
-  "dependencies": {
-    "react": "^19.2.4",
-    "react-reconciler": "^0.33.0"
+  "devEngines": {
+    "packageManager": {
+      "name": "bun",
+      "version": "1.4.0"
+    }
   }
 }

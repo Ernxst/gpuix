@@ -1,0 +1,28 @@
+name: Report the turbo runs
+description: List what each turbo task in this job cost on the job's summary page, and upload turbo's run summaries.
+
+inputs:
+  name:
+    description: The artifact's name, which must be unique in the workflow run.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # TURBO_RUN_SUMMARY makes each `turbo run` write a summary to .turbo/runs.
+    # A task turbo never started, because an earlier one failed, has no time.
+    - name: List the tasks
+      shell: bash
+      run: |
+        shopt -s nullglob
+        for run in .turbo/runs/*.json; do
+          jq -r '"| Task | Cache | Seconds | Seconds saved |", "| --- | --- | ---: | ---: |", (.tasks[] | select(.command != "<NONEXISTENT>") | "| `\(.taskId)` | \(.cache.status) | \(if .execution then (.execution.endTime - .execution.startTime) / 1000 else "" end) | \(.cache.timeSaved / 1000) |"), ""' "$run" >> "$GITHUB_STEP_SUMMARY"
+        done
+
+    - name: Upload the run summaries
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: ${{ inputs.name }}
+        path: .turbo/runs/*.json
+        include-hidden-files: true
+        if-no-files-found: ignore

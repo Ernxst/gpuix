@@ -8,7 +8,6 @@
     "noEmit": true,
     "lib": ["ES2022", "DOM"],
     "types": ["node"],
-    "baseUrl": ".",
     "paths": {
       "@gpuix/react/globals": ["../../dist/globals.d.ts"]
     }

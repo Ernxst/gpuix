@@ -1,6 +1,3 @@
-import path from "node:path"
-
-import ts from "typescript"
 import { describe, expect, it, vi } from "vitest"
 
 import {
@@ -57,27 +54,6 @@ function opcodeHeaders(ops: Uint32Array): Array<[number, number]> {
     headers.push([ops[index]!, ops[index + 1]!])
   }
   return headers
-}
-
-function installedCanvas2DMemberNames(): string[] {
-  const libDirectory = path.dirname(ts.getDefaultLibFilePath({}))
-  const libDomPath = path.join(libDirectory, "lib.dom.d.ts")
-  const program = ts.createProgram([libDomPath], {
-    target: ts.ScriptTarget.ES2022,
-    skipLibCheck: true,
-  })
-  const source = program.getSourceFile(libDomPath)
-  const declaration = source?.statements.find(
-    (statement): statement is ts.InterfaceDeclaration =>
-      ts.isInterfaceDeclaration(statement) && statement.name.text === "CanvasRenderingContext2D"
-  )
-  if (!declaration) throw new Error(`CanvasRenderingContext2D is absent from ${libDomPath}`)
-  return program
-    .getTypeChecker()
-    .getTypeAtLocation(declaration.name)
-    .getProperties()
-    .map((property) => property.name)
-    .sort()
 }
 
 describe("recording CanvasRenderingContext2D", () => {
@@ -410,7 +386,8 @@ const diagnosticInvocations: Record<string, DiagnosticInvocation> = {
 }
 
 describe("CanvasRenderingContext2D unimplemented-member contract", () => {
-  it("partitions every installed DOM member into implemented or diagnosed", () => {
+  // canvas-2d-members.types.ts checks the two lists against the DOM library.
+  it("lists each member once and has a diagnostic invocation for every unsupported one", () => {
     const unsupported = CANVAS_2D_UNSUPPORTED_MEMBERS.map(({ member }) => member).sort()
     const implemented = [...CANVAS_2D_IMPLEMENTED_MEMBERS].sort()
     const partition = [...implemented, ...unsupported].sort()
@@ -418,7 +395,6 @@ describe("CanvasRenderingContext2D unimplemented-member contract", () => {
     expect(new Set(unsupported).size).toBe(unsupported.length)
     expect(new Set(implemented).size).toBe(implemented.length)
     expect(new Set(partition).size).toBe(partition.length)
-    expect(partition).toEqual(installedCanvas2DMemberNames())
     expect(Object.keys(diagnosticInvocations).sort()).toEqual(unsupported)
   })
 

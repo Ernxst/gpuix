@@ -1,7 +1,7 @@
-/// Shared fixtures for `boxShadow` layering and inset geometry, consumed by
-/// both the Chromium golden generator (`scripts/shadow-goldens.ts`) and the
-/// native pixel-comparison test (`box-shadow-goldens.test.tsx`), so the two
-/// never drift apart.
+/// Fixtures for `boxShadow` layering and inset geometry, consumed by the
+/// native pixel-comparison test (`box-shadow-goldens.test.tsx`). The committed
+/// Chromium goldens were rendered from these same cases, so a changed or added
+/// case needs a new golden.
 ///
 /// Every case is run at both DPR 1 and DPR 2 by its consumers; this file only
 /// declares the CSS-pixel (logical) geometry.
@@ -31,23 +31,6 @@ export interface ShadowCase {
    * every layer that follows it.
    */
   layers: ShadowLayer[]
-}
-
-/** Renders `layers` as a CSS `box-shadow` declaration value. */
-export function cssBoxShadow(layers: readonly ShadowLayer[]): string {
-  if (layers.length === 0) return "none"
-  return layers
-    .map((layer) => {
-      const parts = [
-        `${layer.offsetX}px`,
-        `${layer.offsetY}px`,
-        `${layer.blurRadius}px`,
-        `${layer.spreadRadius}px`,
-        layer.color,
-      ]
-      return layer.inset ? `${parts.join(" ")} inset` : parts.join(" ")
-    })
-    .join(", ")
 }
 
 export const shadowCases: readonly ShadowCase[] = [

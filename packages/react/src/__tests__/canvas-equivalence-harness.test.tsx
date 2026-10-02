@@ -32,7 +32,7 @@ const isLocalMac = process.platform === "darwin" && !process.env.CI
 const describeLocalMac =
   isLocalMac && isNativeTestRendererAvailable() ? describe : describe.skip
 const fixturesDirectory = fileURLToPath(
-  new URL("../../canvas-goldens/__fixtures__", import.meta.url)
+  new URL("../../goldens/canvas/__fixtures__", import.meta.url)
 )
 
 function captureCanvasScene(scene: CanvasScene, outputPath: string): void {
@@ -304,8 +304,7 @@ describeLocalMac("canvas browser-equivalence harness", { timeout: 12_000 }, () =
     ).toThrowError(
       new CanvasComparisonSkippedError(
         "Canvas comparison skipped: browser golden is absent at " +
-          `${path.join(fixturesDirectory, "intentionally-absent.png")}; ` +
-          "regenerate it with `bun run canvas:goldens`"
+          path.join(fixturesDirectory, "intentionally-absent.png")
       )
     )
   })

@@ -2,8 +2,8 @@
   "name": "@gpuix/native",
   "version": "0.26.2-fork",
   "license": "Apache-2.0",
-  "main": "index.js",
-  "types": "index.d.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "browser": "browser.mjs",
   "napi": {
     "binaryName": "gpuix-native",
@@ -19,25 +19,24 @@
   },
   "scripts": {
     "artifacts": "napi artifacts",
-    "build": "napi build --platform --release --features test-support",
-    "build:release": "napi build --platform --release --no-default-features",
-    "build:test-fault-injection": "napi build --platform --release --features \"test-support display-discovery-fault-injection\"",
-    "build:debug": "napi build --platform --features test-support",
-    "build:web": "bun ../../scripts/web.ts --build-only",
-    "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuix/native locally. CI builds all platform binaries. See AGENTS.md.'); process.exit(1) }\" && bun run build:web && napi pre-publish -t npm --no-gh-release",
+    "build": "napi build --platform --release --output-dir dist --features test-support",
+    "build:release": "napi build --platform --release --output-dir dist --no-default-features",
+    "build:test-fault-injection": "napi build --platform --release --output-dir test-fault-binding --no-js --features \"test-support display-discovery-fault-injection\"",
+    "check:no-default-features": "cargo check --no-default-features --all-targets",
+    "build:debug": "napi build --platform --output-dir dist --features test-support",
+    "test:gpui": "cd ../../zed && cargo test -p gpui",
+    "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuix/native locally. CI builds all platform binaries. See AGENTS.md.'); process.exit(1) }\" && bun ../../scripts/web.ts --build-only && napi pre-publish -t npm --no-gh-release",
     "universal": "napi universal",
     "version": "napi version",
     "prepack": "bun run build"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^3.1.3"
+    "@napi-rs/cli": "3.5.1"
   },
   "files": [
-    "index.js",
-    "index.d.ts",
+    "dist",
     "browser.mjs",
     "wasm",
-    "*.node",
     "LICENSE"
   ]
 }

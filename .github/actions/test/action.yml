@@ -1,0 +1,68 @@
+name: Test
+description: Run the test tasks of the selected packages on this runner, restoring the builds they depend on from the turbo cache.
+
+inputs:
+  filter:
+    description: The `--filter` argument that selects the packages. Empty tests every package.
+    required: false
+  shard:
+    description: The React test shard, such as 1/3. Empty runs the whole React suite.
+    required: false
+  summary-name:
+    description: The name of the artifact that holds turbo's run summaries, which must be unique in the workflow run.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Setup bun
+      uses: ./.github/actions/bun
+
+    # A test task the cache holds is replayed, so nothing below it needs
+    # installing.
+    - name: Check the turbo cache
+      id: cache
+      uses: ./.github/actions/turbo-cache
+      with:
+        args: test ${{ inputs.filter }}
+        shard: ${{ inputs.shard }}
+
+    # This job installs no Rust toolchain. Without the addon in the cache,
+    # turbo would compile it with whatever Cargo the runner has.
+    - name: Require the addon from the build job
+      if: contains(steps.cache.outputs.misses, '@gpuix/native#build')
+      shell: bash
+      run: |
+        echo "::error::The turbo cache does not hold the addon this platform's build job stores. Check that the build job wrote to the remote cache."
+        exit 1
+
+    - name: Setup node
+      if: steps.cache.outputs.misses != ''
+      uses: ./.github/actions/node
+
+    - name: Setup macos
+      if: runner.os == 'macOS' && steps.cache.outputs.misses != ''
+      uses: ./.github/actions/macos
+
+    # The addon loads these libraries at run time.
+    - name: Setup linux
+      if: runner.os == 'Linux' && steps.cache.outputs.misses != ''
+      uses: ./.github/actions/linux
+
+    # packages/react/vitest.config.ts reads the shard from VITEST_SHARD, which
+    # is part of the test task's hash. An empty value hashes differently from
+    # an unset one, so it is exported only when a shard is given.
+    - name: Test
+      shell: bash
+      env:
+        FILTER: ${{ inputs.filter }}
+        SHARD: ${{ inputs.shard }}
+      run: |
+        if [ -n "$SHARD" ]; then export VITEST_SHARD="$SHARD"; fi
+        bunx turbo run test $FILTER --concurrency=1 --continue=dependencies-successful
+
+    - name: Report the turbo runs
+      if: ${{ !cancelled() }}
+      uses: ./.github/actions/turbo-summary
+      with:
+        name: ${{ inputs.summary-name }}

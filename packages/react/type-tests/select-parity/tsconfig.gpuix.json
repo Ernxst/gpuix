@@ -1,17 +1,16 @@
 {
   "extends": "../../tsconfig.exact-optional.json",
   "compilerOptions": {
-    "baseUrl": "../..",
     "paths": {
-      "@base-ui/react/select": ["dist/components/select.d.ts"],
-      "@base-ui/react/tooltip": ["dist/components/tooltip.d.ts"],
-      "@base-ui/react/dialog": ["dist/components/dialog.d.ts"],
-      "@base-ui/react/alert-dialog": ["dist/components/alert-dialog.d.ts"],
-      "@gpuix/react/select": ["dist/components/select.d.ts"],
-      "@gpuix/react/tooltip": ["dist/components/tooltip.d.ts"],
-      "@gpuix/react/dialog": ["dist/components/dialog.d.ts"],
-      "@gpuix/react/alert-dialog": ["dist/components/alert-dialog.d.ts"],
-      "@gpuix/react/jsx-runtime": ["jsx-runtime.d.ts"]
+      "@base-ui/react/select": ["../../dist/components/select.d.ts"],
+      "@base-ui/react/tooltip": ["../../dist/components/tooltip.d.ts"],
+      "@base-ui/react/dialog": ["../../dist/components/dialog.d.ts"],
+      "@base-ui/react/alert-dialog": ["../../dist/components/alert-dialog.d.ts"],
+      "@gpuix/react/select": ["../../dist/components/select.d.ts"],
+      "@gpuix/react/tooltip": ["../../dist/components/tooltip.d.ts"],
+      "@gpuix/react/dialog": ["../../dist/components/dialog.d.ts"],
+      "@gpuix/react/alert-dialog": ["../../dist/components/alert-dialog.d.ts"],
+      "@gpuix/react/jsx-runtime": ["../../jsx-runtime.d.ts"]
     }
   },
   "files": ["./select-parity.types.tsx"],

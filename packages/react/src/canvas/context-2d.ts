@@ -403,9 +403,9 @@ export interface CanvasUnsupportedMember {
 
 /**
  * Complete unsupported-member contract for the installed DOM Canvas 2D
- * surface. `context-2d.test.ts` compares this table plus the implemented set
- * with TypeScript's live `lib.dom.d.ts`, so a newly added browser member cannot
- * silently return `undefined`.
+ * surface. `canvas-2d-members.types.ts` compares this table plus the
+ * implemented set with TypeScript's DOM library, so a newly added browser
+ * member cannot silently return `undefined`.
  */
 export const CANVAS_2D_UNSUPPORTED_MEMBERS = [
   {
@@ -576,7 +576,7 @@ export const CANVAS_2D_UNSUPPORTED_MEMBERS = [
     disposition: "not-implementable",
     reason: "GPUI canvas primitives expose no shadow primitive",
   },
-  ...[
+  ...([
     "direction",
     "font",
     "fontKerning",
@@ -587,7 +587,7 @@ export const CANVAS_2D_UNSUPPORTED_MEMBERS = [
     "textBaseline",
     "textRendering",
     "wordSpacing",
-  ].map((member) => ({
+  ] as const).map((member) => ({
     member,
     kind: "property" as const,
     disposition: "not-implemented" as const,

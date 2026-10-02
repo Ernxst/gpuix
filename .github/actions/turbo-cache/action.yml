@@ -1,0 +1,36 @@
+name: Check the turbo cache
+description: Report which tasks of a turbo run the cache does not hold, so a job can skip the setup that only those tasks need.
+
+inputs:
+  args:
+    description: The arguments of the `turbo run` the job goes on to make.
+    required: true
+  shard:
+    description: The React test shard, when the run is sharded. It is part of the test task's hash.
+    required: false
+
+outputs:
+  misses:
+    description: The ids of the tasks turbo would run, separated by spaces. Empty when every task would be restored.
+    value: ${{ steps.dry.outputs.misses }}
+
+runs:
+  using: composite
+  steps:
+    # The dry run must hash exactly as the real run does. The native build
+    # hashes every variable matching patterns such as `AR*`, so naming the
+    # variable below ARGS would change its hash and report a miss. An empty
+    # VITEST_SHARD also hashes differently from an unset one, so it is set
+    # only for a sharded run. A package with no script for the task is listed
+    # as a miss with no command, and is left out.
+    - name: Check the turbo cache
+      id: dry
+      shell: bash
+      env:
+        DRY_RUN_ARGS: ${{ inputs.args }}
+        SHARD: ${{ inputs.shard }}
+      run: |
+        if [ -n "$SHARD" ]; then export VITEST_SHARD="$SHARD"; fi
+        misses=$(bunx turbo run $DRY_RUN_ARGS --dry=json | jq -r '[.tasks[] | select(.cache.status != "HIT" and .command != "<NONEXISTENT>") | .taskId] | join(" ")')
+        echo "Not in the cache: ${misses:-nothing}"
+        echo "misses=$misses" >> "$GITHUB_OUTPUT"

@@ -254,7 +254,7 @@ async function wrapMacApp(addonFileName: string | undefined): Promise<void> {
   mkdirSync(frameworks, { recursive: true })
 
   const addon = path.join(frameworks, addonFileName)
-  run('cp', [path.join(NATIVE_DIR, addonFileName), addon])
+  run('cp', [path.join(NATIVE_DIR, 'dist', addonFileName), addon])
   run('codesign', ['--force', '--sign', '-', addon])
 
   const executable = path.join(macos, 'chat')

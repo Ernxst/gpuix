@@ -1,63 +1,55 @@
 {
-  "$schema": "https://turbo.build/schema.json",
+  "$schema": "./node_modules/turbo/schema.json",
   "cacheMaxSize": "5GB",
   "cacheMaxAge": "30d",
-  "globalDependencies": ["zed/**"],
+  "futureFlags": {
+    // `turbo watch` reruns a task only when a changed file matches the task's
+    // `inputs`, so an edit beside the Rust sources leaves the addon alone.
+    "watchUsingTaskInputs": true
+  },
   "tasks": {
-    "//#native:build": {
-      "inputs": [
-        "package.json",
-        "bun.lock",
-        "turbo.json",
-        "scripts/native-build.ts",
-        "scripts/native-build-task.ts",
-        "rust-toolchain.toml",
-        "packages/native/src/**",
-        "packages/native/Cargo.toml",
-        "packages/native/Cargo.lock",
-        "packages/native/build.rs",
-        "packages/native/.cargo/**",
-        "packages/native/scripts/**",
-        "packages/native/package.json",
-        "zed/**",
-        "!zed/.git"
+    "dev": {
+      "dependsOn": [
+        "@gpuix/native#build:debug"
+      ],
+      "cache": false,
+      "persistent": true,
+      "description": "Run persistent development servers for workspace packages."
+    },
+    "build": {
+      "dependsOn": [
+        "^build"
       ],
       "outputs": [
-        "packages/native/index.js",
-        "packages/native/index.d.ts",
-        "packages/native/*.node"
+        "dist/**",
       ],
+      "description": "Build workspace packages and applications in dependency order."
+    },
+    "typecheck": {
+      "dependsOn": [
+        "^build"
+      ],
+      "description": "Type-check workspace packages in dependency order.",
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": [
+        "build"
+      ],
+      // The shard, and the variables that opt a local run into the tests CI
+      // runs by default.
       "env": [
-        "GPUX_NATIVE_BUILD_CONTEXT",
-        "GPUX_NATIVE_FEATURES",
-        "GPUX_NATIVE_TARGET",
-        "CARGO*",
-        "RUST*",
-        "CC*",
-        "CXX*",
-        "AR*",
-        "CFLAGS*",
-        "CXXFLAGS*",
-        "CPPFLAGS*",
-        "LDFLAGS*",
-        "SDKROOT",
-        "MACOSX_*",
-        "IPHONEOS_*",
-        "DEVELOPER_DIR",
-        "VCTOOLS*",
-        "WINDOWSSDK*",
-        "WindowsSdkDir",
-        "WindowsSDKVersion",
-        "VCToolsVersion",
-        "INCLUDE",
-        "LIB",
-        "PKG_CONFIG*",
-        "VCPKG*",
-        "ZIG*",
-        "DEPLOYMENT_TARGET*",
-        "NAPI_RS_*",
-        "GPUI_FXC_PATH"
-      ]
-    }
+        "VITEST_SHARD",
+        "GPUIX_WINDOW_ORDER_TEST",
+        "GPUIX_WINDOWS_ACCESSIBILITY_TEST"
+      ],
+      "description": "Run workspace tests in dependency order."
+    },
+    "//#lint:dependencies": {
+      "description": "Check workspace dependency versions and protocols with Syncpack."
+    },
+    "//#lint:monorepo": {
+      "description": "Check monorepo package and dependency consistency with Sherif."
+    },
   }
 }

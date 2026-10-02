@@ -1,0 +1,3 @@
+# Cargo decides which crates compile incrementally; Cargo.toml turns it on for
+# the addon's own crate only.
+incremental = true

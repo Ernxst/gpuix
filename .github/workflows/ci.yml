@@ -1,187 +1,519 @@
 name: CI
-env:
-  APP_NAME: gpuix-native
-  MACOSX_DEPLOYMENT_TARGET: "10.13"
-"on":
+
+# A change that touches only the excluded paths starts no run, because no task
+# reads them. The plugins tests read `skills/`, so its Markdown stays in.
+on:
   push:
     branches:
       - main
-    tags-ignore:
+    paths:
       - "**"
-    paths-ignore:
-      - "**/*.md"
-      - LICENSE
-      - "**/*.gitignore"
-      - docs/**
-  pull_request: null
+      - "!**.md"
+      - "!docs/**"
+      - "!.changeset/**"
+      - "!website/**"
+      - "!.agents/**"
+      - "skills/**"
+  pull_request:
+    paths:
+      - "**"
+      - "!**.md"
+      - "!docs/**"
+      - "!.changeset/**"
+      - "!website/**"
+      - "!.agents/**"
+      - "skills/**"
   workflow_dispatch:
-    inputs:
-      targets:
-        description: "Comma-separated OSes to build and test: macos, linux, windows"
-        required: false
-        default: "macos,linux,windows"
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-jobs:
-  # push/PR builds Linux x64 and Windows x64; macOS is built and tested
-  # locally. workflow_dispatch builds and tests the OSes named by its `targets` input
-  # (all three by default). Computed in a plan job because job-level `if`
-  # cannot reference the matrix context.
-  # One target per OS, on the architecture that OS is mostly used on
-  # (upstream's set): `packages/native/package.json` `napi.targets` must
-  # list exactly the same set as the FULL matrix below.
-  plan:
-    runs-on: ubuntu-latest
-    outputs:
-      settings: ${{ steps.set.outputs.settings }}
-    steps:
-      - id: set
-        env:
-          TARGETS: ${{ inputs.targets }}
-        run: |
-          # macOS (Metal): default features include test-support.
-          # Linux (Vulkan/wgpu): build:release disables test-support until wgpu image readback lands.
-          # Windows (Direct3D): test support includes TestGpuixRenderer and render_to_image.
-          FULL='[
-            {"os":"macos","host":"macos-latest","target":"aarch64-apple-darwin","bunTarget":"bun-darwin-arm64","build":"bun run build --target aarch64-apple-darwin"},
-            {"os":"linux","host":"ubuntu-latest","target":"x86_64-unknown-linux-gnu","bunTarget":"bun-linux-x64","build":"bun run build:release --target x86_64-unknown-linux-gnu"},
-            {"os":"windows","host":"windows-latest","target":"x86_64-pc-windows-msvc","bunTarget":"bun-windows-x64","build":"bun run build --target x86_64-pc-windows-msvc"}
-          ]'
-          LINUX_WINDOWS=$(echo "$FULL" | jq -c 'map(select(.os != "macos"))')
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            CHOSEN=$(echo "$FULL" | jq -c --arg targets "$TARGETS" '
-              ($targets | gsub(" "; "") | ascii_downcase | split(",")) as $want
-              | map(select(.os as $os | $want | index($os)))')
-            if [ "$CHOSEN" = "[]" ]; then
-              echo "::error::targets '$TARGETS' selects no OS; use macos, linux or windows"
-              exit 1
-            fi
-          else
-            CHOSEN="$LINUX_WINDOWS"
-          fi
-          echo "settings=$(echo "$CHOSEN" | jq -c .)" >> "$GITHUB_OUTPUT"
+env:
+  MACOSX_DEPLOYMENT_TARGET: "10.13"
+  # `lto = true` makes Cargo embed LLVM bitcode in every dependency. The addon
+  # is both a cdylib and an rlib, and Cargo passes no `-C lto` flag for such a
+  # crate, so nothing reads that bitcode. Turning LTO off skips producing it.
+  CARGO_PROFILE_RELEASE_LTO: "false"
+  # What the Rust setup action would export. The native build's cache key
+  # includes them, so they are set for every job: jobs that skip the Rust setup
+  # then restore the build job's addon instead of missing the cache.
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_TERM_COLOR: always
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+  CARGO_UNSTABLE_SPARSE_REGISTRY: "true"
+  RUST_BACKTRACE: short
+  # Each `turbo run` writes what its tasks cost to .turbo/runs, which the
+  # turbo-summary action reports.
+  TURBO_RUN_SUMMARY: "true"
 
-  build:
-    needs: plan
-    strategy:
-      fail-fast: false
-      matrix:
-        settings: ${{ fromJSON(needs.plan.outputs.settings) }}
-    name: build - ${{ matrix.settings.target }}
-    runs-on: ${{ matrix.settings.host }}
-    defaults:
-      run:
-        working-directory: packages/native
+permissions: {}
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+
+      - name: Setup bun
+        uses: ./.github/actions/bun
+
+      - name: Lint monorepo
+        run: bunx turbo run "//#lint:monorepo"
+
+      - name: Lint dependencies
+        run: bunx turbo run "//#lint:dependencies"
+
+  # Each platform builds and then tests on its own, so one platform's tests
+  # never wait for another platform's build. The build stores the packages in
+  # the turbo remote cache, and the test and typecheck jobs restore them.
+  # A build job also reports the compiler versions it built with, which the
+  # native tasks hash; the jobs that restore its build set GPUIX_HOST_TOOLS
+  # from that output, so their hashes match on a different image.
+  build-macos:
+    name: Build (macOS)
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    outputs:
+      host-tools: ${{ steps.build.outputs.host-tools }}
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Build
+        id: build
+        uses: ./.github/actions/build
+
+  build-linux:
+    name: Build (Linux)
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    outputs:
+      host-tools: ${{ steps.build.outputs.host-tools }}
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Build
+        id: build
+        uses: ./.github/actions/build
+
+  build-windows:
+    name: Build (Windows)
+    runs-on: blacksmith-4vcpu-windows-2025
+    permissions:
+      contents: read
+    outputs:
+      host-tools: ${{ steps.build.outputs.host-tools }}
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Build
+        id: build
+        uses: ./.github/actions/build
+
+  typecheck:
+    name: Typecheck
+    # Runs on macOS because the native binding's types include the test
+    # renderer, which the Linux build leaves out.
+    needs: build-macos
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+      GPUIX_HOST_TOOLS: ${{ needs.build-macos.outputs.host-tools }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
           submodules: recursive
 
       - name: Setup bun
-        uses: oven-sh/setup-bun@v2
+        uses: ./.github/actions/bun
 
-      # Reads the channel from rust-toolchain.toml, which must match zed's
-      # pin for the gpui revision in packages/native/Cargo.toml.
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Check the turbo cache
+        id: cache
+        uses: ./.github/actions/turbo-cache
         with:
-          target: ${{ matrix.settings.target }}
-          # this workflow caches cargo explicitly in the next step
-          cache: false
-          # the action defaults to RUSTFLAGS="-D warnings"; keep lint policy
-          # in the crate instead of letting CI deny every warning
-          rustflags: ""
+          args: typecheck
 
-      # gpui_apple compiles shaders with `metal`, which Xcode 26 no longer
-      # ships by default. Without this the build fails with
-      # "cannot execute tool 'metal' due to missing Metal Toolchain".
-      - name: Install Metal toolchain
-        if: contains(matrix.settings.target, 'apple-darwin')
-        run: xcodebuild -downloadComponent MetalToolchain
-
-      - name: Cache cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            packages/native/target/
-          key: ${{ matrix.settings.target }}-cargo-${{ hashFiles('packages/native/Cargo.lock') }}
-          restore-keys: |
-            ${{ matrix.settings.target }}-cargo-
-
-      # Linux system deps for GPUI (Vulkan, Wayland, X11, fonts)
-      # Based on longbridge/gpui-component and Zed's script/linux
-      - name: Install Linux dependencies
-        if: contains(matrix.settings.target, 'linux')
-        working-directory: .
+      # This job installs no Rust toolchain. Without the addon in the cache,
+      # turbo would compile it with whatever Cargo the runner has.
+      - name: Require the addon from the build job
+        if: contains(steps.cache.outputs.misses, '@gpuix/native#build')
+        shell: bash
         run: |
-          sudo apt-get update && sudo apt-get install -y \
-            gcc g++ clang \
-            libfontconfig-dev \
-            libwayland-dev \
-            libxkbcommon-x11-dev \
-            libx11-xcb-dev \
-            libssl-dev \
-            libzstd-dev \
-            libvulkan1 \
-            vulkan-validationlayers
+          echo "::error::The turbo cache does not hold the addon this platform's build job stores. Check that the build job wrote to the remote cache."
+          exit 1
 
-      - name: Install dependencies
-        working-directory: .
-        run: bun install --frozen-lockfile
+      - name: Setup macos
+        if: steps.cache.outputs.misses != ''
+        uses: ./.github/actions/macos
 
-      - name: Check all Rust targets without default features
-        if: contains(matrix.settings.target, 'linux')
-        run: RUST_FONTCONFIG_DLOPEN=1 cargo check --target x86_64-unknown-linux-gnu --no-default-features --all-targets
+      - name: Typecheck
+        run: bun run typecheck
 
-      - name: Build native
-        run: ${{ matrix.settings.build }}
-        shell: bash
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - name: Report the turbo runs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/turbo-summary
         with:
-          name: bindings-${{ matrix.settings.target }}
-          path: packages/native/${{ env.APP_NAME }}.*.node
-          if-no-files-found: error
+          name: turbo-runs-typecheck
 
-      - name: Build display-discovery fault-injection binding
-        if: matrix.settings.target == 'aarch64-apple-darwin'
-        run: bun run build:test-fault-injection --target aarch64-apple-darwin --output-dir test-fault-binding --no-js
-
-      - name: Upload display-discovery fault-injection binding
-        if: matrix.settings.target == 'aarch64-apple-darwin'
-        uses: actions/upload-artifact@v4
+  test-macos:
+    name: Test (macOS, ${{ matrix.part.name }})
+    needs: build-macos
+    # React's suite is most of the test time, so it runs as three shards on
+    # separate runners. The other packages share one. GitHub runs five macOS
+    # jobs at a time for this repository, which these four and the typecheck
+    # fill; a fourth shard would wait for a runner.
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        part:
+          - name: react 1/3
+            shard: 1/3
+            filter: --filter=@gpuix/react
+          - name: react 2/3
+            shard: 2/3
+            filter: --filter=@gpuix/react
+          - name: react 3/3
+            shard: 3/3
+            filter: --filter=@gpuix/react
+          - name: others
+            filter: --filter=!@gpuix/react
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+      GPUIX_HOST_TOOLS: ${{ needs.build-macos.outputs.host-tools }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: bindings-test-fault-aarch64-apple-darwin
-          path: packages/native/test-fault-binding/${{ env.APP_NAME }}.*.node
-          if-no-files-found: error
+          persist-credentials: false
+          submodules: recursive
 
-      - name: Build React package
-        working-directory: packages/react
-        shell: bash
-        run: bun run build
+      - name: Test
+        uses: ./.github/actions/test
+        with:
+          filter: ${{ matrix.part.filter }}
+          shard: ${{ matrix.part.shard }}
+          summary-name: turbo-runs-test-${{ runner.os }}-${{ strategy.job-index }}
 
-      - name: Build plugins package
-        run: bun run build
-        working-directory: packages/plugins
+  test-windows:
+    name: Test (Windows, ${{ matrix.part.name }})
+    needs: build-windows
+    # A GitHub-hosted runner, not Blacksmith's. The test renderer opens a real
+    # DirectX window, which needs an interactive desktop session, and
+    # Blacksmith runs its Windows agent as a service in session 0, where
+    # creating the DirectX renderer fails.
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        part:
+          - name: react 1/3
+            shard: 1/3
+            filter: --filter=@gpuix/react
+          - name: react 2/3
+            shard: 2/3
+            filter: --filter=@gpuix/react
+          - name: react 3/3
+            shard: 3/3
+            filter: --filter=@gpuix/react
+          - name: others
+            filter: --filter=!@gpuix/react
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+      GPUIX_HOST_TOOLS: ${{ needs.build-windows.outputs.host-tools }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
 
-      - name: Test plugins package
-        run: bun run test
-        working-directory: packages/plugins
+      - name: Test
+        uses: ./.github/actions/test
+        with:
+          filter: ${{ matrix.part.filter }}
+          shard: ${{ matrix.part.shard }}
+          summary-name: turbo-runs-test-${{ runner.os }}-${{ strategy.job-index }}
+
+  test-linux:
+    name: Test (Linux)
+    needs: build-linux
+    # Linux has no test renderer, so packages/react/vitest.config.ts leaves out
+    # the files that need one. What remains takes seconds, so one runner tests
+    # every package.
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+      GPUIX_HOST_TOOLS: ${{ needs.build-linux.outputs.host-tools }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Test
+        uses: ./.github/actions/test
+        with:
+          summary-name: turbo-runs-test-Linux
+
+  test-gpui:
+    name: Test GPUI (macOS)
+    # GPUI's own suite takes about ten minutes. Its inputs are in the `zed`
+    # submodule, so turbo replays the result until the submodule changes.
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Identify the host tools
+        uses: ./.github/actions/host-tools
+
+      - name: Setup bun
+        uses: ./.github/actions/bun
+
+      - name: Check the turbo cache
+        id: cache
+        uses: ./.github/actions/turbo-cache
+        with:
+          args: test:gpui
+
+      - name: Setup rust
+        if: steps.cache.outputs.misses != ''
+        uses: ./.github/actions/rust
+
+      - name: Setup macos
+        if: steps.cache.outputs.misses != ''
+        uses: ./.github/actions/macos
+
+      - name: Setup mbx
+        if: steps.cache.outputs.misses != ''
+        uses: ./.github/actions/mbx
+        with:
+          working-directory: zed
+          cache-generation: v1-gpui
+
+      - name: Test GPUI
+        run: bun run test:gpui
+
+      - name: Report the turbo runs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/turbo-summary
+        with:
+          name: turbo-runs-test-gpui
+
+  check-linux:
+    name: Check without default features (Linux)
+    # `build:release` ships the addon without `test-support`, a feature set no
+    # other job compiles. This checks it, and the Rust examples with it.
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Identify the host tools
+        uses: ./.github/actions/host-tools
+
+      - name: Setup bun
+        uses: ./.github/actions/bun
+
+      - name: Check the turbo cache
+        id: cache
+        uses: ./.github/actions/turbo-cache
+        with:
+          args: check:no-default-features
+
+      - name: Setup rust
+        if: steps.cache.outputs.misses != ''
+        uses: ./.github/actions/rust
+
+      - name: Setup linux
+        if: steps.cache.outputs.misses != ''
+        uses: ./.github/actions/linux
+
+      - name: Setup mbx
+        if: steps.cache.outputs.misses != ''
+        uses: ./.github/actions/mbx
+        with:
+          working-directory: packages/native
+          cache-generation: v1-check
+
+      - name: Check without default features
+        run: bunx turbo run check:no-default-features
+
+      - name: Report the turbo runs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/turbo-summary
+        with:
+          name: turbo-runs-check-linux
+
+  test-fault-injection:
+    name: Test fault injection (macOS)
+    # Runs native-binding.test.ts against an addon built to fail renderer
+    # initialisation. The ordinary addon's `index.js` loads it, so this waits
+    # for the macOS build.
+    needs: build-macos
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+      GPUIX_HOST_TOOLS: ${{ needs.build-macos.outputs.host-tools }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Setup bun
+        uses: ./.github/actions/bun
+
+      - name: Check the turbo cache
+        id: cache
+        uses: ./.github/actions/turbo-cache
+        with:
+          args: test:fault-injection
+
+      - name: Setup node
+        if: steps.cache.outputs.misses != ''
+        uses: ./.github/actions/node
+
+      - name: Setup macos
+        if: steps.cache.outputs.misses != ''
+        uses: ./.github/actions/macos
+
+      - name: Setup rust
+        if: contains(steps.cache.outputs.misses, '@gpuix/native#')
+        uses: ./.github/actions/rust
+
+      - name: Setup mbx
+        if: contains(steps.cache.outputs.misses, '@gpuix/native#')
+        uses: ./.github/actions/mbx
+        with:
+          working-directory: packages/native
+
+      - name: Test fault injection
+        run: bunx turbo run test:fault-injection
+
+      - name: Report the turbo runs
+        if: ${{ !cancelled() }}
+        uses: ./.github/actions/turbo-summary
+        with:
+          name: turbo-runs-test-fault-injection
+
+  example-chat:
+    name: Compile chat example (${{ matrix.settings.target }})
+    # The standalone chat binary that a release can carry. Nothing attaches it
+    # to a release, so it is built only on a manual run.
+    if: github.event_name == 'workflow_dispatch'
+    needs: [build-macos, build-linux, build-windows]
+    runs-on: ${{ matrix.settings.host }}
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - host: macos-latest
+            build: build-macos
+            target: aarch64-apple-darwin
+            bunTarget: bun-darwin-arm64
+          - host: blacksmith-2vcpu-ubuntu-2404
+            build: build-linux
+            target: x86_64-unknown-linux-gnu
+            bunTarget: bun-linux-x64
+          - host: windows-latest
+            build: build-windows
+            target: x86_64-pc-windows-msvc
+            bunTarget: bun-windows-x64
+    permissions:
+      contents: read
+    env:
+      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
+      GPUIX_HOST_TOOLS: ${{ needs[matrix.settings.build].outputs.host-tools }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Setup bun
+        uses: ./.github/actions/bun
 
       - name: Compile chat example
-        working-directory: examples
         shell: bash
         env:
           COMPILE_OUT: example-chat-${{ matrix.settings.target }}
           COMPILE_TARGET: ${{ matrix.settings.bunTarget }}
           COMPILE_SKIP_ICONS: "1"
           COMPILE_SKIP_APP: "1"
-        run: bun compile-chat.ts
+        run: bunx turbo run compile
 
       # A release asset is served as raw bytes, so a download loses the
       # executable bit and arrives with no extension: macOS and Linux users
@@ -203,197 +535,8 @@ jobs:
           ls -l
 
       - name: Upload example artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: example-chat-${{ matrix.settings.target }}
           path: examples/dist/example-chat-${{ matrix.settings.target }}.*
           if-no-files-found: error
-
-  test:
-    name: test
-    needs: build
-    # Needs the macOS artifact, which only exists on dispatch runs that target macOS.
-    if: github.event_name == 'workflow_dispatch' && contains(inputs.targets, 'macos')
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Setup bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          cache: false
-          rustflags: ""
-
-      - name: Download macOS arm64 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: bindings-aarch64-apple-darwin
-          path: packages/native/
-
-      - name: Smoke test published test renderer without display discovery
-        run: bun scripts/test-renderer-smoke.ts
-
-      - name: Download display-discovery fault-injection artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: bindings-test-fault-aarch64-apple-darwin
-          path: packages/native/test-fault-binding/
-
-      - name: Smoke test catchable display-discovery failure
-        env:
-          NAPI_RS_NATIVE_LIBRARY_PATH: ${{ github.workspace }}/packages/native/test-fault-binding/gpuix-native.darwin-arm64.node
-        run: bun scripts/test-renderer-smoke.ts --fault-injection
-
-      # Includes the GPU-backed default-main-menu and Cmd+Q action smoke.
-      - name: Run React and macOS menu integration tests
-        run: bun run test
-        working-directory: packages/react
-
-      - name: Build React package
-        run: bun run build
-        working-directory: packages/react
-
-      - name: Run example tests
-        run: bun run test
-        working-directory: examples
-
-      # Bun never typechecks. This step is what catches a broken public type,
-      # such as `key` disappearing from every element.
-      - name: Typecheck the example app
-        run: bun run typecheck
-        working-directory: example-app
-
-  test-linux:
-    name: test-linux
-    needs: build
-    if: github.event_name == 'workflow_dispatch' && contains(inputs.targets, 'linux')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Setup bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          cache: false
-          rustflags: ""
-
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update && sudo apt-get install -y \
-            gcc g++ clang \
-            libfontconfig-dev \
-            libwayland-dev \
-            libxkbcommon-x11-dev \
-            libx11-xcb-dev \
-            libssl-dev \
-            libzstd-dev \
-            libvulkan1 \
-            vulkan-validationlayers \
-            xvfb xauth
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Download Linux x64 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: bindings-x86_64-unknown-linux-gnu
-          path: packages/native/
-
-      - name: Run React tests
-        # These suites construct TestGpuixRenderer, which the Linux binding omits
-        # because wgpu cannot read rendered images back yet. The remaining React
-        # tests do not need GPU image readback and still run on Linux.
-        run: |
-          bun run build
-          bun run typecheck:test
-          bun run vitest run \
-            --exclude src/__tests__/canvas-wpt.test.tsx \
-            --exclude 'src/__tests__/{baseline-layout.test.tsx,border-box-sizing.test.tsx,bun-preload-hover-group.test.ts,code.test.tsx,diff-native.test.tsx,frame-clock.test.tsx,globals.test.tsx,grid-layout.test.tsx,highlight.test.tsx,intrinsic-and-viewport-lengths.test.tsx,markdown.test.tsx,resolved-style.test.tsx,satisfactory-focus-within-repro.test.tsx,scroll-percentage-layout.test.tsx,selection-layout.test.tsx,selection.test.tsx,showcase.test.tsx,spacing-percentage-layout.test.tsx,style-coverage.test.tsx,testing-per-file-isolation.test.tsx,virtual-list.test.tsx}'
-        working-directory: packages/react
-
-      - name: Run example tests
-        run: bun run test
-        working-directory: examples
-
-      # GPUI's test target does not compile on Linux at the pinned Zed revision; see #828.
-
-  test-gpui-macos:
-    name: test-gpui-macos
-    if: github.event_name == 'workflow_dispatch' && contains(inputs.targets, 'macos')
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          cache: false
-          rustflags: ""
-
-      - name: Test GPUI
-        run: cargo test -p gpui
-        working-directory: zed
-
-  test-windows:
-    name: test-windows
-    needs: build
-    # Needs the Windows artifact, which only exists on dispatch runs that target Windows.
-    if: github.event_name == 'workflow_dispatch' && contains(inputs.targets, 'windows')
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Setup node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Download Windows x64 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: bindings-x86_64-pc-windows-msvc
-          path: packages/native/
-
-      - name: Load native binding with Bun
-        run: bun -e "require('./packages/native'); console.log('Windows native binding OK (bun)')"
-
-      - name: Load native binding with Node
-        run: node -e "require('./packages/native'); console.log('Windows native binding OK (node)')"
-
-      - name: Verify Windows test renderer
-        shell: bash
-        run: bun -e "const { statSync } = require('node:fs'); const { TestGpuixRenderer } = require('./packages/native'); const renderer = new TestGpuixRenderer(320, 200); renderer.applyBatch(JSON.stringify([['createElement',1,'text'],['setText',1,'Windows test renderer'],['setRoot',1]])); renderer.flush(); renderer.captureScreenshot('windows-test-renderer.png'); if (renderer.getAllText()[0] !== 'Windows test renderer' || statSync('windows-test-renderer.png').size === 0) throw new Error('TestGpuixRenderer did not render')"
-
-      - name: Run React tests
-        run: bun run test
-        working-directory: packages/react
-
-      - name: Build React package
-        run: bun run build
-        working-directory: packages/react
-
-      - name: Run example tests
-        run: bun run test
-        working-directory: examples

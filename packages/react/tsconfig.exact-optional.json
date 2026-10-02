@@ -3,19 +3,21 @@
   "compilerOptions": {
     "exactOptionalPropertyTypes": true,
     "rootDir": ".",
-    "baseUrl": ".",
     "paths": {
-      "@gpuix/react": ["dist/index.d.ts"],
-      "@gpuix/react/select": ["dist/components/select.d.ts"],
-      "@gpuix/react/combobox": ["dist/components/combobox.d.ts"],
-      "@gpuix/react/tooltip": ["dist/components/tooltip.d.ts"],
+      "@gpuix/react": ["./dist/index.d.ts"],
+      "@gpuix/react/select": ["./dist/components/select.d.ts"],
+      "@gpuix/react/combobox": ["./dist/components/combobox.d.ts"],
+      "@gpuix/react/tooltip": ["./dist/components/tooltip.d.ts"],
       "@gpuix/react/dialog": ["./dist/components/dialog.d.ts"],
       "@gpuix/react/alert-dialog": ["./dist/components/alert-dialog.d.ts"],
-      "@gpuix/react/*": ["dist/*"]
+      "@gpuix/react/*": ["./dist/*"]
     },
     "skipLibCheck": true,
     "disableSourceOfProjectReferenceRedirect": true,
-    "noEmit": true
+    "noEmit": true,
+    // Nothing is emitted, but `tsc --build` writes its build info under
+    // `outDir`. Keep that out of the published `dist`.
+    "outDir": "./node_modules/.cache/typecheck"
   },
   "files": [
     "src/__tests__/exact-optional.types.ts",

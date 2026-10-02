@@ -1,0 +1,64 @@
+name: Build
+description: Build every package on this runner, compiling the addon only when the turbo cache does not hold it.
+
+outputs:
+  host-tools:
+    description: The compiler versions this runner built with, for the jobs that restore the build.
+    value: ${{ steps.host-tools.outputs.value }}
+
+runs:
+  using: composite
+  steps:
+    - name: Identify the host tools
+      id: host-tools
+      uses: ./.github/actions/host-tools
+
+    - name: Setup bun
+      uses: ./.github/actions/bun
+
+    # The steps below install what a task needs to run. A task the cache
+    # holds is restored instead, so its setup is skipped.
+    - name: Check the turbo cache
+      id: cache
+      uses: ./.github/actions/turbo-cache
+      with:
+        args: build
+
+    - name: Setup node
+      if: steps.cache.outputs.misses != ''
+      uses: ./.github/actions/node
+
+    - name: Setup rust
+      if: contains(steps.cache.outputs.misses, '@gpuix/native#build')
+      uses: ./.github/actions/rust
+
+    - name: Setup macos
+      if: runner.os == 'macOS' && contains(steps.cache.outputs.misses, '@gpuix/native#build')
+      uses: ./.github/actions/macos
+
+    - name: Setup linux
+      if: runner.os == 'Linux' && contains(steps.cache.outputs.misses, '@gpuix/native#build')
+      uses: ./.github/actions/linux
+
+    - name: Setup mbx
+      if: contains(steps.cache.outputs.misses, '@gpuix/native#build')
+      uses: ./.github/actions/mbx
+      with:
+        working-directory: packages/native
+
+    # Each platform builds in its runner's default shell.
+    - name: Build
+      if: runner.os != 'Windows'
+      shell: bash
+      run: bun run build
+
+    - name: Build
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: bun run build
+
+    - name: Report the turbo runs
+      if: ${{ !cancelled() }}
+      uses: ./.github/actions/turbo-summary
+      with:
+        name: turbo-runs-build-${{ runner.os }}
