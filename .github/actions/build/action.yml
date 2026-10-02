@@ -31,35 +31,11 @@ runs:
       if: runner.os == 'Linux' && contains(steps.cache.outputs.misses, '@gpuix/native#build')
       uses: ./.github/actions/linux
 
-    # Brings back mbx's compiled objects from the last build on this pull
-    # request, or else on the default branch. Objects match by content, so the
-    # crates in the `zed` submodule are cache hits on a fresh checkout; Cargo's
-    # own target directory would treat them as changed and recompile them.
-    # Runs after the toolchain is installed, because the cache key includes
-    # the compiler.
-    #
-    # Pinned to a commit on the action's main branch: v1.5.0, the latest
-    # release, has no `save-on-pull-request`.
     - name: Setup mbx
       if: contains(steps.cache.outputs.misses, '@gpuix/native#build')
-      uses: jdx/mr-boxington-action@81ec44711945b482d44718f5f1543d2df54c6b19 # main
+      uses: ./.github/actions/mbx
       with:
         working-directory: packages/native
-        github-cache-mode: objects
-        save-on-workflow-dispatch: true
-        save-on-pull-request: true
-
-    # napi runs `cargo`, so mbx's Cargo shim goes first on PATH.
-    - name: Route cargo through mbx
-      if: contains(steps.cache.outputs.misses, '@gpuix/native#build')
-      shell: bash
-      run: |
-        mbx setup --yes
-        case "$RUNNER_OS" in
-          macOS) echo "$HOME/Library/Application Support/mbx/bin" >> "$GITHUB_PATH" ;;
-          Linux) echo "$HOME/.local/share/mbx/bin" >> "$GITHUB_PATH" ;;
-          Windows) echo "$LOCALAPPDATA\\mbx\\bin" >> "$GITHUB_PATH" ;;
-        esac
 
     # Each platform builds in its runner's default shell.
     - name: Build

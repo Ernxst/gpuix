@@ -175,27 +175,23 @@ jobs:
   test-macos:
     name: Test (macOS, ${{ matrix.part.name }})
     needs: build-macos
-    # React's suite is most of the test time, so it runs as shards on separate
-    # runners. The other packages share one.
+    # React's suite is most of the test time, so it runs as three shards on
+    # separate runners. The other packages share one. GitHub runs five macOS
+    # jobs at a time for this repository, which these four and the typecheck
+    # fill; a fourth shard would wait for a runner.
     runs-on: macos-latest
     strategy:
       fail-fast: false
       matrix:
         part:
-          - name: react 1/5
-            shard: 1/5
+          - name: react 1/3
+            shard: 1/3
             filter: --filter=@gpuix/react
-          - name: react 2/5
-            shard: 2/5
+          - name: react 2/3
+            shard: 2/3
             filter: --filter=@gpuix/react
-          - name: react 3/5
-            shard: 3/5
-            filter: --filter=@gpuix/react
-          - name: react 4/5
-            shard: 4/5
-            filter: --filter=@gpuix/react
-          - name: react 5/5
-            shard: 5/5
+          - name: react 3/3
+            shard: 3/3
             filter: --filter=@gpuix/react
           - name: others
             filter: --filter=!@gpuix/react
@@ -317,6 +313,12 @@ jobs:
       - name: Setup macos
         if: steps.cache.outputs.misses != ''
         uses: ./.github/actions/macos
+
+      - name: Setup mbx
+        if: steps.cache.outputs.misses != ''
+        uses: ./.github/actions/mbx
+        with:
+          working-directory: zed
 
       - name: Test GPUI
         run: bun run test:gpui
