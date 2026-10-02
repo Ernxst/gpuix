@@ -16,6 +16,15 @@ env:
   # Fat LTO re-optimises every crate at link time on every build and no cache
   # can skip it. CI builds only feed tests, so they go without it.
   CARGO_PROFILE_RELEASE_LTO: "false"
+  # What the Rust setup action would export. The native build's cache key
+  # includes them, so they are set for every job: jobs that skip the Rust setup
+  # then restore the build job's addon instead of missing the cache.
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_TERM_COLOR: always
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+  CARGO_UNSTABLE_SPARSE_REGISTRY: "true"
+  RUST_BACKTRACE: short
 
 permissions: {}
 
@@ -43,9 +52,6 @@ jobs:
         uses: ./.github/actions/bun
 
       # Only used when the remote cache has no native build for this commit.
-      - name: Setup rust
-        uses: ./.github/actions/rust
-
       - name: Setup macos
         uses: ./.github/actions/macos
 
@@ -67,8 +73,6 @@ jobs:
     env:
       TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
       TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
-      # napi runs this as its cargo, so the build goes through mbx.
-      CARGO: mbx
     steps:
       - name: Clone repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -90,14 +94,26 @@ jobs:
         if: runner.os == 'Linux'
         uses: ./.github/actions/linux
 
-      # Restores Cargo's compiled dependencies from the last build on the default
-      # branch. Runs after the toolchain is installed, because the cache key
-      # includes the compiler.
+      # Restores Cargo's compiled dependencies from the last build on this pull
+      # request, or else on the default branch. Runs after the toolchain is
+      # installed, because the cache key includes the compiler.
       - name: Setup mbx
         uses: jdx/mr-boxington-action@v1
         with:
           working-directory: packages/native
           save-on-workflow-dispatch: true
+          save-on-pull-request: true
+
+      # napi runs `cargo`, so mbx's Cargo shim goes first on PATH.
+      - name: Route cargo through mbx
+        shell: bash
+        run: |
+          mbx setup --yes
+          case "$RUNNER_OS" in
+            macOS) echo "$HOME/Library/Application Support/mbx/bin" >> "$GITHUB_PATH" ;;
+            Linux) echo "$HOME/.local/share/mbx/bin" >> "$GITHUB_PATH" ;;
+            Windows) echo "$LOCALAPPDATA\\mbx\\bin" >> "$GITHUB_PATH" ;;
+          esac
 
       - name: Build
         if: runner.os != 'Linux'
@@ -150,9 +166,6 @@ jobs:
 
       - name: Setup bun
         uses: ./.github/actions/bun
-
-      - name: Setup rust
-        uses: ./.github/actions/rust
 
       - name: Setup macos
         if: runner.os == 'macOS'
