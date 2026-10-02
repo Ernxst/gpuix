@@ -23,6 +23,7 @@ runs:
       uses: jdx/mr-boxington-action@1687e54eb349cadf61fa38b5813a77875489e8e6 # v1.6.0
       with:
         working-directory: ${{ inputs.working-directory }}
+        version: 1.21.1
         cache-generation: ${{ inputs.cache-generation }}
         github-cache-mode: objects
         save-on-workflow-dispatch: true
