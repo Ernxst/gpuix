@@ -2,6 +2,7 @@
   "name": "@gpuix/examples",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "typecheck": "tsc --project tsconfig.test.json",
     "test": "vitest run --project examples --project serial",

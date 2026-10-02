@@ -3,6 +3,7 @@
   "private": true,
   "license": "Apache-2.0",
   "packageManager": "bun@1.4.0",
+  "type": "module",
   "workspaces": [
     "packages/*",
     "examples",
@@ -14,15 +15,20 @@
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "--------------------------------------------------------------------------------": "",
+    "lint:monorepo": "sherif",
+    "lint:dependencies": "syncpack lint",
+    "---------------------------------------------------------------------------------": "",
     "test": "turbo run test --concurrency=1",
     "test:watch": "vitest --project '!*(perf)' --project '!*(wpt)'",
     "test:coverage": "vitest run --coverage --project '!*(perf)' --project '!*(wpt)'",
-    "---------------------------------------------------------------------------------": ""
+    "----------------------------------------------------------------------------------": ""
   },
   "devDependencies": {
     "@types/bun": "1.4.0",
     "@vitest/coverage-istanbul": "5.0.3",
     "react-refresh": "0.18.0",
+    "sherif": "1.13.0",
+    "syncpack": "15.3.3",
     "turbo": "2.11.6",
     "typescript": "7.0.2",
     "vite": "8.3.2",
