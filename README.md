@@ -3962,9 +3962,11 @@ provide `cancel()` and `allowPropagation()` alongside `preventUnmountOnClose()`.
 active trigger and payload when switching triggers or overlapping Roots; an
 active detached trigger closing on unmount can be cancelled from `onOpenChange`.
 Custom-rendered triggers keep their children, including nested tooltip triggers.
-`Tooltip.Viewport` is optional unless animated
-content switches between triggers. The native Portal keeps children
-in the retained tree; its `container` prop does not select a destination. The
+`Tooltip.Portal keepMounted` retains a closed popup and hides it. `Tooltip.Viewport`
+wraps content in a current container and remounts it when the active trigger or
+payload changes; it does not retain previous content for animated transitions.
+The native Portal keeps children in the retained tree; its `container` prop does
+not select a destination. The
 shared floating Positioner uses GPUI's deferred `anchored()` layer, flips and
 shifts against the padded window boundary, and occludes controls behind it. A
 disabled Trigger suppresses tooltip interaction without disabling its rendered

@@ -2162,6 +2162,90 @@ describeNative("Tooltip Base UI parity tree", () => {
     expect(testRoot.renderer.findByTestId("nested-outer-popup")).toBeDefined()
     testRoot.unmount()
   })
+
+  it("keeps the closed popup mounted and hidden when Tooltip.Portal keepMounted is set", () => {
+    const testRoot = createTestRoot({ width: 400, height: 240 })
+    testRoot.render(
+      <Tooltip.Root>
+        <Tooltip.Trigger data-testid="keep-mounted-trigger">Trigger</Tooltip.Trigger>
+        <Tooltip.Portal keepMounted>
+          <Tooltip.Positioner>
+            <Tooltip.Popup data-testid="keep-mounted-popup">Content</Tooltip.Popup>
+          </Tooltip.Positioner>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    )
+    const popup = testRoot.renderer.findByTestId("keep-mounted-popup")
+    expect(popup).toBeDefined()
+    expect(popup!.style.display).toBe("none")
+    testRoot.unmount()
+  })
+
+  it("unmounts the closed popup by default", () => {
+    const testRoot = createTestRoot({ width: 400, height: 240 })
+    testRoot.render(
+      <Tooltip.Root>
+        <Tooltip.Trigger>Trigger</Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Positioner>
+            <Tooltip.Popup data-testid="unmounted-popup">Content</Tooltip.Popup>
+          </Tooltip.Positioner>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    )
+    expect(testRoot.renderer.findByTestId("unmounted-popup")).toBeUndefined()
+    testRoot.unmount()
+  })
+
+  it("exposes the focus activation type on Tooltip.Viewport", () => {
+    const testRoot = createTestRoot({ width: 400, height: 240 })
+    testRoot.render(
+      <Tooltip.Root>
+        <Tooltip.Trigger data-testid="viewport-focus-trigger" delay={0}>Trigger</Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Positioner>
+            <Tooltip.Popup>
+              <Tooltip.Viewport data-testid="viewport-focus">Content</Tooltip.Viewport>
+            </Tooltip.Popup>
+          </Tooltip.Positioner>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    )
+    testRoot.renderer.focusElement(testRoot.renderer.findByTestId("viewport-focus-trigger")!.id)
+    expect(testRoot.renderer.findByTestId("viewport-focus")!.customProps?.["data-instant"]).toBe("focus")
+    testRoot.unmount()
+  })
+
+  it("remounts the current Tooltip.Viewport container when its active Trigger changes", () => {
+    const testRoot = createTestRoot({ width: 400, height: 240 })
+    testRoot.render(
+      <Tooltip.Root>
+        {({ payload }) => (
+          <>
+            <Tooltip.Trigger data-testid="viewport-trigger-one" payload="one" delay={0}>One</Tooltip.Trigger>
+            <Tooltip.Trigger data-testid="viewport-trigger-two" payload="two" delay={0}>Two</Tooltip.Trigger>
+            <Tooltip.Portal>
+              <Tooltip.Positioner>
+                <Tooltip.Popup>
+                  <Tooltip.Viewport data-testid="viewport">{payload}</Tooltip.Viewport>
+                </Tooltip.Popup>
+              </Tooltip.Positioner>
+            </Tooltip.Portal>
+          </>
+        )}
+      </Tooltip.Root>
+    )
+    testRoot.renderer.focusElement(testRoot.renderer.findByTestId("viewport-trigger-one")!.id)
+    const first = testRoot.renderer.findByTestId("viewport")!
+    const firstCurrent = first.children?.find((child) => child.customProps?.["data-current"] !== undefined)
+    expect(firstCurrent).toBeDefined()
+    testRoot.renderer.focusElement(testRoot.renderer.findByTestId("viewport-trigger-two")!.id)
+    const second = testRoot.renderer.findByTestId("viewport")!
+    const secondCurrent = second.children?.find((child) => child.customProps?.["data-current"] !== undefined)
+    expect(secondCurrent).toBeDefined()
+    expect(secondCurrent!.id).not.toBe(firstCurrent!.id)
+    testRoot.unmount()
+  })
 })
 
 interface NestedTooltipSceneOptions {

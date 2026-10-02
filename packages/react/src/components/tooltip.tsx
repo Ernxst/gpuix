@@ -30,18 +30,31 @@ import type { PositionerProps, PositionerState, StateStyle } from "./floating.js
 const tooltipTriggerInstances = new Set<PublicInstance>()
 
 function isDescendantTooltipTrigger(parent: PublicInstance, child: PublicInstance): boolean {
-  return child !== parent && parent.contains(child)
+  let candidate = child.parentElement
+  while (candidate) {
+    if (candidate.id === parent.id) return true
+    candidate = candidate.parentElement
+  }
+  return false
+}
+
+function registeredTooltipTrigger(instance: PublicInstance): PublicInstance | undefined {
+  for (const trigger of tooltipTriggerInstances) {
+    if (trigger.id === instance.id) return trigger
+  }
+  return undefined
 }
 
 function isNestedTooltipTrigger(currentTarget: PublicInstance, target: PublicInstance | null, x?: number, y?: number): boolean {
   let candidate = target
   while (candidate && candidate !== currentTarget) {
-    if (tooltipTriggerInstances.has(candidate) && isDescendantTooltipTrigger(currentTarget, candidate)) return true
+    const registered = registeredTooltipTrigger(candidate)
+    if (registered && isDescendantTooltipTrigger(currentTarget, registered)) return true
     candidate = candidate.parentElement
   }
   if (x !== undefined && y !== undefined) {
     for (const trigger of tooltipTriggerInstances) {
-      if (trigger !== currentTarget && isDescendantTooltipTrigger(currentTarget, trigger)) {
+      if (trigger.id !== currentTarget.id && isDescendantTooltipTrigger(currentTarget, trigger)) {
         const bounds = trigger.getBoundingClientRect()
         if (x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom) return true
       }
@@ -53,12 +66,13 @@ function isNestedTooltipTrigger(currentTarget: PublicInstance, target: PublicIns
 function isEnabledNestedTrigger(currentTarget: PublicInstance, target: PublicInstance | null, x?: number, y?: number): boolean {
   let candidate = target
   while (candidate && candidate !== currentTarget) {
-    if (tooltipTriggerInstances.has(candidate) && isDescendantTooltipTrigger(currentTarget, candidate) && candidate.getAttribute("data-trigger-disabled") === null) return true
+    const registered = registeredTooltipTrigger(candidate)
+    if (registered && isDescendantTooltipTrigger(currentTarget, registered) && registered.getAttribute("data-trigger-disabled") === null) return true
     candidate = candidate.parentElement
   }
   if (x !== undefined && y !== undefined) {
     for (const trigger of tooltipTriggerInstances) {
-      if (trigger !== currentTarget && isDescendantTooltipTrigger(currentTarget, trigger) && trigger.getAttribute("data-trigger-disabled") === null) {
+      if (trigger.id !== currentTarget.id && isDescendantTooltipTrigger(currentTarget, trigger) && trigger.getAttribute("data-trigger-disabled") === null) {
         const bounds = trigger.getBoundingClientRect()
         if (x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom) return true
       }
@@ -95,7 +109,9 @@ export interface TooltipChangeEventDetails {
 function focusRemainsWithinTriggers(trigger: PublicInstance, triggers: Iterable<PublicInstance>): boolean {
   const activeElement = trigger.ownerDocument.activeElement
   return activeElement !== null && Array.from(triggers).some((candidate) =>
-    candidate.getAttribute("data-trigger-disabled") === null && candidate.contains(activeElement as PublicInstance)
+    candidate.getAttribute("data-trigger-disabled") === null && (
+      candidate.id === (activeElement as PublicInstance).id || isDescendantTooltipTrigger(candidate, activeElement as PublicInstance)
+    )
   )
 }
 
@@ -458,6 +474,7 @@ interface TooltipContextValue<Payload = unknown> {
 }
 
 const TooltipContext = createContext<TooltipContextValue | null>(null)
+const TooltipKeepMountedContext = createContext(false)
 
 function useTooltipContext(name: string): TooltipContextValue {
   const value = useContext(TooltipContext)
@@ -1096,11 +1113,15 @@ export const TooltipPortal = forwardRef<PublicInstance, TooltipPortalProps>(func
   { children, render, className, style, container: _container, keepMounted: _keepMounted, ...props },
   ref
 ) {
+  const context = useTooltipContext("Tooltip.Portal")
+  if (!context.popupMounted && !_keepMounted) return null
   const state = {}
   const resolved = { ...props, className: resolveClassName(className, state), style: resolveStyle(style, state) }
-  if (typeof render === "function") return <>{render({ ...resolved, ref }, state)}</>
-  if (isValidElement<Props>(render)) return renderSlot({ asChild: true, children: render, props: resolved, ref })
-  return <>{children}</>
+  let portal: ReactNode
+  if (typeof render === "function") portal = render({ ...resolved, ref }, state)
+  else if (isValidElement<Props>(render)) portal = renderSlot({ asChild: true, children: render, props: resolved, ref })
+  else portal = children
+  return <TooltipKeepMountedContext.Provider value={_keepMounted ?? false}>{portal}</TooltipKeepMountedContext.Provider>
 })
 
 export interface TooltipPositionerState extends PositionerState {
@@ -1159,6 +1180,7 @@ export const TooltipPopup = forwardRef<PublicInstance, TooltipPopupProps>(functi
   ref
 ) {
   const context = useTooltipContext("Tooltip.Popup")
+  const keepMounted = useContext(TooltipKeepMountedContext)
   const positioner = usePositionerState()
   if (!positioner) throw new Error("Base UI: TooltipPositionerContext is missing. TooltipPositioner parts must be placed within <Tooltip.Positioner>.")
   const state: TooltipPopupState = {
@@ -1169,12 +1191,15 @@ export const TooltipPopup = forwardRef<PublicInstance, TooltipPopupProps>(functi
     transitionStatus: "idle",
   }
   const resolvedClassName = resolveClassName(className, state)
-  if ((!context.open && !context.popupMounted) || context.forceUnmount) return null
+  if ((!context.open && !context.popupMounted && !keepMounted) || context.forceUnmount) return null
+  const hidden = keepMounted && !context.open
+  const popupStyle = floatingPopupStyle(resolveStyle(style, state), resolvedClassName)
   const resolved: Props = {
     ...props,
     ref,
     className: resolvedClassName,
-    style: floatingPopupStyle(resolveStyle(style, state), resolvedClassName),
+    style: hidden ? mergeStyles(popupStyle, { display: "none" }) : popupStyle,
+    "aria-hidden": hidden ? "true" : props["aria-hidden"],
     "data-open": context.open ? "" : undefined,
     "data-closed": context.open ? undefined : "",
     "data-side": state.side,
@@ -1262,6 +1287,8 @@ export const TooltipViewport = forwardRef<PublicInstance, TooltipViewportProps>(
 ) {
   const context = useTooltipContext("Tooltip.Viewport")
   const state: TooltipViewportState = { activationDirection: undefined, transitioning: false, instant: context.instant }
+  const contentKeyRevision = useRef(0)
+  const contentKey = useMemo(() => ++contentKeyRevision.current, [context.activeTriggerId, context.payload])
   const resolved: Props = {
     ...props,
     ref,
@@ -1271,7 +1298,7 @@ export const TooltipViewport = forwardRef<PublicInstance, TooltipViewportProps>(
     "data-transitioning": undefined,
     "data-instant": state.instant,
   }
-  return <>{renderPart("div", render, resolved, children, state, ref)}</>
+  return <>{renderPart("div", render, resolved, <div data-current key={contentKey}>{children}</div>, state, ref)}</>
 })
 
 export function Tooltip(): null { return null }

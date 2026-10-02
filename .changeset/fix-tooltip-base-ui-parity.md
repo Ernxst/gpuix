@@ -8,7 +8,10 @@ Escape propagation, controlled no-op changes, Arrow accessibility, trigger
 children, hover dismissal and delay, detached handles, nested triggers, and
 handle attachment warnings. Preserve trigger payloads across handoffs and apply
 Tooltip positioner offsets and hoverability settings, including resolved
-placement data for offset callbacks.
+placement data for offset callbacks. Keep closed popups mounted and hidden when
+`Tooltip.Portal keepMounted` is set, remount Tooltip.Viewport's current content
+when its active trigger or payload changes, and identify nested triggers across
+native event wrappers so focusing one does not open its ancestor tooltip.
 
 Fixes #845
 Fixes #846
