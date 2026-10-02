@@ -2,7 +2,7 @@
   "$schema": "./node_modules/syncpack/schema.json",
   "versionGroups": [
     {
-      "dependencies": ["$LOCAL"],
+      "label": "Peer dependencies are ranges that consumers satisfy",
       "dependencyTypes": ["peer"],
       "isIgnored": true
     }
@@ -10,7 +10,7 @@
   "semverGroups": [
     {
       "dependencies": ["**"],
-      "dependencyTypes": ["prod", "dev", "peer", "overrides", "pnpmOverrides", "resolutions"],
+      "dependencyTypes": ["prod", "dev", "overrides", "pnpmOverrides", "resolutions"],
       "label": "Pin dependency versions",
       "range": ""
     }
