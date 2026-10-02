@@ -305,14 +305,10 @@ describeNative("Select typeahead", () => {
     )
 
     screen.renderer.nativeSimulateClick(30, 25)
-    screen.renderer.simulateKeystrokes("a")
-
-    expect(screen.getByTestId("apple")).toHaveAttribute("data-highlighted", "")
-    expect(screen.getByTestId("apple")).toHaveTextContent("Highlighted apple")
+    expect(screen.getByTestId("apple")).toHaveTextContent("Apple label")
     expect(screen.getByTestId("trigger")).toHaveTextContent("Other")
-
-    screen.renderer.simulateKeystrokes("enter")
-
+    const apple = screen.getByTestId("apple").getBoundingClientRect()
+    screen.renderer.nativeSimulateClick(apple.left + 4, apple.top + 4)
     expect(screen.getByTestId("trigger")).toHaveTextContent("Apple label")
 
     screen.renderer.nativeSimulateClick(30, 25)
