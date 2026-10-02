@@ -345,13 +345,44 @@ describeNative("SelectPopup background", () => {
 
   it("lets a compiled class state background show on hover", () => {
     screen.render(
-      <Fruit popup={{ className: compiled({ hover: { backgroundColor: "#123456" } }) }} />
+      <div style={{ width: 400, height: 400, backgroundColor: "#11171b" }}>
+        <Select.Root>
+          <Select.Trigger data-testid="trigger" style={{ width: 180, height: 36 }} />
+          <Select.Popup
+            data-testid="popup"
+            className={compiled({
+              width: 180,
+              height: 96,
+              borderRadius: 8,
+              hover: { backgroundColor: "#123456" },
+            })}
+          >
+            <Select.List><Select.Item value="apple">Apple</Select.Item></Select.List>
+          </Select.Popup>
+        </Select.Root>
+      </div>
     )
-    screen.renderer.nativeSimulateClick(30, 25)
+    const trigger = screen.getByTestId("trigger")
+    const triggerBounds = screen.renderer.getElementBounds(trigger.id)!
+    screen.renderer.nativeSimulateClick(
+      triggerBounds.x + triggerBounds.width / 2,
+      triggerBounds.y + triggerBounds.height / 2
+    )
+    screen.renderer.dispatchNativeEvents()
     screen.renderer.drawPendingFrame()
 
     const popup = screen.getByTestId("popup")
     const bounds = screen.renderer.getElementBounds(popup.id)!
+    const readPixel = (x: number, y: number) => {
+      const capture = screen.renderer.captureScreenshotRaw()
+      const scale = screen.renderer.getWindowSize().scaleFactor
+      const offset = (Math.round(y * scale) * capture.width + Math.round(x * scale)) * 4
+      return [...capture.pixels.subarray(offset, offset + 4)]
+    }
+    expect(readPixel(bounds.x + bounds.width / 2, bounds.y + bounds.height - 8)).toEqual([
+      17, 23, 27, 255,
+    ])
+
     screen.renderer.nativeSimulateMouseMove(bounds.x + 2, bounds.y + 2)
     screen.renderer.drawPendingFrame()
 

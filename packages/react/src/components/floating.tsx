@@ -194,7 +194,7 @@ export function floatingPopupStyle(
     if (Object.keys(background).length > 0) stateBackgrounds[state] = background
   }
   const fallback =
-    !hasBackground(style) && !hasBackground(classStyle)
+    !hasAnyBackground(style) && !hasAnyBackground(classStyle)
       ? { backgroundColor: "#1A1A1A" }
       : undefined
   const resolved = mergeStyles(fallback, style)
