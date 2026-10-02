@@ -195,7 +195,7 @@ Their text is selectable and searchable, but test text queries cannot see it; us
 
 ## `anchored` and overlays
 
-`<anchored>` places its children beside the box of its direct parent, so put it inside the trigger's parent (the built-in Content parts follow this shape). Props: `position`, `side`, `align`, `gap`, `anchor`, `offset`, `fit` (`"switch"` flips to the other side on overflow, `"snap"` shifts inside the window), `snapMargin`, `deferred` (paint in a later pass, on top; on by default), `priority`, `occlude` (block hits to what is behind; on by default).
+`<anchored>` places its children beside the box of its direct parent, so put it inside the trigger's parent (the built-in Content parts follow this shape). Props: `position`, `side`, `align`, `gap`, `anchor`, `offset`, `fit` (`"switch"` flips to the other anchor when it overflows, then shifts inside `snapMargin`; `"snap"` shifts inside the window), `snapMargin` (a number for every edge or an object with per-edge values), `deferred` (paint in a later pass, on top; on by default), `priority`, `occlude` (block hits to what is behind; on by default).
 
 - Menus, tooltips and dialogs need `<anchored>` (or the built-in Content parts), which is deferred unless `deferred={false}`. A positioned element or flex/grid item can use `style.zIndex` to paint above overlapping siblings; pointer hits follow that paint order. `zIndex` does not change tab, accessibility, or text-selection order. Ordinary in-flow blocks ignore it.
 - Give overlays an opaque fill. Built-in floating popups use a `#1A1A1A` fallback only when no background is supplied; an explicitly transparent background takes precedence and lets the page show through.

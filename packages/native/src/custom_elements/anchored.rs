@@ -119,7 +119,7 @@ pub struct AnchoredElement {
     gap: f32,
     offset: (f32, f32),
     fit: FitMode,
-    snap_margin: f32,
+    snap_margin: (f32, f32, f32, f32),
     deferred: bool,
     priority: usize,
     occlude: bool,
@@ -136,7 +136,7 @@ impl Default for AnchoredElement {
             gap: 0.0,
             offset: (0.0, 0.0),
             fit: FitMode::Snap,
-            snap_margin: 8.0,
+            snap_margin: (8.0, 8.0, 8.0, 8.0),
             deferred: true,
             priority: 1,
             occlude: true,
@@ -355,11 +355,15 @@ impl CustomElement for AnchoredElement {
             if let Some((x, y)) = self.position {
                 anchored = anchored.position(gpui::point(gpui::px(x), gpui::px(y)));
             }
-                match self.fit {
-                    FitMode::None => {}
-                    FitMode::Switch => {}
-                    FitMode::Snap => anchored = anchored.snap_to_window_with_margin(gpui::px(self.snap_margin)),
+            match self.fit {
+                FitMode::None => {}
+                FitMode::Switch => {
+                    anchored = anchored.switch_anchor_with_margin(self.snap_margin_edges())
                 }
+                FitMode::Snap => {
+                    anchored = anchored.snap_to_window_with_margin(self.snap_margin_edges())
+                }
+            }
         }
 
         let anchored = anchored.child(content);
@@ -410,7 +414,33 @@ impl CustomElement for AnchoredElement {
                     .unwrap_or_default();
             }
             "fit" => self.fit = value.as_str().map(FitMode::from_str).unwrap_or_default(),
-            "snapMargin" => self.snap_margin = value.as_f64().unwrap_or(8.0) as f32,
+            "snapMargin" => {
+                self.snap_margin = if let Some(margin) = value.as_f64() {
+                    let margin = margin as f32;
+                    (margin, margin, margin, margin)
+                } else if let Some(margin) = value.as_object() {
+                    (
+                        margin
+                            .get("top")
+                            .and_then(|value| value.as_f64())
+                            .unwrap_or(0.0) as f32,
+                        margin
+                            .get("right")
+                            .and_then(|value| value.as_f64())
+                            .unwrap_or(0.0) as f32,
+                        margin
+                            .get("bottom")
+                            .and_then(|value| value.as_f64())
+                            .unwrap_or(0.0) as f32,
+                        margin
+                            .get("left")
+                            .and_then(|value| value.as_f64())
+                            .unwrap_or(0.0) as f32,
+                    )
+                } else {
+                    (8.0, 8.0, 8.0, 8.0)
+                }
+            }
             "deferred" => self.deferred = value.as_bool().unwrap_or(true),
             "priority" => {
                 self.priority = value
@@ -464,4 +494,15 @@ impl CustomElement for AnchoredElement {
     }
 
     fn destroy(&mut self) {}
+}
+
+impl AnchoredElement {
+    fn snap_margin_edges(&self) -> gpui::Edges<gpui::Pixels> {
+        gpui::Edges {
+            top: gpui::px(self.snap_margin.0),
+            right: gpui::px(self.snap_margin.1),
+            bottom: gpui::px(self.snap_margin.2),
+            left: gpui::px(self.snap_margin.3),
+        }
+    }
 }
