@@ -874,10 +874,12 @@ const TooltipTriggerInRoot = forwardRef<PublicInstance, TooltipTriggerProps>(fun
       onBlur?.(event as never)
       if (context.instant === "focus") {
         if (!focusRemainsWithinTriggers(event.currentTarget, context.triggerRefs.current.values())) {
-          const blurredTrigger = event.currentTarget
-          queueMicrotask(() => {
-            if (triggerInstanceRef.current === blurredTrigger) context.close("trigger-focus", event)
-          })
+          if (focusRemainsWithinTriggers(event.currentTarget, tooltipTriggerInstances)) {
+            const blurredTrigger = event.currentTarget
+            queueMicrotask(() => {
+              if (triggerInstanceRef.current === blurredTrigger) context.close("trigger-focus", event)
+            })
+          } else context.close("trigger-focus", event)
         }
       } else context.scheduleClose(closeDelay ?? provider.closeDelay, "trigger-focus", event)
     },

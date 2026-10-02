@@ -491,8 +491,7 @@ describeNative("Tooltip Base UI parity tree", () => {
     expect(testRoot.renderer.getAllText()).toContain("Focus content")
     await testRoot.userEvent.tab()
     expect(testRoot.renderer.getActiveElement()).toBe(next.id)
-    testRoot.renderer.advanceAsyncClock(0)
-    await testRoot.waitFor(() => expect(testRoot.renderer.getAllText()).not.toContain("Focus content"), { timeout: 5_000 })
+    expect(testRoot.renderer.getAllText()).not.toContain("Focus content")
     testRoot.unmount()
   })
 
