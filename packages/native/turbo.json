@@ -13,11 +13,16 @@
       "outputs": [
         "dist/*"
       ],
+      // Hashed: what changes the binary. The runner pair stands in for the
+      // target, which turbo does not hash.
       "env": [
         "RUNNER_OS",
         "RUNNER_ARCH",
         "CARGO*",
+        "!CARGO_HOME",
+        "!CARGO_TARGET_DIR",
         "RUST*",
+        "!RUSTUP_HOME",
         "CC*",
         "CXX*",
         "AR*",
@@ -25,22 +30,29 @@
         "CXXFLAGS*",
         "CPPFLAGS*",
         "LDFLAGS*",
-        "SDKROOT",
         "MACOSX_*",
         "IPHONEOS_*",
+        "DEPLOYMENT_TARGET*",
+        "VCToolsVersion",
+        "WindowsSDKVersion",
+        "ZIG*",
+        "NAPI_RS_*"
+      ],
+      // Passed through but not hashed: where the toolchain and SDKs live on
+      // this machine. Hashing them would stop two runners sharing a build.
+      "passThroughEnv": [
+        "CARGO_HOME",
+        "CARGO_TARGET_DIR",
+        "RUSTUP_HOME",
+        "SDKROOT",
         "DEVELOPER_DIR",
         "VCTOOLS*",
         "WINDOWSSDK*",
         "WindowsSdkDir",
-        "WindowsSDKVersion",
-        "VCToolsVersion",
         "INCLUDE",
         "LIB",
         "PKG_CONFIG*",
         "VCPKG*",
-        "ZIG*",
-        "DEPLOYMENT_TARGET*",
-        "NAPI_RS_*",
         "GPUI_FXC_PATH"
       ]
     },
