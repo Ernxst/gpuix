@@ -655,7 +655,7 @@ describeNative("Tooltip Base UI parity tree", () => {
     )
 
     await testRoot.userEvent.keyboard(testRoot.renderer.findByTestId("propagation-trigger")!, "escape")
-    expect(missingMethodError).toBeInstanceOf(TypeError)
+    expect(missingMethodError).toBeUndefined()
     testRoot.unmount()
   })
 
