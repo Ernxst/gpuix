@@ -124,14 +124,7 @@ jobs:
           esac
 
       - name: Build
-        if: runner.os != 'Linux'
         run: bun run build
-
-      # `test-support` does not compile on Linux until wgpu image readback
-      # lands, so Linux checks that the addon builds without it.
-      - name: Build the native addon without test-support
-        if: runner.os == 'Linux'
-        run: bunx turbo run build:release --filter=@gpuix/native
 
   test:
     name: Test (${{ matrix.os }}, ${{ matrix.part.name }})
@@ -140,8 +133,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Linux has its own job, `test-linux`: this one runs the `test` task,
-        # which needs a build that does not compile there.
+        # Linux has no test renderer, so packages/react/vitest.config.ts leaves
+        # out the files that need one.
         #
         # Windows stays on a GitHub-hosted runner. The test renderer opens a
         # real DirectX window, which needs an interactive desktop session, and
@@ -149,6 +142,7 @@ jobs:
         # creating the DirectX renderer fails.
         os:
           - macos-latest
+          - blacksmith-4vcpu-ubuntu-2404
           - windows-latest
         # React's suite is most of the test time, so it runs as three shards on
         # separate runners. The other packages share one.
@@ -180,6 +174,11 @@ jobs:
         if: runner.os == 'macOS'
         uses: ./.github/actions/macos
 
+      # The addon loads these libraries at run time.
+      - name: Setup linux
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/linux
+
       # packages/react/vitest.config.ts reads the shard from VITEST_SHARD, which
       # is part of the test task's hash.
       - name: Test React
@@ -193,52 +192,6 @@ jobs:
         if: ${{ !matrix.part.shard }}
         shell: bash
         run: bunx turbo run test --filter=!@gpuix/react --concurrency=1 --continue=dependencies-successful
-
-  test-linux:
-    name: Test (linux)
-    # Waits for the build so the addon comes from the cache.
-    needs: build
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    permissions:
-      contents: read
-    env:
-      TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
-      TURBO_TEAMID: ${{ vars.TURBO_TEAMID }}
-    steps:
-      - name: Clone repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-          submodules: recursive
-
-      - name: Setup bun
-        uses: ./.github/actions/bun
-
-      # The addon loads these libraries at run time.
-      - name: Setup linux
-        uses: ./.github/actions/linux
-
-      # The `test` task depends on the native `build`, which does not compile
-      # on Linux. So this job restores the addon built without `test-support`
-      # and runs each package's own scripts, which turbo does not cache.
-      - name: Restore the native addon
-        run: bunx turbo run build:release --filter=@gpuix/native
-
-      - name: Build React
-        run: bun run build
-        working-directory: packages/react
-
-      # packages/react/vitest.config.ts leaves out the files that need the
-      # test renderer.
-      - name: Test React
-        run: bun run test
-        working-directory: packages/react
-
-      - name: Test the examples
-        run: bun run test
-        working-directory: examples
-
-      # GPUI's test target does not compile on Linux at the pinned Zed revision; see #828.
 
   test-gpui:
     name: Test GPUI (macos)
