@@ -61,6 +61,7 @@ interface ProviderValue {
   closeDelay: number
   timeout: number
   lastClosedAt: React.MutableRefObject<number>
+  focusedTooltip: React.MutableRefObject<{ owner: object; close: (event?: GpuixSyntheticEvent) => void } | null>
   disableHoverableContent: boolean
 }
 
@@ -69,6 +70,7 @@ const defaultProvider: ProviderValue = {
   closeDelay: 0,
   timeout: 400,
   lastClosedAt: { current: Number.NEGATIVE_INFINITY },
+  focusedTooltip: { current: null },
   disableHoverableContent: false,
 }
 const ProviderContext = createContext(defaultProvider)
@@ -81,7 +83,8 @@ export function TooltipProvider({
   disableHoverableContent = false,
 }: TooltipProviderProps): ReactElement {
   const lastClosedAt = useRef(Number.NEGATIVE_INFINITY)
-  const value = useMemo(() => ({ delay, closeDelay, timeout, lastClosedAt, disableHoverableContent }), [delay, closeDelay, timeout, disableHoverableContent])
+  const focusedTooltip = useRef<ProviderValue["focusedTooltip"]["current"]>(null)
+  const value = useMemo(() => ({ delay, closeDelay, timeout, lastClosedAt, focusedTooltip, disableHoverableContent }), [delay, closeDelay, timeout, lastClosedAt, focusedTooltip, disableHoverableContent])
   return <ProviderContext.Provider value={value}>{children}</ProviderContext.Provider>
 }
 
@@ -378,6 +381,8 @@ const TooltipRootImpl = forwardRef<PublicInstance, TooltipRootProps<unknown>>(fu
   const [forceUnmount, setForceUnmount] = useState(false)
   const [instant, setInstant] = useState<TooltipContextValue["instant"]>()
   const triggerRefs = useRef(new Map<string, PublicInstance>())
+  const focusRegistration = useRef<object>({})
+  const closeRef = useRef<(reason: TooltipChangeEventReason, event?: GpuixSyntheticEvent) => void>(() => {})
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dismissLayer = useDismissLayer(open)
@@ -405,6 +410,16 @@ const TooltipRootImpl = forwardRef<PublicInstance, TooltipRootProps<unknown>>(fu
     onOpenChange?.(next, details)
     if (openProp === undefined) setOpenState(next)
     if (next) {
+      if (reason === "trigger-focus") {
+        const focusedTooltip = provider.focusedTooltip.current
+        if (focusedTooltip && focusedTooltip.owner !== focusRegistration.current) {
+          focusedTooltip.close(event)
+        }
+        provider.focusedTooltip.current = {
+          owner: focusRegistration.current,
+          close: (closeEvent) => closeRef.current("trigger-focus", closeEvent),
+        }
+      }
       setPopupMounted(true)
       setForceUnmount(false)
       setActiveTriggerId(nextTriggerId ?? triggerId ?? activeTriggerId)
@@ -412,6 +427,9 @@ const TooltipRootImpl = forwardRef<PublicInstance, TooltipRootProps<unknown>>(fu
       syncTooltipHandle(handle, nextTriggerId ?? triggerId ?? activeTriggerId ?? "", nextPayload)
       setInstant(reason === "trigger-hover" ? "delay" : reason === "trigger-focus" ? "focus" : undefined)
     } else {
+      if (provider.focusedTooltip.current?.owner === focusRegistration.current) {
+        provider.focusedTooltip.current = null
+      }
       setPopupMounted(preventUnmount)
       if (!preventUnmount) setForceUnmount(false)
       setInstant("dismiss")
@@ -424,6 +442,7 @@ const TooltipRootImpl = forwardRef<PublicInstance, TooltipRootProps<unknown>>(fu
     changeOpen(true, reason, event, id, nextPayload)
   }
   const close = (reason: TooltipChangeEventReason, event?: GpuixSyntheticEvent) => changeOpen(false, reason, event)
+  closeRef.current = close
   const scheduleOpen: TooltipContextValue["scheduleOpen"] = (delay, reason, event, id, nextPayload) => {
     if (disabled) return
     cancelClose()
@@ -450,6 +469,9 @@ const TooltipRootImpl = forwardRef<PublicInstance, TooltipRootProps<unknown>>(fu
   useEffect(() => () => {
     cancelOpen()
     cancelClose()
+    if (provider.focusedTooltip.current?.owner === focusRegistration.current) {
+      provider.focusedTooltip.current = null
+    }
     if (handle) attachTooltipHandle(handle, null)
   }, [handle])
   useEffect(() => {

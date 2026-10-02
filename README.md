@@ -3939,13 +3939,17 @@ are retained.
 
 Combobox uses the native input for text editing, IME, clipboard, and focus.
 Tooltip parts accept `render`, state-based `className` and `style`, and expose
-Base UI state attributes. `Tooltip.Viewport` is optional unless animated
-content switches between triggers. The native Portal keeps children in the
-retained tree; its `container` prop does not select a destination. The shared
-floating Positioner uses GPUI's deferred `anchored()` layer, snaps inside the
-window, and occludes controls behind it. A disabled Trigger suppresses tooltip
-interaction without disabling its rendered control; disabling an open Root
-closes the tooltip. Multiple triggers retain their own anchors and payloads.
+Base UI state attributes. Keyboard focus opens a tooltip immediately; moving
+focus to another trigger in the same Provider closes the tooltip opened by the
+previous trigger. The Positioner follows the active rendered Trigger and
+places the popup on its requested side. `Tooltip.Viewport` is optional unless
+animated content switches between triggers. The native Portal keeps children
+in the retained tree; its `container` prop does not select a destination. The
+shared floating Positioner uses GPUI's deferred `anchored()` layer, snaps inside
+the window, and occludes controls behind it. A disabled Trigger suppresses
+tooltip interaction without disabling its rendered control; disabling an open
+Root closes the tooltip. Multiple triggers retain their own anchors and
+payloads.
 
 ### Overlay menus
 
