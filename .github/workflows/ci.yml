@@ -258,7 +258,7 @@ jobs:
         # out the files that need one. What remains takes seconds, so one
         # runner tests every package.
         include:
-          - os: blacksmith-4vcpu-ubuntu-2404
+          - os: blacksmith-2vcpu-ubuntu-2404
             part:
               name: all
               filter: ""
