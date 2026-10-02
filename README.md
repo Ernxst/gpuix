@@ -3954,10 +3954,20 @@ immediately, including when focus moves outside the Provider. Moving focus
 between triggers owned by the same Root keeps its tooltip open; focusing a
 trigger owned by another Root in the same Provider closes the previous tooltip.
 `closeDelay` continues to apply to hover closure. The Positioner follows the
-active rendered Trigger and places the popup on its requested side.
-`Tooltip.Viewport` is optional unless animated
-content switches between triggers. The native Portal keeps children
-in the retained tree; its `container` prop does not select a destination. The
+active rendered Trigger, flips its alignment when the padded boundary requires
+it, and passes that resolved alignment and side to offset callbacks.
+`Tooltip.Popup` must be inside `Tooltip.Positioner`. `onOpenChange` details
+provide `cancel()` and `allowPropagation()` alongside `preventUnmountOnClose()`.
+`Tooltip.Arrow` defaults to `aria-hidden=\"true\"`. Tooltip handles keep their
+active trigger and payload when switching triggers or overlapping Roots; an
+active detached trigger closing on unmount can be cancelled from `onOpenChange`.
+Custom render functions control their returned content; nested Tooltip triggers
+inside a custom-rendered Trigger are not supported yet.
+`Tooltip.Portal keepMounted` retains a closed popup and hides it. `Tooltip.Viewport`
+wraps content in a current container and remounts it when the active trigger or
+payload changes; it does not retain previous content for animated transitions.
+The native Portal keeps children in the retained tree; its `container` prop does
+not select a destination. The
 shared floating Positioner uses GPUI's deferred `anchored()` layer, flips and
 shifts against the padded window boundary, and occludes controls behind it. A
 disabled Trigger suppresses tooltip interaction without disabling its rendered

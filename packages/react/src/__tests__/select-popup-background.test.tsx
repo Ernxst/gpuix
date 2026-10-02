@@ -413,9 +413,14 @@ describeNative("SelectPopup background", () => {
     screen.render(
       <div style={{ width: 400, height: 400 }}>
         <Tooltip.Root defaultOpen>
-          <Tooltip.Popup data-testid="popup" className={compiled({ backgroundColor: "#123456" })}>
-            Tip
-          </Tooltip.Popup>
+          <Tooltip.Trigger>Trigger</Tooltip.Trigger>
+          <Tooltip.Portal>
+            <Tooltip.Positioner>
+              <Tooltip.Popup data-testid="popup" className={compiled({ backgroundColor: "#123456" })}>
+                Tip
+              </Tooltip.Popup>
+            </Tooltip.Positioner>
+          </Tooltip.Portal>
         </Tooltip.Root>
       </div>
     )

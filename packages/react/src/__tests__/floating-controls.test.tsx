@@ -876,13 +876,15 @@ describeNative("floating controls", () => {
                   Hover me
                 </div>
               </TooltipPrimitive.Trigger>
-              <TooltipPrimitive.Popup
-                side="bottom"
-                sideOffset={4}
-                style={{ width: 120, height: 28, padding: 6, backgroundColor: "#020617" }}
-              >
-                Tooltip body
-              </TooltipPrimitive.Popup>
+              <TooltipPrimitive.Portal>
+                <TooltipPrimitive.Positioner side="bottom" sideOffset={4}>
+                  <TooltipPrimitive.Popup
+                    style={{ width: 120, height: 28, padding: 6, backgroundColor: "#020617" }}
+                  >
+                    Tooltip body
+                  </TooltipPrimitive.Popup>
+                </TooltipPrimitive.Positioner>
+              </TooltipPrimitive.Portal>
             </TooltipPrimitive.Root>
           </TooltipPrimitive.Provider>
         </div>
@@ -921,7 +923,11 @@ describeNative("floating controls", () => {
               >
                 Hover me
               </TooltipPrimitive.Trigger>
-              <TooltipPrimitive.Popup style={contentStyle}>Tooltip body</TooltipPrimitive.Popup>
+              <TooltipPrimitive.Portal>
+                <TooltipPrimitive.Positioner>
+                  <TooltipPrimitive.Popup style={contentStyle}>Tooltip body</TooltipPrimitive.Popup>
+                </TooltipPrimitive.Positioner>
+              </TooltipPrimitive.Portal>
             </TooltipPrimitive.Root>
           </TooltipPrimitive.Provider>
         </div>
@@ -943,15 +949,19 @@ describeNative("floating controls", () => {
         <TooltipPrimitive.Provider delay={0} disableHoverableContent>
           <TooltipPrimitive.Root defaultOpen>
             <TooltipPrimitive.Trigger style={triggerStyle}>Hover me</TooltipPrimitive.Trigger>
-            <TooltipPrimitive.Popup
-              ref={(instance) => { popup.current = instance }}
-              onKeyDown={(event) => {
-                if (event.key.toLowerCase() === "escape") event.preventDefault()
-              }}
-              style={contentStyle}
-            >
-              Tooltip body
-            </TooltipPrimitive.Popup>
+            <TooltipPrimitive.Portal>
+              <TooltipPrimitive.Positioner>
+                <TooltipPrimitive.Popup
+                  ref={(instance) => { popup.current = instance }}
+                  onKeyDown={(event) => {
+                    if (event.key.toLowerCase() === "escape") event.preventDefault()
+                  }}
+                  style={contentStyle}
+                >
+                  Tooltip body
+                </TooltipPrimitive.Popup>
+              </TooltipPrimitive.Positioner>
+            </TooltipPrimitive.Portal>
           </TooltipPrimitive.Root>
         </TooltipPrimitive.Provider>
       </div>
