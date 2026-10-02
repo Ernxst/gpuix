@@ -13,12 +13,10 @@ concurrency:
 
 env:
   MACOSX_DEPLOYMENT_TARGET: "10.13"
-  # Fat LTO re-optimises every crate at link time on every build and no cache
-  # can skip it. CI builds only feed tests, so they go without it.
+  # `lto = true` makes Cargo embed LLVM bitcode in every dependency. The addon
+  # is both a cdylib and an rlib, and Cargo passes no `-C lto` flag for such a
+  # crate, so nothing reads that bitcode. Turning LTO off skips producing it.
   CARGO_PROFILE_RELEASE_LTO: "false"
-  # The LLD that ships with the Rust toolchain links faster than MSVC's
-  # link.exe. Set for every job because the native build's cache key includes it.
-  CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld
   # What the Rust setup action would export. The native build's cache key
   # includes them, so they are set for every job: jobs that skip the Rust setup
   # then restore the build job's addon instead of missing the cache.
@@ -97,9 +95,12 @@ jobs:
         if: runner.os == 'Linux'
         uses: ./.github/actions/linux
 
-      # Restores Cargo's compiled dependencies from the last build on this pull
-      # request, or else on the default branch. Runs after the toolchain is
-      # installed, because the cache key includes the compiler.
+      # Brings back mbx's compiled objects from the last build on this pull
+      # request, or else on the default branch. Objects match by content, so the
+      # crates in the `zed` submodule are cache hits on a fresh checkout; Cargo's
+      # own target directory would treat them as changed and recompile them.
+      # Runs after the toolchain is installed, because the cache key includes
+      # the compiler.
       #
       # Pinned to a commit on the action's main branch: v1.5.0, the latest
       # release, has no `save-on-pull-request`.
@@ -107,6 +108,7 @@ jobs:
         uses: jdx/mr-boxington-action@81ec44711945b482d44718f5f1543d2df54c6b19 # main
         with:
           working-directory: packages/native
+          github-cache-mode: objects
           save-on-workflow-dispatch: true
           save-on-pull-request: true
 
@@ -189,4 +191,4 @@ jobs:
       - name: Test the other packages
         if: ${{ !matrix.part.shard }}
         shell: bash
-        run: bunx turbo run test --filter=!@gpuix/react --concurrency=1
+        run: bunx turbo run test --filter=!@gpuix/react --concurrency=1 --continue=dependencies-successful
