@@ -3651,12 +3651,21 @@ and module-level part aliases for existing code.
 | `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Portal`, `Positioner`, `Popup`, `Arrow`, `Viewport`, `Handle`, `createHandle` |
 | `@gpuix/react/floating` | `FloatingLayer`, `PositionerProps`, `FloatingPositioner`, `renderSlot` |
 
+Each part namespace exposes its `Props` and `State` types, for example
+`Select.Trigger.Props` and `Dialog.Popup.State`. Root parts also expose
+`Actions`, `ChangeEventReason`, and `ChangeEventDetails` where Base UI does.
+GPU-IX event details use GPU-IX synthetic events rather than browser `Event`
+objects because the native renderer has no DOM.
+
 In Select, `Label` labels the field and `GroupLabel` labels an item group.
 The namespace also includes `Portal`, `Backdrop`, `Positioner`, `Arrow`, both
 scroll arrows, and `Separator`. Values are generic and nullable for
 single-select mode, event callbacks receive details, and `items` is optional.
 `Select.Item` accepts a function child receiving `{ selected, highlighted, disabled }`,
-so item content can reflect its current state.
+so item content can reflect its current state. `Select.ItemText` accepts the
+same function child; it renders with the current item state while the label
+used by the trigger and typeahead comes from the unhighlighted, unselected
+call. Item `label` and `textValue` props override that function-derived label.
 
 ### Build a local Select
 

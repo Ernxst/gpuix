@@ -4,6 +4,12 @@ GPU-IX ships its own headless Dialog, Select, Combobox and Tooltip (`packages/re
 
 Use the documented named namespace import for compound components: `import { Select } from "@gpuix/react/select"`, then `Select.Root`, `Select.Item`, and `Select.ItemText`. Select keeps the direct `<Select>` root and module-level part aliases for existing imports. The package root also exports prefixed names such as `Select`, `SelectItem`, and `SelectItemText` (likewise `Combobox*` and `Tooltip*`).
 
+Each compound part exposes its `Props` and `State` types (for example,
+`Select.Trigger.Props` and `Dialog.Popup.State`). Root parts also expose
+`Actions`, `ChangeEventReason`, and `ChangeEventDetails` where Base UI does.
+Event details use GPU-IX synthetic events instead of browser `Event` objects;
+the native renderer has no DOM event object.
+
 ## Contents
 
 - Traps
@@ -108,7 +114,7 @@ The namespace follows Base UI 1.8.0: `Root`, `Label`, `Trigger`, `Value`, `Icon`
 **Root props**: Base UI's generic `value`/`defaultValue` (nullable in single-select mode), `onValueChange(value, eventDetails)`, `open`/`defaultOpen`/`onOpenChange`, `multiple`, `disabled`, `readOnly`, `required`, `name`, `form`, `autoComplete`, `modal`, comparison/stringification callbacks, and optional item-label lookup data. Root renders no host element.
 
 - **`items` is optional.** Keyboard navigation and clicks use the mounted `SelectItem`s, which register even while closed (Popup stays mounted as `display: none`), in document order, including items wrapped in your own components. `SelectValue` shows the matching `items` entry's label (an entry with no `label` or `textValue` shows the raw value), else the registered item's `SelectItemText`, `textValue` or plain-text children, else the raw value. Pass `items` only when the closed label must be a rich node. Multiple values join with `", "`.
-- **Item function children** receive `{ selected, highlighted, disabled }` in both closed and open states. Use `SelectItemText` or `textValue` when a function child needs a label for `SelectValue` or typeahead.
+- **Item function children** receive `{ selected, highlighted, disabled }` in both closed and open states. `ItemText` accepts the same function child and renders it with that item state. Its closed label and typeahead text come from the call with `selected` and `highlighted` false; the Item `label` and `textValue` props override that label.
 - **Behaviour**: opening highlights the selected item and focuses Popup; closing refocuses the Trigger; single mode closes on select, multiple mode toggles and stays open; a press outside closes (and the same press on the Trigger does not reopen); hovering highlights; disabled items are skipped; navigation wraps; Escape calls `onEscapeKeyDown` then closes.
 - **ARIA**: Trigger `role="combobox"`, `ariaExpanded`, `ariaHasPopup="listbox"` and `ariaControls` pointing to its List; List `role="listbox"`; Item `role="option"`, `ariaSelected`.
 - **Typeahead and scrolling**: Typing highlights a matching item and scrolls it into view. Scroll arrows appear only when the list can scroll further in their direction.
