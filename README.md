@@ -104,16 +104,16 @@ bun add -d @types/react typescript
 
 Release versions follow semver with a fixed `-fork` suffix, and all three packages share the same
 exact version. Pin the React and plugins tarballs from one release and override `@gpuix/native` to
-that release's tarball. For example, `0.26.1-fork` uses this tag and these package URLs:
+that release's tarball. For example, `0.26.2-fork` uses this tag and these package URLs:
 
 ```json
 {
   "dependencies": {
-    "@gpuix/react": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.1-fork/gpuix-react-0.26.1-fork.tgz",
-    "@gpuix/plugins": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.1-fork/gpuix-plugins-0.26.1-fork.tgz"
+    "@gpuix/react": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.2-fork/gpuix-react-0.26.2-fork.tgz",
+    "@gpuix/plugins": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.2-fork/gpuix-plugins-0.26.2-fork.tgz"
   },
   "overrides": {
-    "@gpuix/native": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.1-fork/gpuix-native-0.26.1-fork.tgz"
+    "@gpuix/native": "https://github.com/galaxiajs/gpuix/releases/download/%40gpuix/react%400.26.2-fork/gpuix-native-0.26.2-fork.tgz"
   }
 }
 ```
@@ -756,7 +756,7 @@ prevented Tab or Shift+Tab keydown likewise keeps focus on the current element.
 
 Pin `@gpuix/native`, `@gpuix/react`, and `@gpuix/plugins` to the **same exact
 release version**. Versions follow semver with a fixed `-fork` suffix, such as
-`0.26.1-fork`; React pins native and plugins pins React. GPUIX is still pre-1.0.
+`0.26.2-fork`; React pins native and plugins pins React. GPUIX is still pre-1.0.
 Breaking changes can land before v1, so upgrade all three together.
 
 ## Building
@@ -3800,8 +3800,10 @@ including inline styles, event handlers, and refs.
 Select positioning uses the native window viewport, anchor, side/alignment and
 offset options. A custom `collisionBoundary` may be a rectangle, host element,
 or array of boundaries (arrays use their intersection); object-valued
-`collisionPadding` is applied per edge. `anchorHidden` reports an anchor that
-falls outside the effective boundary. On the native renderer,
+`collisionPadding` is applied per edge, with omitted object edges set to zero;
+the default is five pixels on every edge. Padding determines when a Positioner
+flips and how far it shifts inside the effective boundary. `anchorHidden`
+reports an anchor that falls outside that boundary. On the native renderer,
 `collisionBoundary="clipping-ancestors"` means the window viewport.
 
 The native renderer accepts but does not implement `positionMethod`, `sticky`,
@@ -3939,13 +3941,17 @@ are retained.
 
 Combobox uses the native input for text editing, IME, clipboard, and focus.
 Tooltip parts accept `render`, state-based `className` and `style`, and expose
-Base UI state attributes. `Tooltip.Viewport` is optional unless animated
-content switches between triggers. The native Portal keeps children in the
-retained tree; its `container` prop does not select a destination. The shared
-floating Positioner uses GPUI's deferred `anchored()` layer, snaps inside the
-window, and occludes controls behind it. A disabled Trigger suppresses tooltip
-interaction without disabling its rendered control; disabling an open Root
-closes the tooltip. Multiple triggers retain their own anchors and payloads.
+Base UI state attributes. Keyboard focus opens a tooltip immediately; moving
+focus to another trigger in the same Provider closes the tooltip opened by the
+previous trigger. The Positioner follows the active rendered Trigger and
+places the popup on its requested side. `Tooltip.Viewport` is optional unless
+animated content switches between triggers. The native Portal keeps children
+in the retained tree; its `container` prop does not select a destination. The
+shared floating Positioner uses GPUI's deferred `anchored()` layer, flips and
+shifts against the padded window boundary, and occludes controls behind it. A
+disabled Trigger suppresses tooltip interaction without disabling its rendered
+control; disabling an open Root closes the tooltip. Multiple triggers retain
+their own anchors and payloads.
 
 ### Overlay menus
 
