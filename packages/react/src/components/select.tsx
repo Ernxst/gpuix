@@ -103,6 +103,11 @@ export type SelectValueFor<Value = unknown, Multiple extends boolean | undefined
 const SelectContext = createContext<SelectContextValue | null>(null)
 const SelectPopupSideContext = createContext<string>("bottom")
 const SelectPositionedContext = createContext(false)
+interface SelectGroupContextValue {
+  labelId: string | undefined
+  setLabelId: React.Dispatch<React.SetStateAction<string | undefined>>
+}
+const SelectGroupContext = createContext<SelectGroupContextValue | null>(null)
 interface SelectItemContextValue {
   value: unknown
   state: React.MutableRefObject<SelectItemState>
@@ -207,6 +212,10 @@ function isValueSelected(value: SelectSelection<unknown>, multiple: boolean, ite
   return multiple ? Array.isArray(value) && value.some((candidate) => equal(item, candidate)) : value !== null && equal(item, value)
 }
 
+function compareSelectItemEquality(item: unknown, value: unknown, compare: (item: unknown, value: unknown) => boolean): boolean {
+  return item == null || value == null ? Object.is(item, value) : compare(item, value)
+}
+
 export function Select<Value = unknown, Multiple extends boolean | undefined = false>({
   children,
   items: itemsProp,
@@ -223,7 +232,7 @@ export function Select<Value = unknown, Multiple extends boolean | undefined = f
   highlightItemOnHover = true,
   isItemEqualToValue = Object.is,
 }: SelectProps<Value, Multiple>): ReactElement {
-  const compareValues = isItemEqualToValue as (item: unknown, value: unknown) => boolean
+  const compareValues = (item: unknown, value: unknown) => compareSelectItemEquality(item, value, isItemEqualToValue as (item: unknown, value: unknown) => boolean)
   const { renderer } = useGpuix()
   const [value, setValue] = useControllableState<SelectSelection<unknown>>({
     value: valueProp,
@@ -569,6 +578,8 @@ export const SelectTrigger = forwardRef<PublicInstance, SelectTriggerProps>(
       ariaHasPopup: "listbox",
       ariaControls: context.open && context.listMounted ? context.listId : undefined,
       "data-open": context.open ? "" : undefined,
+      "data-popup-open": context.open ? "" : undefined,
+      "data-pressed": context.open ? "" : undefined,
       "data-disabled": disabled ? "" : undefined,
       "data-readonly": context.readOnly ? "" : undefined,
       "data-placeholder": state.placeholder ? "" : undefined,
@@ -785,7 +796,7 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
     const itemValue = value ?? null
     const state = {
       selected: isValueSelected(context.value, context.multiple, itemValue, context.isItemEqualToValue),
-      highlighted: context.isItemEqualToValue(context.activeValue, itemValue),
+      highlighted: compareSelectItemEquality(context.activeValue, itemValue, context.isItemEqualToValue),
       disabled,
     }
     const stateRef = useRef(state)
@@ -822,7 +833,7 @@ export const SelectItem = forwardRef<PublicInstance, SelectItemProps>(
       return () => context.unregisterItem(itemValue)
     }, [itemValue, itemText, fallbackTextValue, disabled])
     useLayoutEffect(() => {
-      if (context.open && context.isItemEqualToValue(context.revealActiveValue, itemValue)) instanceRef.current?.scrollIntoView({ block: "nearest" })
+      if (context.open && compareSelectItemEquality(context.revealActiveValue, itemValue, context.isItemEqualToValue)) instanceRef.current?.scrollIntoView({ block: "nearest" })
     }, [context.open, context.revealActiveValue, itemValue])
 
     // Closed content stays mounted (see registerItem's comment above), so
@@ -982,14 +993,16 @@ export const SelectItemIndicator = forwardRef<PublicInstance, SelectItemIndicato
   }
 )
 
-export const SelectGroup = forwardRef<PublicInstance, SelectPartProps<Record<string, never>>>(function SelectGroup({ render, className, style, ...props }, ref) {
+export const SelectGroup = forwardRef<PublicInstance, SelectPartProps<Record<string, never>>>(function SelectGroup({ render, className, style, children, ...props }, ref) {
   const context = useSelectContext("SelectGroup")
+  const [labelId, setLabelId] = useState<string | undefined>()
+  const groupContext = useMemo(() => ({ labelId, setLabelId }), [labelId])
   // A group can contain items, so its children stay mounted while closed for
   // their own registration. The group renders a div in both states - like
   // SelectItem's own marker - so its host element and the items beneath it
   // keep their identity across open/close instead of remounting.
-  const resolved: Props = { ...props, ref, "data-disabled": context.disabled ? "" : undefined, className: resolveClassName(className, {}), style: context.open ? resolvePartStyle(style, {}) : { display: "none" } }
-  return renderPart({ render, props: resolved, children: props.children, state: {}, ref }) as ReactElement
+  const resolved: Props = { role: "group", ariaLabelledBy: labelId, ...props, ref, "data-disabled": context.disabled ? "" : undefined, className: resolveClassName(className, {}), style: context.open ? resolvePartStyle(style, {}) : { display: "none" } }
+  return <SelectGroupContext.Provider value={groupContext}>{renderPart({ render, props: resolved, children, state: {}, ref }) as ReactElement}</SelectGroupContext.Provider>
 })
 
 export interface SelectLabelState {
@@ -1003,9 +1016,20 @@ export interface SelectLabelState {
 export type SelectLabelProps = SelectPartProps<SelectLabelState>
 
 export interface SelectGroupLabelState {}
-export const SelectGroupLabel = forwardRef<PublicInstance, SelectPartProps<SelectGroupLabelState>>(function SelectGroupLabel({ render, className, style, children, ...props }, ref) {
+export const SelectGroupLabel = forwardRef<PublicInstance, SelectPartProps<SelectGroupLabelState>>(function SelectGroupLabel(componentProps, ref) {
+  const { render, className, style, children, id, ariaHidden, ["aria-hidden"]: ariaHiddenAttribute, ...props } = componentProps
   useSelectContext("SelectGroupLabel")
-  const resolved: Props = { ...props, ref, className: resolveClassName(className, {}), style: resolvePartStyle(style, {}) }
+  const groupContext = useContext(SelectGroupContext)
+  if (!groupContext) throw new Error("Base UI: SelectGroupContext is missing. SelectGroup parts must be placed within <Select.Group>.")
+  const generatedId = useId()
+  const labelId = id ?? generatedId
+  useLayoutEffect(() => {
+    groupContext.setLabelId(labelId)
+    return () => groupContext.setLabelId((currentId) => currentId === labelId ? undefined : currentId)
+  }, [groupContext.setLabelId, labelId])
+  const hasAriaHidden = Object.prototype.hasOwnProperty.call(componentProps, "ariaHidden") || Object.prototype.hasOwnProperty.call(componentProps, "aria-hidden")
+  const resolvedAriaHidden = Object.prototype.hasOwnProperty.call(componentProps, "ariaHidden") ? ariaHidden : ariaHiddenAttribute
+  const resolved: Props = { ...props, id: labelId, ref, ariaHidden: hasAriaHidden ? resolvedAriaHidden : true, className: resolveClassName(className, {}), style: resolvePartStyle(style, {}) }
   if (typeof render === "function") return <>{render(resolved, {})}</>
   if (isValidElement<Props>(render)) return renderSlot({ asChild: true, children: render, props: resolved, ref })
   return <div {...resolved}>{children}</div>
