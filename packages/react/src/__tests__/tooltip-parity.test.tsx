@@ -2142,6 +2142,10 @@ describeNative("Tooltip Base UI parity tree", () => {
     renderNestedTooltipScene(firstRoot)
     const secondRoot = createTestRoot({ width: 600, height: 400 })
     renderNestedTooltipScene(secondRoot, { disabledInner: true })
+    const firstInner = firstRoot.renderer.findByTestId("nested-inner-trigger")!
+    const secondInner = secondRoot.renderer.findByTestId("nested-inner-trigger")!
+    expect(secondInner.id).toBe(firstInner.id)
+    expect(secondInner).not.toBe(firstInner)
 
     moveTo(secondRoot, "nested-outer-area")
     await secondRoot.waitFor(() => expect(secondRoot.renderer.findByTestId("nested-outer-popup")).toBeDefined())
