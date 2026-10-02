@@ -683,6 +683,39 @@ describeNative("Tooltip Base UI parity tree", () => {
     testRoot.unmount()
   })
 
+  it("opens and closes a detached Tooltip.Root through its handle", async () => {
+    const testRoot = createTestRoot()
+    const handle = Tooltip.createTooltipHandle()
+    testRoot.render(
+      <div>
+        <Tooltip.Root handle={handle}>
+          <Tooltip.Positioner><Tooltip.Popup data-testid="imperative-popup">Content</Tooltip.Popup></Tooltip.Positioner>
+        </Tooltip.Root>
+        <Tooltip.Trigger id="imperative-trigger" handle={handle}>Trigger</Tooltip.Trigger>
+      </div>
+    )
+
+    handle.open("imperative-trigger")
+    await testRoot.waitFor(() => expect(testRoot.renderer.findByTestId("imperative-popup")).toBeDefined(), { timeout: 5_000 })
+    handle.close()
+    await testRoot.waitFor(() => expect(testRoot.renderer.findByTestId("imperative-popup")).toBeUndefined(), { timeout: 5_000 })
+    testRoot.unmount()
+  })
+
+  it("throws when a detached Tooltip handle opens an unregistered trigger id", () => {
+    const testRoot = createTestRoot()
+    const handle = Tooltip.createTooltipHandle()
+    testRoot.render(
+      <>
+        <Tooltip.Root handle={handle}><Tooltip.Positioner><Tooltip.Popup>Content</Tooltip.Popup></Tooltip.Positioner></Tooltip.Root>
+        <Tooltip.Trigger id="registered-trigger" handle={handle}>Trigger</Tooltip.Trigger>
+      </>
+    )
+
+    expect(() => handle.open("missing-trigger")).toThrow('was called with the trigger id "missing-trigger"')
+    testRoot.unmount()
+  })
+
   it("removes data-popup-open when close unmount is prevented", async () => {
     const testRoot = createTestRoot()
     function PreventUnmountTooltip() {
