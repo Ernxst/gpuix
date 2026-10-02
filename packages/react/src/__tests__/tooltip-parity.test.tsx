@@ -122,6 +122,65 @@ describeNative("Tooltip Base UI parity tree", () => {
     testRoot.unmount()
   })
 
+  it("keeps a focus-opened tooltip open while focus moves between triggers in one Root", async () => {
+    const testRoot = createTestRoot()
+    let first: PublicInstance | null = null
+    let second: PublicInstance | null = null
+    const openChanges: boolean[] = []
+
+    testRoot.render(
+      <Tooltip.Root onOpenChange={(open) => openChanges.push(open)}>
+        <Tooltip.Trigger ref={(instance) => { first = instance }} render={<button type="button">First trigger</button>} />
+        <Tooltip.Trigger ref={(instance) => { second = instance }} render={<button type="button">Second trigger</button>} />
+        <Tooltip.Portal>
+          <Tooltip.Positioner>
+            <Tooltip.Popup>Shared tooltip</Tooltip.Popup>
+          </Tooltip.Positioner>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    )
+
+    await testRoot.userEvent.tab()
+    expect(testRoot.renderer.getActiveElement()).toBe(first!.id)
+    expect(testRoot.renderer.findByText("Shared tooltip")).toBeDefined()
+    await testRoot.userEvent.tab()
+    expect(testRoot.renderer.getActiveElement()).toBe(second!.id)
+    expect(testRoot.renderer.findByText("Shared tooltip")).toBeDefined()
+    expect(openChanges).not.toContain(false)
+    testRoot.unmount()
+  })
+
+  it("keeps a detached Handle tooltip open while focus moves between its triggers", async () => {
+    const testRoot = createTestRoot()
+    const handle = Tooltip.createTooltipHandle()
+    let first: PublicInstance | null = null
+    let second: PublicInstance | null = null
+    const openChanges: boolean[] = []
+
+    testRoot.render(
+      <Tooltip.Provider>
+        <Tooltip.Root handle={handle} onOpenChange={(open) => openChanges.push(open)}>
+          <Tooltip.Portal>
+            <Tooltip.Positioner>
+              <Tooltip.Popup>Handle shared tooltip</Tooltip.Popup>
+            </Tooltip.Positioner>
+          </Tooltip.Portal>
+        </Tooltip.Root>
+        <Tooltip.Trigger handle={handle} ref={(instance) => { first = instance }} render={<button type="button">First handle trigger</button>} />
+        <Tooltip.Trigger handle={handle} ref={(instance) => { second = instance }} render={<button type="button">Second handle trigger</button>} />
+      </Tooltip.Provider>
+    )
+
+    await testRoot.userEvent.tab()
+    expect(testRoot.renderer.getActiveElement()).toBe(first!.id)
+    expect(testRoot.renderer.findByText("Handle shared tooltip")).toBeDefined()
+    await testRoot.userEvent.tab()
+    expect(testRoot.renderer.getActiveElement()).toBe(second!.id)
+    expect(testRoot.renderer.findByText("Handle shared tooltip")).toBeDefined()
+    expect(openChanges).not.toContain(false)
+    testRoot.unmount()
+  })
+
   it("closes a rendered trigger's focus-opened tooltip on Shift+Tab despite closeDelay", async () => {
     const testRoot = createTestRoot()
 
