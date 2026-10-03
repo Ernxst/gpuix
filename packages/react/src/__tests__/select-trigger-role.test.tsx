@@ -64,7 +64,7 @@ describeNative("SelectTrigger", () => {
     expect(triggerNode?.aria.controls).toEqual([listboxTreeId])
   })
 
-  it("does not expose aria-controls when the open popup has no list", () => {
+  it("controls the popup listbox when Select.List is omitted", () => {
     screen.render(
       <Select.Root>
         <Select.Trigger ariaLabel="Fruit" data-testid="trigger">
@@ -77,6 +77,8 @@ describeNative("SelectTrigger", () => {
     )
     screen.renderer.nativeSimulateClick(30, 15)
 
-    expect(screen.getByRole("combobox", { name: "Fruit" })).not.toHaveAttribute("aria-controls")
+    const trigger = screen.getByRole("combobox", { name: "Fruit" })
+    const popup = screen.getByRole("listbox")
+    expect(trigger).toHaveAttribute("aria-controls", popup.authorId)
   })
 })
